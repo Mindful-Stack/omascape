@@ -18,6 +18,7 @@
 # hl.dsp.focus({ workspace = "N" })).
 set -euo pipefail
 WS="${1:?workspace id with windows}"
+case "$WS" in ''|*[!0-9]*) echo "FAIL: numeric workspace id required (special workspaces are not probed by this script)" >&2; exit 1;; esac
 for bin in grim magick jq hyprctl; do command -v "$bin" >/dev/null || { echo "SKIP: $bin missing"; exit 0; }; done
 
 ev() { local out; out=$(hyprctl eval "$1") || { echo "FAIL: hyprctl eval: $out" >&2; exit 1; }; }
@@ -37,7 +38,7 @@ cleanup() {
   if ! out=$(hyprctl eval "if _G.omyview_probe_rule then _G.omyview_probe_rule:set_enabled(false) end; _G.omyview_probe_rule = nil"); then
     echo "WARNING: could not disable the probe rule — run: hyprctl eval '_G.omyview_probe_rule:set_enabled(false)'  ($out)" >&2; rc=1
   fi
-  [ -n "${ORIG_WS:-}" ] && hyprctl dispatch "hl.dsp.focus({ workspace = \"$ORIG_WS\" })" >/dev/null 2>&1 || true
+  [ -n "${ORIG_WS:-}" ] && hyprctl dispatch "hl.dsp.focus({ workspace = \"$ORIG_WS\" })" >/dev/null 2>&1 || echo "WARNING: could not restore workspace $ORIG_WS" >&2
   rm -rf "$tmp"
   exit "$rc"
 }
@@ -72,7 +73,6 @@ OTHER_WS=$(hyprctl -j workspaces | jq -r ".[] | select(.id > 0 and .id != $WS an
 if [ -n "$OTHER_WS" ]; then
   switch_and_wait "$OTHER_WS"
   grim -o "$OUT" "$tmp/other.png"; OTHER=$(mean "$tmp/other.png")
-  rm -f "$tmp/other.png"
   switch_and_wait "$WS"
 else
   OTHER="SKIP-SCOPING"
@@ -90,5 +90,4 @@ awk -v b="$B" -v on="$ON" -v off="$OFF" -v on2="$ON2" -v other="$OTHER" 'BEGIN {
   if (off < 0.05) { print "FAIL: rule disabled but capture still black (set_enabled(false) has no effect)"; exit 1 }
   if (on2 > 0.02) { print "FAIL: re-enable has no effect"; exit 1 }
   if (other != "SKIP-SCOPING" && other+0 < 0.05) { print "FAIL: rule leaks to other workspaces (scoping broken)"; exit 1 }
-  print "PASS: create-enabled → black; set_enabled(false) → visible; set_enabled(true) → black" }'
-status=$?
+  print "PASS: create-enabled → black; set_enabled(false) → visible; set_enabled(true) → black" }' || status=$?
