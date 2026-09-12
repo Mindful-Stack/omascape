@@ -227,12 +227,22 @@ no sync is sent, so a shell restart can never disable rules the compositor still
 All dispatches are idempotent. Installation is not awaited: `Hyprland.dispatch` is fire-and-forget
 and there is no completion barrier before `open()` maps the surface (see Edge cases).
 
+"Every accepted change" is load-bearing: `watchChanges`/an explicit `reload()` re-emit `loaded`
+even when the bytes on disk did not change (our own atomic write reading its own content back;
+a stray watcher firing) — `Logic.applyLocksTo` compares the newly parsed set against the current
+one (same selectors, same order) and reports `changed: false` for an echo, so `OmyviewLocks` does
+not re-emit `loadedArmed()` for it and the Overview does not re-sync or (while open) re-rebuild.
+A `null` current always counts as changed (there is nothing yet to compare against).
+
 Quickshell's `FileView` watches the file's *parent directory*, not the file itself: if that
 directory does not exist at `FileView` creation, the watch never attaches, and no `fileChanged`
 ever fires for it later even once the directory and file show up (see Edge cases, "Shell start
-before the runtime dir exists"). `OmyviewLocks.refresh()` (`stateFile.reload(); locksFile.reload()`)
-re-attaches it; `lockInstall()` restarts a 400ms `Timer` that calls it, and `open()` also calls it
-directly (after `lockInstall(); lockSync()`) as a belt-and-braces re-attach on every summon.
+before the runtime dir exists"). This only affects the state file — `$XDG_RUNTIME_DIR/omyview` is
+created asynchronously by the install chunk, after the `FileView` on it already exists — never
+the locks file, whose directory (`~/.config/omarchy`) exists before omyview ever runs.
+`OmyviewLocks.refresh()` (`stateFile.reload()`) re-attaches the state-file watch; `lockInstall()`
+restarts a 400ms `Timer` that calls it, and `open()` also calls it directly (after `lockInstall();
+lockSync()`) as a belt-and-braces re-attach on every summon.
 
 **Keys.** Chord branch: `Ctrl+L` → `locks.toggle(Logic.wsSelector(selectedId))` when
 `Logic.hasWs(selectedId)`, then sync. Works with or without a query.
@@ -285,22 +295,26 @@ the input → `endDrag()`" check.
   directory*; a directory that is missing at construction means the watch never attaches, so
   every later write to `share-state` (a share starting or ending) would go unseen for the rest of
   the session, with no error — nothing fails, it just silently never updates. Mitigated by
-  `OmyviewLocks.refresh()` (`reload()` on both files, re-attaching the watch), called ~400ms
+  `OmyviewLocks.refresh()` (`stateFile.reload()`, re-attaching just that watch), called ~400ms
   after every `lockInstall()` (a `Timer`, giving the directory time to appear) and once more
-  directly in `open()`. Applies in principle to the locks file's own directory too
-  (`~/.config/omarchy/`), but that directory is created well before omyview ever runs (Omarchy's
-  own config layout), so it is not observed to be missing in practice — `refresh()` covers it for
-  free regardless.
+  directly in `open()`. The locks file does not need this: its directory (`~/.config/omarchy/`)
+  is created well before omyview ever runs (Omarchy's own config layout), so its `FileView`'s
+  watch attaches at construction — `refresh()` deliberately leaves it alone, both because it
+  needs no help and because an explicit `reload()` re-emits `loaded` even with unchanged content
+  (see Sync points), which would otherwise cost a redundant sync on every refresh.
 - **Locks file missing on the first load**: resolves to `[]` (first run). **Missing on a later
   load** (the user deleted the file after a successful read): the in-memory set is kept, not
   reset to `[]` — only a first, never-yet-resolved load may treat "missing" as "empty".
   **Malformed, or any other read error, on the first load**: `armed` stays null (still
-  unresolved); reported once via the notification path; `toggle` remains a no-op, and
-  `lockToggleSelected()` tells the user once per open why Ctrl+L is doing nothing ("omyview:
-  locks file unreadable — fix or delete ~/.config/omarchy/omyview-locks.json") rather than
-  silently swallowing the keypress. **Malformed, or any other read error, on a later load**: the
-  last valid set is kept and enforced; reported once; the next successful write (the next
-  accepted toggle) replaces the file with a fresh, valid one.
+  unresolved); reported once per open via the notification path (a stuck `FileView` can re-emit
+  `loaded` — or `onLoadFailed` again — without the error changing, and unlike the armed set a
+  parse error has no "unchanged" case to compare against, so the guard is a simple once-per-open
+  latch instead); `toggle` remains a no-op, and `lockToggleSelected()` tells the user, also once
+  per open, why Ctrl+L is doing nothing ("omyview: locks file unreadable — fix or delete
+  ~/.config/omarchy/omyview-locks.json") rather than silently swallowing the keypress.
+  **Malformed, or any other read error, on a later load**: the last valid set is kept and
+  enforced; reported once per open; the next successful write (the next accepted toggle)
+  replaces the file with a fresh, valid one.
 - **A selector whose workspace does not exist**: kept in the file and in the rule table; the
   rule matches nothing until the workspace returns; the badge shows only when its box exists.
 - **Pinned windows**: reported on the workspace they were pinned from; whether a pinned window
@@ -326,14 +340,19 @@ the input → `endDrag()`" check.
   write → no rename (state file unchanged);
   invalid selector dropped and reported; `os.rename` failing → reported; `Logic.notifyLua(text)`
   round-trips a backslash, a quote and a newline into a single valid Lua string (escaped, then
-  flattened) rather than breaking the chunk or losing the character.
+  flattened) rather than breaking the chunk or losing the character; a text past the 200-character
+  budget whose 200th raw character is a backslash still parses (the raw text is sliced BEFORE
+  escaping, so a `\` never straddles the cut and gets split into a lone, chunk-breaking trailing
+  backslash) and its rendered text ends with the truncation marker.
 - **Tier 1, `tests/tst_layout.qml`**: a `placeholder` workspace yields a box with
   `placeholder: true` and no tiles; an `armed` one without placeholder is unchanged;
   `Logic.parseLocks` accepts a valid file (de-duplicated) and rejects a non-object, a missing
   `armed` array and a bad selector; `Logic.applyLocksTo(current, raw, status)` — missing on the
   first load → `[]`, changed; missing later → `current` kept, unchanged; an error or a malformed
   file on the first load → still `null`, reported; the same later → the previous value kept,
-  reported; `"ok"` with a valid file → parsed, changed; `Logic.toggleSelector(armed, sel)` adds,
+  reported; `"ok"` with a valid file → parsed, changed; **an identical reload (same selectors,
+  same order) → unchanged**, a reordered or different set → changed, so a `watchChanges`/
+  `reload()` echo does not read as a real edit; `Logic.toggleSelector(armed, sel)` adds,
   removes, and returns `null` (refused) for `null` armed or an invalid selector, without
   mutating its input.
 - **Offscreen UI (`tests/ui/lock.qml`)**, with prepare.py replacing `OmyviewLocks.qml` by a
@@ -355,7 +374,9 @@ the input → `endDrag()`" check.
   (pinned by index, on a view built and reset right before that one `open()` call); a toggle
   attempted while unresolved reports "locks file unreadable" once per open, not once per
   keypress; a padded (synthetic, empty) workspace still carries `armed`/`placeholder` so an
-  otherwise-empty workspace can be armed and keeps its badge.
+  otherwise-empty workspace can be armed and keeps its badge; **loading the identical set twice
+  in a row dispatches no second sync** (the stub shares `Logic.applyLocksTo`'s comparison, so
+  this exercises the same code path a real `reload()` echo would hit).
 - **Live (plan's first task, before any UI work)**: the rule-semantics sequence above with
   `grim` captures inspected as pixels (an unarmed workspace as positive control). (The
   `configreloaded` event name and the loss of globals on reload are already verified.) **Live (final)**: a

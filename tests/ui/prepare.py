@@ -75,7 +75,10 @@ tile = tile[:start] + '    Rectangle { anchors.fill: parent; color: tile.bg }\n\
 # keeps the one property later tests depend on — `armed` is null until a load resolves — and
 # records writes instead of touching disk. Real file watching, atomic rename and load ordering
 # are NOT reproduced here (live check); `refresh()` is a no-op for the same reason. `toggle()`
-# shares Logic.toggleSelector with the real component so both agree on when a toggle is refused.
+# and `loadArmed()` share Logic.toggleSelector/Logic.applyLocksTo with the real component, so
+# both agree on when a toggle is refused and — via applyLocksTo's array comparison — on when a
+# repeated load actually changed anything (an identical `loadArmed` must not re-fire
+# `loadedArmed()`, or every reload echo would re-sync and re-rebuild for nothing).
 (dest / 'OmyviewLocks.qml').write_text(
     'import QtQuick\nimport "logic.js" as Logic\nQtObject {\n'
     '    property var armed: null\n'
@@ -89,7 +92,11 @@ tile = tile[:start] + '    Rectangle { anchors.fill: parent; color: tile.bg }\n\
     '    function isArmed(sel) { return armed !== null && armed.indexOf(sel) >= 0 }\n'
     '    function placeholder(sel) { return isArmed(sel) && sharing }\n'
     '    function refresh() {}\n'
-    '    function loadArmed(arr) { armed = arr.slice(); loadedArmed() }\n'
+    '    function loadArmed(arr) {\n'
+    '        var r = Logic.applyLocksTo(armed, JSON.stringify({ armed: arr }), "ok")\n'
+    '        armed = r.armed\n'
+    '        if (r.changed) loadedArmed()\n'
+    '    }\n'
     '    function setSharing(on) { sharing = on }\n'
     '    function toggle(sel) {\n'
     '        var next = Logic.toggleSelector(armed, sel)\n'

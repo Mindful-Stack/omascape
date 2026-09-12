@@ -95,6 +95,20 @@ TestCase {
         compare(s2.length, 1, "the load itself triggers the sync"); verify(s2[0].indexOf('"3"') >= 0)
         v.close()
     }
+    // Distinguishes: a reload echo (watchChanges/reload() re-emitting `loaded` with unchanged
+    // content — our own atomic write reading back its own bytes, a stray watcher firing) being
+    // treated as a real change and re-dispatching a sync (and, while open, re-rebuilding) for
+    // nothing.
+    function test_loadArmed_with_unchanged_content_does_not_resync() {
+        var v = createTemporaryObject(overview, tc); v.motion.scale = 0; seed(v)
+        v.testLocks.loadArmed(["3"])
+        v.open(); wait(400)
+        v.compositor.commands = []                  // drop everything open() itself dispatched
+        v.testLocks.loadArmed(["3"])                 // identical content: an echo, not a change
+        var syncs2 = v.compositor.commands.filter(function (c) { return c.indexOf("local ARMED = {") >= 0 })
+        compare(syncs2.length, 0, "an unchanged reload must not re-sync")
+        v.close()
+    }
     // Distinguishes: Ctrl+L not writing, writing the wrong selector, or not syncing the new set.
     function test_ctrl_l_arms_and_disarms_the_selected_box() {
         keyClick(Qt.Key_Right)                         // ws 2

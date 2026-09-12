@@ -93,6 +93,12 @@ Item {
     // (never loaded, or stuck on a malformed file) is a no-op; without feedback the user just
     // sees Ctrl+L do nothing. Reset in open() so a later, working open() can warn again.
     property bool lockUnresolvedNotified: false
+    // Same idea for a malformed/unreadable file's own report: a stuck FileView can re-emit
+    // `loaded` (a watcher firing on an unrelated directory event, a repeated reload) without the
+    // file's content changing, and Logic.applyLocksTo re-reports the same error every time
+    // (unlike the armed set, "still malformed" has no "unchanged" case to suppress it against).
+    // Without this guard that would toast on every such echo, not just the first.
+    property bool lockInvalidNotified: false
     // Enforcement lives in the compositor; these keep it in step with the armed set. Install is
     // idempotent and cheap; sync is sent only once `armed` has resolved (never an unresolved set).
     function lockInstall() {
@@ -122,7 +128,11 @@ Item {
         function onLoadedArmed() { root.lockSync(); if (root.opened) root.rebuild() }
         function onSharingChanged() { if (root.opened) root.rebuild() }
         function onWriteFailed(why) { Hyprland.dispatch(Logic.notifyLua("omyview: could not save locks: " + why)) }
-        function onInvalidFile(why) { Hyprland.dispatch(Logic.notifyLua("omyview: locks file ignored: " + why)) }
+        function onInvalidFile(why) {
+            if (root.lockInvalidNotified) return
+            root.lockInvalidNotified = true
+            Hyprland.dispatch(Logic.notifyLua("omyview: locks file ignored: " + why))
+        }
     }
     // Quickshell's FileView watches the file's *parent directory*, not the file itself: if
     // $XDG_RUNTIME_DIR/omyview does not exist yet (every fresh login, before the compositor's
@@ -750,7 +760,7 @@ Item {
         if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
         config.probeMotion()                       // async; result lands for this or the next open
         targetScreen = focusedScreen(); hideScratchpad(); selectedIndex = -1; opened = true
-        lockUnresolvedNotified = false
+        lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind()
         _showVisuals(true)                         // before the first rebuild: layout motion is gated on it

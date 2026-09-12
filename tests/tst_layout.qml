@@ -936,6 +936,18 @@ TestCase {
         var r = Logic.applyLocksTo(null, '{ "armed": ["3", "special:scratchpad"] }', "ok")
         compare(r.armed, ["3", "special:scratchpad"]); compare(r.changed, true); compare(r.error, null)
     }
+    // Distinguishes: every successful parse being reported as a change (a reload echo —
+    // watchChanges/reload() re-emitting `loaded` with unchanged bytes — would then re-dispatch
+    // a sync, and while open a rebuild, for nothing) from one that actually compares against
+    // the current set, order included.
+    function test_applyLocksTo_unchanged_reload_is_not_a_change() {
+        var same = Logic.applyLocksTo(["3", "special:scratchpad"], '{ "armed": ["3", "special:scratchpad"] }', "ok")
+        compare(same.armed, ["3", "special:scratchpad"]); compare(same.changed, false)
+        var reordered = Logic.applyLocksTo(["3", "special:scratchpad"], '{ "armed": ["special:scratchpad", "3"] }', "ok")
+        compare(reordered.changed, true, "a different order still counts as changed")
+        var different = Logic.applyLocksTo(["3"], '{ "armed": ["4"] }', "ok")
+        compare(different.changed, true)
+    }
     // Distinguishes: a toggle that mutates in place (aliasing the caller's array) or accepts an
     // unresolved/invalid selector.
     function test_toggleSelector() {

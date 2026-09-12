@@ -367,6 +367,19 @@ case("notification text round-trips a backslash, a quote and a newline safely", 
   eq(#hl.__notifications, 1, "one notification")
   eq(hl.__notifications[1].text, 'bad \\ " line break')
 end)
+-- Distinguishes: escaping before truncating (a backslash landing right at the 200-character cut
+-- can have its escape pair split, leaving a lone trailing "\" that escapes the chunk's own
+-- closing quote and makes it unparseable -- caught here because `run()` already had to `load()`
+-- the chunk to get this far) from truncating the raw text first, which this chunk does.
+case("a notification over the 200-character budget still parses and is marked truncated", function()
+  local hl = Mock.new({})
+  run("NOTIFY_LONG", hl)
+  eq(#hl.__notifications, 1, "one notification")
+  local text = hl.__notifications[1].text
+  -- "…" is a 3-byte UTF-8 sequence; Lua strings are raw bytes, so the marker's length in
+  -- bytes (not characters) is what :sub needs here.
+  assert(text:sub(-#"…") == "…", "truncated text ends with the ellipsis marker, got: " .. text)
+end)
 
 if failures > 0 then io.stderr:write(failures .. " Lua chunk test(s) failed\n"); os.exit(1) end
 print("PASS: Lua chunk behaviour suite")

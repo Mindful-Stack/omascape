@@ -22,13 +22,17 @@ QtObject {
     function isArmed(sel) { return armed !== null && armed.indexOf(sel) >= 0 }
     function placeholder(sel) { return isArmed(sel) && sharing }
 
-    // Re-read both files. Quickshell's FileView watches the file's *parent directory*, not the
-    // file itself: if that directory does not exist at FileView creation (every fresh login,
-    // before the compositor's install chunk has run `mkdir -p $XDG_RUNTIME_DIR/omyview`), the
-    // watch never attaches, and no `fileChanged` ever fires for it later, even once the
-    // directory and file show up. Overview.qml calls this once, ~400ms after every
-    // lockInstall(), by which point the directory very likely exists.
-    function refresh() { stateFile.reload(); locksFile.reload() }
+    // Re-read the state file only. Quickshell's FileView watches the file's *parent directory*,
+    // not the file itself: if that directory does not exist at FileView creation (every fresh
+    // login, before the compositor's install chunk has run `mkdir -p
+    // $XDG_RUNTIME_DIR/omyview`), the watch never attaches, and no `fileChanged` ever fires for
+    // it later, even once the directory and file show up. Overview.qml calls this once, ~400ms
+    // after every lockInstall(), by which point the directory very likely exists. The locks
+    // file has no such problem — it lives under `~/.config/omarchy`, which Omarchy's own config
+    // layout guarantees exists well before omyview ever runs, so its watch attaches at
+    // `FileView` creation and never needs this nudge; reloading it here too would only add a
+    // redundant `loaded` echo (see Logic.applyLocksTo) for free.
+    function refresh() { stateFile.reload() }
 
     // Reduce a load result onto `armed` (see Logic.applyLocksTo): `status` is "ok" (raw holds
     // the file's fresh text), "missing" (resolves to [] once, on the first load only) or

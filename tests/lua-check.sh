@@ -45,6 +45,13 @@ TestCase {
         console.log("CHUNK LOCK_SYNC_NONE " + Logic.lockSyncLua([]))
         var badText = "bad \\\\ \" line\nbreak"
         console.log("CHUNK NOTIFY " + Logic.notifyLua(badText))
+        // Regression guard for the escape-then-truncate bug: the 200th raw character (index 199,
+        // the last one the 200-char slice keeps) is a backslash, with more text after it so the
+        // budget actually cuts. Slicing the RAW text first (then escaping) means that backslash
+        // is either wholly kept or wholly dropped, never split into a lone trailing "\" that
+        // would escape the chunk's closing quote.
+        var longText = "a".repeat(199) + "\\\\" + "tail text past the two hundred character budget"
+        console.log("CHUNK NOTIFY_LONG " + Logic.notifyLua(longText))
     }
 }
 EOF
@@ -60,8 +67,8 @@ QT_QPA_PLATFORMTHEME=generic QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1
 sed -n 's/^.*CHUNK //p' "$fixture/qml.out" > "$fixture/chunks.txt"
 
 count=$(grep -c . "$fixture/chunks.txt" || true)
-if [ "$qml_status" -ne 0 ] || [ "$count" -lt 12 ]; then
-  echo "FAIL: $RUNNER exited $qml_status; expected 12 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
+if [ "$qml_status" -ne 0 ] || [ "$count" -lt 13 ]; then
+  echo "FAIL: $RUNNER exited $qml_status; expected 13 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
   echo "--- raw qml output:" >&2; cat "$fixture/qml.out" >&2
   exit 1
 fi

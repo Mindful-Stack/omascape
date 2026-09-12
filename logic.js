@@ -962,7 +962,21 @@ function applyLocksTo(current, raw, status) {
     }
     var parsed = parseLocks(raw)
     if (!parsed.ok) return { armed: current, changed: false, error: parsed.error }
-    return { armed: parsed.armed, changed: true, error: null }
+    // `watchChanges`/an explicit reload() re-emits `loaded` even when the bytes on disk did not
+    // change (our own atomic write reads back its own content; a repeated stub `loadArmed` in
+    // tests). Comparing here — not just returning `changed: true` on every successful parse —
+    // is what stops that echo from re-dispatching a sync (and, via the Overview, re-rebuilding)
+    // for every "load" that carries no real change. `current === null` always counts as changed
+    // (the first resolution): there is no previous set to compare against.
+    return { armed: parsed.armed, changed: current === null || !sameSelectors(current, parsed.armed), error: null }
+}
+
+// Same selectors, in the same order — a plain array-of-strings equality used only to decide
+// whether a load actually changed anything.
+function sameSelectors(a, b) {
+    if (a.length !== b.length) return false
+    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+    return true
 }
 
 // Toggle `sel` in `armed`. Returns a new array, or `null` when the toggle must be refused
@@ -976,17 +990,21 @@ function toggleSelector(armed, sel) {
 }
 
 // One-line, pcall-guarded chunk that shows a Hyprland notification. Every value that reaches
-// here (a Quickshell FileView error, a JSON parse error) is untrusted text, so it is escaped
-// rather than interpolated raw: backslashes and quotes first (order matters — escaping the
-// quote first would double-escape the backslash it just introduced), then newlines/tabs
-// flattened to a single space (the chunk itself must stay single-line), then truncated so one
-// bad string cannot make the chunk unreasonably large or unreadable in a log.
+// here (a Quickshell FileView error, a JSON parse error) is untrusted text, so it is truncated
+// to a 200-character budget FIRST, on the raw (unescaped) input, and only THEN escaped —
+// escaping first and truncating the result would risk slicing a just-introduced `\\` escape
+// pair in half, leaving a lone trailing backslash that escapes the chunk's closing quote and
+// makes the whole thing unparseable. Escaping itself: backslashes and quotes first (order
+// matters — escaping the quote first would double-escape the backslash it just introduced),
+// then newlines/tabs flattened to a single space (the chunk itself must stay single-line).
 function notifyLua(text) {
-    var t = String(text === undefined || text === null ? "" : text)
+    var raw = String(text === undefined || text === null ? "" : text)
+    var cut = raw.length > 200
+    if (cut) raw = raw.slice(0, 200) + "…"
+    var t = raw
         .replace(/\\/g, "\\\\")
         .replace(/"/g, "\\\"")
         .replace(/[\n\r\t]+/g, " ")
-    if (t.length > 200) t = t.slice(0, 200)
     return (
         'function()\n' +
         '  pcall(function() hl.notification.create({ text = "' + t + '", duration = 4000, icon = "error" }) end)\n' +
