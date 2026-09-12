@@ -34,17 +34,18 @@ guarantee about the first frame after a *Hyprland config reload* (see Edge cases
 - Rules can be created `enabled = false` and toggled with `rule:set_enabled(bool)`; the spec
   field `name` exists on `HL.WindowRuleSpec`.
 - Lua globals persist between dispatched chunks (one interpreter). `io.open`, `os.getenv`,
-  `os.execute("mkdir -p …")` and (to verify in the plan's first task) `os.rename` work from a
-  dispatched chunk.
+  `os.execute("mkdir -p …")` and `os.rename` all work from a dispatched chunk (probed
+  2026-09-12), so the observer can create its directory and publish the state file atomically.
 - `hl.on("screenshare.state", cb)` fires with `(active: boolean, type: number, name: string)`
   (upstream documents Active, Type, Name; the second argument is not a session id). A screenshot
   fires `true` then `false`. Subscriptions have `:remove()` and `:is_active()`. The event is
   Lua-only; Quickshell cannot observe shares directly.
 - `hl.layer_rule({ match = { namespace = "omyview" }, no_screen_share = true })` is the layer form.
-- Hyprland's IPC socket emits `configreloaded` (Quickshell surfaces it via `Hyprland.rawEvent`).
-  A config reload re-runs the Lua config and discards the dispatched-chunk globals (upstream:
-  Lua state is torn down on reload) — to confirm in the plan's first task by probing a global
-  across `hyprctl reload`.
+- Hyprland's IPC socket emits `configreloaded>>` on `hyprctl reload` (captured on socket2;
+  Quickshell surfaces it via `Hyprland.rawEvent`). **A config reload discards the
+  dispatched-chunk globals** (probed 2026-09-12: a global set before `hyprctl reload` is gone
+  after it), so rules and the observer created by chunks vanish on every reload and must be
+  re-installed.
 - omyview's config is `~/.config/omarchy/omyview.json`, read through a watched `FileView`.
 
 ## Decisions
@@ -106,13 +107,16 @@ if not L then
 end
 if not L.dir then
   local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end
-  L.dir = base .. "/omyview"
-  if os.execute("mkdir -p '" .. L.dir .. "'") ~= true and os.execute("mkdir -p '" .. L.dir .. "'") ~= 0 then error("mkdir failed") end
+  local dir = base .. "/omyview"
+  local r = os.execute("mkdir -p '" .. dir .. "'")          -- once; Lua 5.4 returns true, 5.1 returns 0
+  if r ~= true and r ~= 0 then error("mkdir failed") end
+  L.dir = dir                                                -- assigned only on success, so a failed install can retry
 end
 function L.publish()
   local tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"
   local f = io.open(tmp, "w"); if not f then error("cannot write share-state") end
-  f:write(L.sharing > 0 and "1" or "0"); f:close()
+  local w = f:write(L.sharing > 0 and "1" or "0"); local c = f:close()
+  if not w or not c then error("write share-state failed") end
   local ok, err = os.rename(tmp, dst); if not ok then error("rename share-state: " .. tostring(err)) end
 end
 if not L.layer then L.layer = hl.layer_rule({ name = "omyview-lock-layer", match = { namespace = "omyview" }, no_screen_share = true }) end
@@ -127,16 +131,22 @@ end
 L.publish()
 ```
 - `sharing` counts starts minus ends, clamped at 0. It only drives the placeholder; a stuck
-  count shows the placeholder longer than needed, never exposes anything. It resets on install.
-- `publish()` writes `1`/`0` atomically; install publishes the current state so a fresh shell
+  count shows the placeholder longer than needed, never exposes anything. An idempotent
+  re-install preserves it; only a fresh Lua state (Hyprland start or reload) starts at 0. A
+  share already running when the observer is created is therefore not detected until the next
+  share event: accepted false negative (enforcement does not depend on it).
+- `publish()` writes `1`/`0` atomically, checking write and close before the rename so a failed
+  write never replaces valid state; every install publishes the current value so a fresh shell
   never reads a missing file for long.
 
 **`lockSyncLua(armed)`** — `armed` is the full array of selectors (`"3"`, `"special:scratchpad"`):
 ```lua
 local L = _G.omyview_lock; if not L then error("lock not installed") end
 local want = {}; for _, sel in ipairs(ARMED) do want[sel] = true end
-local ok, err = pcall(function()
-  for sel in pairs(want) do
+local failed = {}
+local function step(sel, f) local ok, err = pcall(f); if not ok then failed[#failed + 1] = sel .. ": " .. tostring(err) end end
+for sel in pairs(want) do
+  step(sel, function()
     local r = L.rules[sel]
     if not r then
       r = hl.window_rule({ name = "omyview-lock-" .. sel, match = { workspace = sel }, no_screen_share = true, enabled = true })
@@ -144,13 +154,17 @@ local ok, err = pcall(function()
     else
       r:set_enabled(true)
     end
-  end
-  for sel, r in pairs(L.rules) do if not want[sel] then r:set_enabled(false) end end
-end)
--- reportLua('lock sync')
+  end)
+end
+for sel, r in pairs(L.rules) do if not want[sel] then step(sel, function() r:set_enabled(false) end) end end
+local ok, err = #failed == 0, table.concat(failed, "; ")
+-- reportLua('lock sync')   -- one report naming every selector that failed
 ```
-where `ARMED` is the array literal interpolated by the builder (selectors are validated to
-`^[0-9]+$` or `^special:[%w_-]+$` before interpolation; anything else is dropped and reported).
+Every create/enable/disable is guarded on its own, so one failure never prevents the other
+selectors from being protected or stale rules from being disabled. `ARMED` is the array literal
+interpolated by the builder; **in JavaScript, before interpolation**, each selector must match
+`/^(\d+|special:[A-Za-z0-9_-]+)$/`; anything else is dropped from the chunk and reported via
+the notification path.
 
 **Rule semantics to prove in the plan's first task, on 0.56.2, with captured pixels** (not
 `is_enabled()`): create enabled → capture an existing window is black; `set_enabled(false)` →
@@ -162,23 +176,31 @@ rules are named for that reason.
 ## Overview side
 
 **State.** `OmyviewLocks.qml` (new, beside `OmyviewConfig.qml`): a watched `FileView` on the
-locks file; `armed: var` (array of selectors; the last valid set is kept when the file is
-missing or malformed, and a malformed file is reported once via the notification path);
-`toggle(sel)` writes the file atomically. A second watched `FileView` on the share-state file
-exposes `sharing: bool` (`"1"`), false when missing or unreadable. `placeholder(sel) =
-armed.includes(sel) && sharing`.
+locks file. `armed: var` is **null until the first load resolves** ("unresolved"), then an array
+of selectors. A missing file resolves to `[]` (first run). A malformed file keeps the previous
+value — still null if it was the first load — and is reported once via the notification path.
+`toggle(sel)` is a no-op while unresolved. A second watched `FileView` on the share-state file
+exposes `sharing: bool` (`"1"`), false when missing or unreadable. `placeholder(sel) = armed !==
+null && armed.includes(sel) && sharing`.
+
+**Persistence ordering in `toggle(sel)`:** update the in-memory `armed` first, dispatch
+`lockSyncLua(armed)` immediately (the compositor is the enforcement; it must not wait for disk),
+then write the file atomically (temp + rename). A write failure is reported and leaves the
+in-memory set as the truth for this session; the next toggle retries. Rapid toggles each
+dispatch the full set, so the last dispatch wins and the compositor never sees a partial state.
 
 **Selectors.** `Logic.wsSelector(id)` already yields `"3"` / `"special:scratchpad"`; boxes are
 keyed by it for lock purposes. The file stores selectors, so the scratchpad entry survives its
 dynamic id.
 
-**Sync points.** `Overview` dispatches `lockInstallLua()` then `lockSyncLua(armed)`:
-1. on `Component.onCompleted` (kept loaded: shell start);
-2. on `Hyprland.rawEvent` named `configreloaded`;
-3. in `open()`;
-4. after every `toggle(sel)`.
-All idempotent. (The shell's `Hyprland` object emits the raw event name; the plan verifies the
-exact string with a live `hyprctl reload`.)
+**Sync points.** `lockInstallLua()` is dispatched on `Component.onCompleted` (kept loaded: shell
+start), on the `configreloaded` raw event, and in `open()`. `lockSyncLua(armed)` is dispatched
+**only when `armed` is resolved**: on the locks file's first successful load and every accepted
+change, on `configreloaded`, in `open()`, and after every `toggle`. While `armed` is unresolved
+no sync is sent, so a shell restart can never disable rules the compositor still holds (the
+`FileView` loads asynchronously; the retained rules keep protecting until the file is read).
+All dispatches are idempotent. Installation is not awaited: `Hyprland.dispatch` is fire-and-forget
+and there is no completion barrier before `open()` maps the surface (see Edge cases).
 
 **Keys.** Chord branch: `Ctrl+L` → `locks.toggle(Logic.wsSelector(selectedId))` when
 `Logic.hasWs(selectedId)`, then sync. Works with or without a query.
@@ -209,8 +231,14 @@ the input → `endDrag()`" check.
 - **Hyprland config reload**: Lua globals are lost, so the rules and the observer are gone until
   omyview sees `configreloaded` and re-installs (milliseconds). A capture in that window can
   see armed windows. Accepted and documented; a reload is a user action (theme change, config
-  edit), not something a share triggers. If the plan's probe shows globals *survive* a reload,
-  this window does not exist and the `configreloaded` sync is merely redundant.
+  edit), not something a share triggers. Probed: globals do NOT survive a reload, so this window
+  is real and the `configreloaded` re-install is load-bearing, not redundant.
+- **Overview mapped before its layer rule exists** (a share running at shell start, and the
+  overview opened within the few milliseconds before the install chunk lands): the overview's
+  surface can be captured. Accepted. Two mitigations bound it: the rule is dispatched at shell
+  start, long before a human can press SUPER+P; and the overview's own thumbnails are screencopy
+  captures of windows that are themselves under `no_screen_share`, so they are expected to be
+  black too — a live-test item (below), not a claim.
 - **Hyprland restart**: ends every share and every capture client; the shell's next
   `configreloaded`/open re-installs.
 - **Shell restart / crash**: the compositor table and rules are untouched (install is
@@ -234,13 +262,16 @@ the input → `endDrag()`" check.
   (`_G` isolated per case; the current runner shares the host `_G` and must be changed), with
   stubs for `os.getenv`, `os.execute`, `os.rename`, `io.open` (in-memory files) and a mock `hl`
   gaining `layer_rule`, named rule objects with `set_enabled`/`is_enabled`, and `on` with a
-  `fire(event, ...)` helper. Cases: install twice → one layer rule, one active subscription, one
-  publish of `0`; sync `["3"]` → rule `omyview-lock-3` created enabled; sync `[]` → disabled,
+  `fire(event, ...)` helper. Cases: install twice → one layer rule, one active subscription, a publish on
+  each install (value `0` on a fresh state), and the counter preserved across the second
+  install; sync `["3"]` → rule `omyview-lock-3` created enabled; sync `[]` → disabled,
   handle kept; sync `["3"]` again → same handle re-enabled (no second rule); sync
   `["3","special:scratchpad"]` → both enabled; share start → `1` published, rules untouched
   (already enabled); second start then one end → still `1`; last end → `0`; end without start
-  → clamped at `0`; a rule setter throwing → reported once, remaining rules still processed
-  (the loop continues after pcall per rule — the builder wraps each `set_enabled` individually);
+  → clamped at `0`; a rule creation or setter throwing → one report naming it, every other
+  selector still created/enabled and every stale rule still disabled (per-step pcall); a
+  failed mkdir → install reports and `L.dir` stays unset so the next install retries; a failed
+  write → no rename (state file unchanged);
   invalid selector dropped and reported; `os.rename` failing → reported.
 - **Tier 1, `tests/tst_layout.qml`**: a `placeholder` workspace yields a box with
   `placeholder: true` and no tiles; an `armed` one without placeholder is unchanged.
@@ -254,10 +285,15 @@ the input → `endDrag()`" check.
   onto a placeholder box dispatches the move and leaves no pending row; a pending drop onto ws 3
   followed by the state file flipping to `1` leaves no row; reopen re-reads the file and
   re-dispatches install + sync; a malformed file keeps the previous set; a `configreloaded` raw
-  event re-dispatches install + sync.
+  event re-dispatches install + sync; **no sync is dispatched before the locks file has
+  loaded** (the fixture delays the load and asserts the dispatch list holds only the install);
+  a write failure (unwritable path) is reported and the in-memory set still drives the badge
+  and the sync.
 - **Live (plan's first task, before any UI work)**: the rule-semantics sequence above with
-  `grim` captures inspected as pixels (an unarmed workspace as positive control), the
-  `configreloaded` event name, and whether globals survive `hyprctl reload`. **Live (final)**: a
+  `grim` captures inspected as pixels (an unarmed workspace as positive control). (The
+  `configreloaded` event name and the loss of globals on reload are already verified.) **Live (final)**: a
   real monitor share through the portal (e.g. a video-call test page or `wf-recorder`), armed
   workspaces black in the recorded output including the first frame after switching to them,
-  the overview absent from the recording, and the state file flipping on start and end.
+  the overview absent from the recording, the overview's own thumbnail of an armed window black
+  (if it is not, the placeholder is load-bearing and the mapping gap above widens to "thumbnails
+  visible for milliseconds"), and the state file flipping on start and end.
