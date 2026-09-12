@@ -830,3 +830,84 @@ function scratchpadFocusLua(addr) {
         'end'
     ).replace(/\n\s*/g, ' ')
 }
+
+// ---- Workspace lock (docs/specs/2026-09-12-lock-design.md) ---------------------------------
+// A selector is a workspace id ("3") or a special workspace name ("special:scratchpad"). It is
+// interpolated into Lua, so anything else is refused here, in JavaScript, before it can reach
+// a chunk.
+var LOCK_SELECTOR_RE = /^(\d+|special:[A-Za-z0-9_-]+)$/
+function validLockSelector(sel) { return typeof sel === "string" && LOCK_SELECTOR_RE.test(sel) }
+
+// Install the compositor-side lock state: one table in _G, the layer rule that keeps the
+// overview out of every capture, and the share observer that publishes 1/0 to
+// $XDG_RUNTIME_DIR/omyview/share-state. Idempotent: re-running keeps the rules, the
+// subscription and the share counter. Dispatched at shell start, on configreloaded (a reload
+// drops every global) and at open().
+function lockInstallLua() {
+    return (
+        'function()\n' +
+        '  local ok, err = pcall(function()\n' +
+        '    local L = _G.omyview_lock\n' +
+        '    if not L then L = { rules = {}, sharing = 0, sub = nil, layer = nil, dir = nil }; _G.omyview_lock = L end\n' +
+        '    if not L.dir then\n' +
+        '      local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end\n' +
+        '      local dir = base .. "/omyview"\n' +
+        '      local r = os.execute("mkdir -p \'" .. dir .. "\'")\n' +
+        '      if r ~= true and r ~= 0 then error("mkdir failed") end\n' +
+        '      L.dir = dir\n' +
+        '    end\n' +
+        '    function L.publish()\n' +
+        '      local tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"\n' +
+        '      local f = io.open(tmp, "w"); if not f then error("cannot write share-state") end\n' +
+        '      local w = f:write(L.sharing > 0 and "1" or "0"); local c = f:close()\n' +
+        '      if not w or not c then error("write share-state failed") end\n' +
+        '      local rok, rerr = os.rename(tmp, dst); if not rok then error("rename share-state: " .. tostring(rerr)) end\n' +
+        '    end\n' +
+        '    if not L.layer then L.layer = hl.layer_rule({ name = "omyview-lock-layer", match = { namespace = "omyview" }, no_screen_share = true }) end\n' +
+        '    if not (L.sub and L.sub:is_active()) then\n' +
+        '      L.sub = hl.on("screenshare.state", function(active)\n' +
+        '        local sok, serr = pcall(function() L.sharing = math.max(0, L.sharing + (active and 1 or -1)); L.publish() end)\n' +
+        '        if not sok then print("omyview: share observer failed: " .. tostring(serr)) end\n' +
+        '      end)\n' +
+        '    end\n' +
+        '    L.publish()\n' +
+        '  end)\n' +
+        '  ' + reportLua('lock install') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}
+
+// Reconcile the compositor's rule table with the full armed set: create (enabled) or re-enable
+// a named rule per armed selector, disable every other rule the table holds. Each step is
+// guarded on its own so one failure never leaves another selector unprotected; failures are
+// reported once, naming every selector that failed.
+function lockSyncLua(armed) {
+    var sels = []
+    for (var i = 0; i < (armed || []).length; i++) if (validLockSelector(armed[i])) sels.push('"' + armed[i] + '"')
+    return (
+        'function()\n' +
+        '  local ARMED = {' + sels.join(', ') + '}\n' +
+        '  local L = _G.omyview_lock\n' +
+        '  local ok, err = L ~= nil, "lock not installed"\n' +
+        '  if L then\n' +
+        '    local want = {}; for _, sel in ipairs(ARMED) do want[sel] = true end\n' +
+        '    local failed = {}\n' +
+        '    local function step(sel, f) local sok, serr = pcall(f); if not sok then failed[#failed + 1] = sel .. ": " .. tostring(serr) end end\n' +
+        '    for sel in pairs(want) do\n' +
+        '      step(sel, function()\n' +
+        '        local r = L.rules[sel]\n' +
+        '        if not r then\n' +
+        '          r = hl.window_rule({ name = "omyview-lock-" .. sel, match = { workspace = sel }, no_screen_share = true, enabled = true })\n' +
+        '          L.rules[sel] = r\n' +
+        '        else\n' +
+        '          r:set_enabled(true)\n' +
+        '        end\n' +
+        '      end)\n' +
+        '    end\n' +
+        '    for sel, r in pairs(L.rules) do if not want[sel] then step(sel, function() r:set_enabled(false) end) end end\n' +
+        '    ok, err = #failed == 0, table.concat(failed, "; ")\n' +
+        '  end\n' +
+        '  ' + reportLua('lock sync') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}

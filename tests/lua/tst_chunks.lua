@@ -10,12 +10,20 @@ for line in io.lines(arg[1]) do
 end
 
 -- Evaluate the chunk the way hl.dispatch does (it yields a function), then call it with the
--- mock as `hl` and `print` captured (Hyprland rebinds print to its log).
+-- mock as `hl`, `print` captured, and a PRIVATE global table: chunks that keep state in _G
+-- (the lock) must not leak it between cases. `env._G = env` makes `_G.x` resolve to env.x.
+-- `os`/`io` are the mock's fakes when the mock provides them, the host's otherwise.
+local function envFor(hl)
+  local env = setmetatable({ hl = hl, print = function(...)
+    hl.__printed[#hl.__printed + 1] = table.concat({ ... }, "\t") end,
+    os = hl.__os or os, io = hl.__io or io }, { __index = _G })
+  env._G = env
+  return env
+end
 local function run(name, hl)
   local body = assert(chunks[name], "no chunk named " .. name)
-  local env = setmetatable({ hl = hl, print = function(...)
-    hl.__printed[#hl.__printed + 1] = table.concat({ ... }, "\t") end }, { __index = _G })
-  local f = assert(load("return " .. body, name, "t", env))
+  hl.__env = hl.__env or envFor(hl)
+  local f = assert(load("return " .. body, name, "t", hl.__env))
   local fn = f()
   assert(type(fn) == "function", name .. " must evaluate to a function")
   fn()
@@ -211,6 +219,93 @@ case("scratchpad focus: focus throws → one notification, bring_to_top never ru
   eq(#hl.__notifications, 1, "one notification")
   assert(hl.__notifications[1].text:find("focus scratchpad window failed", 1, true))
   eq(hl.__seen["window.bring_to_top"], nil, "bring_to_top never ran")
+end)
+
+local function state(hl) return hl.__files[(hl.__runtime_dir or "/run/user/1000") .. "/omyview/share-state"] end
+-- Distinguishes: a non-idempotent install (two layer rules / two subscriptions) or one that
+-- never publishes.
+case("lock install is idempotent and publishes 0", function()
+  local hl = Mock.new({})
+  run("LOCK_INSTALL", hl); run("LOCK_INSTALL", hl)
+  eq(#hl.__layer_rules, 1, "one layer rule"); eq(#hl.__subs, 1, "one subscription")
+  eq(hl.__layer_rules[1].spec.no_screen_share, true); eq(hl.__layer_rules[1].spec.match.namespace, "omyview")
+  eq(state(hl), "0", "published 0"); eq(#hl.__mkdirs, 1, "mkdir once")
+  eq(#hl.__notifications, 0)
+end)
+-- Distinguishes: a counter reset by re-install, or an install that publishes stale state.
+case("lock install preserves the share counter", function()
+  local hl = Mock.new({})
+  run("LOCK_INSTALL", hl); Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  run("LOCK_INSTALL", hl)
+  eq(state(hl), "1", "still sharing after re-install")
+end)
+-- Distinguishes: a rule created disabled, unnamed, or matched on something other than workspace.
+case("lock sync creates one enabled named rule per selector", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  run("LOCK_SYNC_3_SCRATCH", hl)
+  eq(#hl.__window_rules, 2)
+  local r3 = Mock.ruleNamed(hl, "omyview-lock-3"); eq(r3 ~= nil, true, "named rule for 3")
+  eq(r3:is_enabled(), true); eq(r3.spec.match.workspace, "3"); eq(r3.spec.no_screen_share, true)
+  eq(Mock.ruleNamed(hl, "omyview-lock-special:scratchpad"):is_enabled(), true)
+  eq(#hl.__notifications, 0)
+end)
+-- Distinguishes: disarm destroying/forgetting the handle (re-arm would create a second rule),
+-- or disarm not disabling.
+case("lock sync disables removed selectors and reuses the handle on re-arm", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  run("LOCK_SYNC_3", hl); run("LOCK_SYNC_NONE", hl)
+  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), false, "disabled")
+  run("LOCK_SYNC_3", hl)
+  eq(#hl.__window_rules, 1, "same handle re-enabled, no second rule")
+  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true)
+end)
+-- Distinguishes: the share observer touching rules (they must stay as the sync left them) or
+-- publishing the wrong value; the counter not clamping.
+case("share events publish 1/0 with a clamped counter and never touch rules", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1"); eq(state(hl), "1")
+  Mock.fire(hl, "screenshare.state", true, 0, "HDMI-A-1"); Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
+  eq(state(hl), "1", "two starts, one end: still sharing")
+  Mock.fire(hl, "screenshare.state", false, 0, "HDMI-A-1"); eq(state(hl), "0")
+  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1"); eq(state(hl), "0", "clamped at 0")
+  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true, "rules untouched by share events")
+end)
+-- Distinguishes: one failing selector aborting the rest (a single pcall around both loops).
+case("lock sync isolates a failing selector and still protects the others", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  hl.__fail_on = "window_rule"; hl.__fail_sel = "3"
+  run("LOCK_SYNC_3_SCRATCH", hl)
+  eq(Mock.ruleNamed(hl, "omyview-lock-3"), nil, "3 failed")
+  eq(Mock.ruleNamed(hl, "omyview-lock-special:scratchpad"):is_enabled(), true, "scratchpad still protected")
+  eq(#hl.__notifications, 1, "reported once"); eq(hl.__notifications[1].text:find("3:", 1, true) ~= nil, true, "names the selector")
+end)
+-- Distinguishes: a stale rule not disabled because an earlier enable threw.
+case("lock sync still disables stale rules when an enable throws", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3_SCRATCH", hl)
+  hl.__fail_on = "rule.set_enabled"
+  run("LOCK_SYNC_NONE", hl)   -- both set_enabled(false) calls throw → both reported, nothing crashes
+  eq(#hl.__notifications, 1)
+  hl.__fail_on = nil
+  run("LOCK_SYNC_NONE", hl)
+  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), false)
+end)
+-- Distinguishes: sync before install silently doing nothing.
+case("lock sync before install reports", function()
+  local hl = Mock.new({}); run("LOCK_SYNC_3", hl)
+  eq(#hl.__notifications, 1); eq(#hl.__window_rules, 0)
+end)
+-- Distinguishes: a failed mkdir poisoning L.dir (a later install could never retry), and a
+-- failed write replacing valid state.
+case("lock install: mkdir failure is reported and retried; write failure leaves state intact", function()
+  local hl = Mock.new({})
+  hl.__fail_on = "mkdir"; run("LOCK_INSTALL", hl)
+  eq(#hl.__notifications, 1, "mkdir failure reported"); eq(state(hl), nil, "nothing published")
+  hl.__fail_on = nil; run("LOCK_INSTALL", hl)
+  eq(state(hl), "0", "retry succeeded"); eq(#hl.__mkdirs, 2, "mkdir attempted again")
+  hl.__fail_on = "io.open"; Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  -- 2, not 1: the earlier mkdir failure already logged one line via reportLua; this is the
+  -- observer's own (separate) failure log, on top of it.
+  eq(state(hl), "0", "failed write did not replace the state"); eq(#hl.__printed, 2, "observer failure logged")
 end)
 
 if failures > 0 then io.stderr:write(failures .. " Lua chunk test(s) failed\n"); os.exit(1) end

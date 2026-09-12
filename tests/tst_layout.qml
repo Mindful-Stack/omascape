@@ -862,4 +862,26 @@ TestCase {
         verify(normal.indexOf('workspace = "3"') >= 0); verify(normal.indexOf('w.workspace.id == 3') >= 0)
     }
 
+    // Distinguishes: a builder that interpolates any string into the Lua array (a selector with
+    // a quote or a Lua comment would break out of the chunk).
+    function test_lock_selectors_are_validated() {
+        compare(Logic.validLockSelector("3"), true)
+        compare(Logic.validLockSelector("10"), true)
+        compare(Logic.validLockSelector("special:scratchpad"), true)
+        compare(Logic.validLockSelector("special:my-pad_2"), true)
+        compare(Logic.validLockSelector(""), false)
+        compare(Logic.validLockSelector("-2"), false)
+        compare(Logic.validLockSelector("3\"); error(\"x"), false)
+        compare(Logic.validLockSelector("special:a b"), false)
+        compare(Logic.validLockSelector(undefined), false)
+    }
+    // Distinguishes: the sync chunk carrying an invalid selector, or dropping valid ones.
+    function test_lock_sync_chunk_carries_only_valid_selectors() {
+        var lua = Logic.lockSyncLua(["3", "bad one", "special:scratchpad"])
+        verify(lua.indexOf('"3"') >= 0 && lua.indexOf('"special:scratchpad"') >= 0)
+        verify(lua.indexOf("bad one") < 0)
+        verify(lua.indexOf("omyview-lock-") >= 0, "rules are named")
+        compare(Logic.lockSyncLua([]).indexOf("local ARMED = {}") >= 0, true)
+    }
+
 }

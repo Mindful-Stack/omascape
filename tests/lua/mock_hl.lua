@@ -45,6 +45,43 @@ function M.new(opts)
   end
   hl.notification = { create = function(t) hl.__notifications[#hl.__notifications + 1] = t end }
 
+  -- Rules: named handles with enable state, so tests can assert "one handle per selector".
+  hl.__window_rules, hl.__layer_rules, hl.__subs = {}, {}, {}
+  local function ruleObject(spec)
+    local r = { spec = spec, enabled = spec.enabled ~= false }
+    function r:set_enabled(v) if hl.__fail_on == "rule.set_enabled" then error("injected set_enabled failure") end; self.enabled = v end
+    function r:is_enabled() return self.enabled end
+    return r
+  end
+  function hl.window_rule(spec)
+    if hl.__fail_on == "window_rule" and (hl.__fail_sel == nil or hl.__fail_sel == spec.match.workspace) then error("injected window_rule failure") end
+    local r = ruleObject(spec); hl.__window_rules[#hl.__window_rules + 1] = r; return r
+  end
+  function hl.layer_rule(spec) local r = ruleObject(spec); hl.__layer_rules[#hl.__layer_rules + 1] = r; return r end
+  -- Events: hl.on stores callbacks; M.fire(hl, name, ...) delivers.
+  function hl.on(name, cb)
+    local sub = { name = name, cb = cb, active = true }
+    function sub:remove() self.active = false end
+    function sub:is_active() return self.active end
+    hl.__subs[#hl.__subs + 1] = sub
+    return sub
+  end
+  -- Fake os/io: an in-memory filesystem so the observer's publish can be asserted without disk.
+  hl.__files, hl.__mkdirs = {}, {}
+  hl.__os = {
+    getenv = function(k) if k == "XDG_RUNTIME_DIR" then return hl.__runtime_dir or "/run/user/1000" end return nil end,
+    execute = function(cmd) hl.__mkdirs[#hl.__mkdirs + 1] = cmd; if hl.__fail_on == "mkdir" then return nil end; return true end,
+    rename = function(a, b) if hl.__fail_on == "rename" then return nil, "injected rename failure" end; hl.__files[b] = hl.__files[a]; hl.__files[a] = nil; return true end,
+  }
+  hl.__io = {
+    open = function(path, mode)
+      if hl.__fail_on == "io.open" then return nil end
+      local buf = {}
+      return { write = function(self, s) buf[#buf + 1] = s; return self end,
+               close = function() hl.__files[path] = table.concat(buf); return true end }
+    end,
+  }
+
   -- Typed dispatcher table: each entry returns a descriptor; hl.dispatch applies it.
   local function d(name) return function(args) return { name = name, args = args } end end
   hl.dsp = {
@@ -96,6 +133,14 @@ function M.names(hl)
   local out = {}
   for i, e in ipairs(hl.__log) do out[i] = e.name end
   return out
+end
+
+function M.fire(hl, name, ...)
+  for _, s in ipairs(hl.__subs) do if s.name == name and s.active then s.cb(...) end end
+end
+function M.ruleNamed(hl, name)
+  for _, r in ipairs(hl.__window_rules) do if r.spec.name == name then return r end end
+  return nil
 end
 
 return M
