@@ -275,8 +275,10 @@ the input → `endDrag()`" check.
   invalid selector dropped and reported; `os.rename` failing → reported.
 - **Tier 1, `tests/tst_layout.qml`**: a `placeholder` workspace yields a box with
   `placeholder: true` and no tiles; an `armed` one without placeholder is unchanged.
-- **Offscreen UI (`tests/ui/lock.qml`)**, with prepare.py pointing both `FileView`s at
-  fixture-local temp files: Ctrl+L on ws 3 writes `armed: ["3"]` and dispatches install + sync
+- **Offscreen UI (`tests/ui/lock.qml`)**, with prepare.py replacing `OmyviewLocks.qml` by a
+  stub (the fixture has no Quickshell.Io) whose `armed` starts null and offers `loadArmed`,
+  `setSharing` and recorded `writes` — real file watching and atomic writes are live-check
+  items: Ctrl+L on ws 3 writes `armed: ["3"]` and dispatches install + sync
   with `"3"`; Ctrl+L again writes `[]` and dispatches a sync without it; the badge follows;
   writing `1` to the state file locks armed boxes (tiles gone, glyph shown, capture handle
   null) and `0` restores tiles; **positive control**: a query matching a window on ws 3 shows 1
