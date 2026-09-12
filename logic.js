@@ -239,7 +239,8 @@ function layout(input) {
             for (var c = 0; c < chunk.length; c++) {
                 var box = { workspaceId: chunk[c].id, monitorName: name, monFocused: focusedGroup,
                             special: "", x: inset + c * (cw + gap), y: y, w: cw, h: gch,
-                            focused: !!chunk[c].focused, occupied: !!chunk[c].occupied }
+                            focused: !!chunk[c].focused, occupied: !!chunk[c].occupied,
+                            armed: !!chunk[c].armed, placeholder: !!chunk[c].placeholder }
                 boxes.push(box); boxByWs[box.workspaceId] = box
             }
             var rowW = chunk.length * cw + (chunk.length - 1) * gap
@@ -268,7 +269,8 @@ function layout(input) {
         y += inset + P.headerH
         var sbox = { workspaceId: sws.id, monitorName: sws.monitorName, monFocused: false,
                      special: sws.special, x: inset, y: y, w: cw, h: cellHeightFor(monByName[sws.monitorName]),
-                     focused: !!sws.focused, occupied: !!sws.occupied }
+                     focused: !!sws.focused, occupied: !!sws.occupied,
+                     armed: !!sws.armed, placeholder: !!sws.placeholder }
         boxes.push(sbox); boxByWs[sbox.workspaceId] = sbox
         y += sbox.h + inset
         sgroup.w = cw + 2 * inset; sgroup.h = y - sgroup.y
@@ -291,6 +293,7 @@ function layout(input) {
     var tiles = []
     for (var wi = 0; wi < input.windows.length; wi++) {
         var win = input.windows[wi], wbox = boxByWs[win.workspaceId]; if (!wbox) continue
+        if (wbox.placeholder) continue     // lock placeholder: no tile, no capture (spec: Rendering)
         var wmon = monByName[wbox.monitorName]; if (!wmon) continue
         var mode = fullscreenMode(win), layer = win.floating ? 2 : 1, slot = null
         if (mode) {

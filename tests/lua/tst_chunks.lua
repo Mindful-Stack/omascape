@@ -304,7 +304,7 @@ case("lock sync drops a dead handle after a failed re-enable, so re-arm creates 
   hl.__fail_on = nil
   run("LOCK_SYNC_3", hl)
   eq(#hl.__window_rules, 2, "dead handle dropped, a new rule was created")
-  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true)
+  eq(hl.__window_rules[2]:is_enabled(), true, "the fresh rule is enabled")
 end)
 -- Distinguishes: sync before install silently doing nothing.
 case("lock sync before install reports", function()
@@ -338,6 +338,15 @@ case("lock install: publish close failure leaves state intact and is logged", fu
   eq(state(hl), "0", "no rename happened")
   assert(hl.__printed[#hl.__printed]:find("share observer failed", 1, true), "observer failure logged")
 end)
+-- Distinguishes: the `not w` half of the write-failure guard from the close-failure half above
+-- (a write failure must be caught on its own, not only incidentally via the close check).
+case("lock install: publish write failure leaves state intact and is logged", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  hl.__fail_on = "io.write"
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  eq(state(hl), "0", "no rename happened")
+  assert(hl.__printed[#hl.__printed]:find("share observer failed", 1, true), "observer failure logged")
+end)
 -- Distinguishes: a rename failure silently committing state (or the write not being cleaned up
 -- when the rename that would have published it fails).
 case("lock install: publish rename failure leaves state intact and is logged", function()
@@ -345,6 +354,7 @@ case("lock install: publish rename failure leaves state intact and is logged", f
   hl.__fail_on = "rename"
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
   eq(state(hl), "0", "no rename happened")
+  eq(hl.__files[hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state.tmp"], nil, "tmp removed on failure")
   assert(hl.__printed[#hl.__printed]:find("share observer failed", 1, true), "observer failure logged")
 end)
 

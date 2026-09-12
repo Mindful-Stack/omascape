@@ -830,6 +830,22 @@ TestCase {
         var r = Logic.layout(input)
         compare(r.groups.length, 1); compare(boxById(r, Logic.SCRATCHPAD_ID), null)
     }
+    // Distinguishes: a placeholder workspace still emitting tiles (a capture would start), and
+    // the flags not reaching the box (the delegate could not draw badge/glyph).
+    function test_placeholder_workspace_has_flags_and_no_tiles() {
+        var input = scratchInput([
+            { address: "0xA", cls: "x", ax: 0, ay: 26, sw: 1024, sh: 1254, workspaceId: 1, floating: false, fullscreen: 0 },
+            { address: "0xB", cls: "x", ax: 0, ay: 26, sw: 1024, sh: 1254, workspaceId: 2, floating: false, fullscreen: 0 }])
+        input.workspaces[0].armed = true; input.workspaces[0].placeholder = true    // ws 1
+        input.workspaces[1].armed = true; input.workspaces[1].placeholder = false   // ws 2: armed, not sharing
+        var r = Logic.layout(input)
+        compare(boxById(r, 1).armed, true); compare(boxById(r, 1).placeholder, true)
+        compare(boxById(r, 2).armed, true); compare(boxById(r, 2).placeholder, false)
+        compare(boxById(r, Logic.SCRATCHPAD_ID).armed, false); compare(boxById(r, Logic.SCRATCHPAD_ID).placeholder, false)
+        var addrs = r.tiles.map(function (t) { return t.address })
+        compare(addrs.indexOf("0xA"), -1, "no tile on the placeholder workspace")
+        verify(addrs.indexOf("0xB") >= 0, "armed-but-visible workspace keeps its tiles")
+    }
     // Distinguishes: a tiled scratchpad window dropped or drawn as floating (layer 2).
     function test_tiled_window_on_the_scratchpad_renders_as_a_tiled_tile() {
         var r = Logic.layout(scratchInput([
