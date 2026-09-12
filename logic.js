@@ -929,3 +929,17 @@ function lockSyncLua(armed) {
         'end'
     ).replace(/\n\s*/g, ' ')
 }
+
+// Parse the locks file. Only the shape { armed: [selector…] } is accepted; every selector is
+// validated. Returns { ok, armed } or { ok: false, error }.
+function parseLocks(raw) {
+    var o
+    try { o = JSON.parse(String(raw || "")) } catch (e) { return { ok: false, error: "not JSON" } }
+    if (!o || typeof o !== "object" || !Array.isArray(o.armed)) return { ok: false, error: "no armed array" }
+    var out = []
+    for (var i = 0; i < o.armed.length; i++) {
+        if (!validLockSelector(o.armed[i])) return { ok: false, error: "bad selector: " + String(o.armed[i]) }
+        if (out.indexOf(o.armed[i]) < 0) out.push(o.armed[i])
+    }
+    return { ok: true, armed: out }
+}

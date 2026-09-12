@@ -837,7 +837,7 @@ TestCase {
             { address: "0xA", cls: "x", ax: 0, ay: 26, sw: 1024, sh: 1254, workspaceId: 1, floating: false, fullscreen: 0 },
             { address: "0xB", cls: "x", ax: 0, ay: 26, sw: 1024, sh: 1254, workspaceId: 2, floating: false, fullscreen: 0 }])
         input.workspaces[0].armed = true; input.workspaces[0].placeholder = true    // ws 1
-        input.workspaces[1].armed = true; input.workspaces[1].placeholder = false   // ws 2: armed, not sharing
+        input.workspaces[1].armed = true                                           // ws 2: armed, not sharing
         var r = Logic.layout(input)
         compare(boxById(r, 1).armed, true); compare(boxById(r, 1).placeholder, true)
         compare(boxById(r, 2).armed, true); compare(boxById(r, 2).placeholder, false)
@@ -898,6 +898,15 @@ TestCase {
         verify(lua.indexOf("bad one") < 0)
         verify(lua.indexOf("omyview-lock-") >= 0, "rules are named")
         compare(Logic.lockSyncLua([]).indexOf("local ARMED = {}") >= 0, true)
+    }
+    // Distinguishes: a parser that accepts a bad selector (it would reach a Lua chunk) or
+    // rejects a valid file.
+    function test_parseLocks() {
+        compare(Logic.parseLocks('{ "armed": ["3", "special:scratchpad", "3"] }').armed, ["3", "special:scratchpad"])
+        compare(Logic.parseLocks('{ "armed": [] }').ok, true)
+        compare(Logic.parseLocks('nope').ok, false)
+        compare(Logic.parseLocks('{ "armed": ["x y"] }').ok, false)
+        compare(Logic.parseLocks('{}').ok, false)
     }
 
 }

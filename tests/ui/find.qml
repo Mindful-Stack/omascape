@@ -42,6 +42,9 @@ TestCase {
         seed(view)
         view.open()
         wait(400)
+        // Lock plumbing (Component.onCompleted + open()) dispatches install chunks that are not
+        // under test here; drop them so command-count assertions see only the test's own action.
+        view.compositor.commands = []
     }
     function cleanup() { view.close(); tileDataSpy.target = null }
     function row(addr) {

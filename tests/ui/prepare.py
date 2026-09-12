@@ -28,6 +28,7 @@ qml = qml.replace('id: root', '''id: root
     property alias testCard: card
     property alias testScrim: scrimRect
     property alias testConfig: config
+    property alias testLocks: locks
     property alias testEnterAnim: enterAnim
     property alias testKeys: keyCatcher
     property alias testBar: findBar
@@ -41,7 +42,7 @@ qml = qml.replace('id: root', '''id: root
         property var focusedMonitor: null
         property var focusedWorkspace: null
         property var commands: []
-        signal rawEvent()
+        signal rawEvent(var event)
         function dispatch(command) { commands = commands.concat([command]) }
         property int refreshes: 0
         function refreshToplevels() { refreshes++ }
@@ -70,6 +71,31 @@ tile = tile[:start] + '    Rectangle { anchors.fill: parent; color: tile.bg }\n\
     '           property string motion: "auto"; property string motionEffective: "full"\n'
     '           property bool motionResolved: true\n'
     '           function probeMotion() {} }\n')
+# Lock state stub: the real OmyviewLocks.qml watches two files through Quickshell.Io. The stub
+# keeps the one property later tests depend on — `armed` is null until a load resolves — and
+# records writes instead of touching disk. Real file watching, atomic rename and load ordering
+# are NOT reproduced here (live check).
+(dest / 'OmyviewLocks.qml').write_text(
+    'import QtQuick\nQtObject {\n'
+    '    property var armed: null\n'
+    '    property bool sharing: false\n'
+    '    property var writes: []\n'
+    '    property bool failWrites: false\n'
+    '    property int writeFailures: 0\n'
+    '    signal loadedArmed()\n'
+    '    function isArmed(sel) { return armed !== null && armed.indexOf(sel) >= 0 }\n'
+    '    function placeholder(sel) { return isArmed(sel) && sharing }\n'
+    '    function loadArmed(arr) { armed = arr.slice(); loadedArmed() }\n'
+    '    function setSharing(on) { sharing = on }\n'
+    '    function toggle(sel) {\n'
+    '        if (armed === null) return false\n'
+    '        var next = armed.slice(); var i = next.indexOf(sel)\n'
+    '        if (i >= 0) next.splice(i, 1); else next.push(sel)\n'
+    '        armed = next\n'
+    '        if (failWrites) writeFailures++; else writes = writes.concat([JSON.stringify({ armed: next })])\n'
+    '        return true\n'
+    '    }\n'
+    '}\n')
 # Emulates shell.qml's manifest-driven Loader.active (shell.qml:623-626): a standalone fixture
 # file so the shell-like Loader in tst_drag.qml can read keepLoaded without a circular reference
 # through the Overview instance it is itself loading.

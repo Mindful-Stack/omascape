@@ -88,6 +88,28 @@ Item {
     readonly property int cardRadius: boxRadius + card.pad
 
     OmyviewConfig { id: config }
+    OmyviewLocks { id: locks }
+    // Enforcement lives in the compositor; these keep it in step with the armed set. Install is
+    // idempotent and cheap; sync is sent only once `armed` has resolved (never an unresolved set).
+    function lockInstall() { Hyprland.dispatch(Logic.lockInstallLua()) }
+    function lockSync() {
+        if (locks.armed === null) return
+        Hyprland.dispatch(Logic.lockSyncLua(locks.armed))
+    }
+    function lockToggleSelected() {
+        if (!Logic.hasWs(selectedId)) return
+        if (!locks.toggle(Logic.wsSelector(selectedId))) return
+        lockSync()
+        rebuild()
+    }
+    Connections {
+        target: locks
+        function onLoadedArmed() { root.lockSync(); if (root.opened) root.rebuild() }
+        function onSharingChanged() { if (root.opened) root.rebuild() }
+        function onWriteFailed(why) { Hyprland.dispatch('hl.notification.create({ text = "omyview: could not save locks: ' + String(why).replace(/"/g, "'") + '", duration = 4000, icon = "error" })') }
+        function onInvalidFile(why) { Hyprland.dispatch('hl.notification.create({ text = "omyview: locks file ignored: ' + String(why).replace(/"/g, "'") + '", duration = 4000, icon = "error" })') }
+    }
+    Component.onCompleted: lockInstall()           // shell start, before any open
 
     // Motion vocabulary. Every duration and easing in the picker comes from here; tiles get it
     // as a property (they never import the shell). `scale` is a test hook (0 = instant);
@@ -191,13 +213,17 @@ Item {
             // appear, so fall back to the focused monitor by name instead.
             var monName = special ? ((mon && monNames[mon.name]) ? mon.name : focusedMonitorName)
                                   : (mon ? mon.name : "?")
+            var wsSel = Logic.wsSelector(wsId)
+            var wsArmed = locks.isArmed(wsSel), wsPlaceholder = locks.placeholder(wsSel)
             wss.push({ id: wsId, monitorName: monName, special: special,
                        focused: ws.id === focusedWsId,
-                       occupied: ws.toplevels && ws.toplevels.values.length > 0 })
+                       occupied: ws.toplevels && ws.toplevels.values.length > 0,
+                       armed: wsArmed, placeholder: wsPlaceholder })
             var tls = ws.toplevels ? ws.toplevels.values : []
             for (var t = 0; t < tls.length; t++) {
                 var o = tls[t] ? tls[t].lastIpcObject : null
                 if (!o || !o.at || !o.size || !o.address) continue
+                if (wsPlaceholder) continue          // find/drag never see a placeholder's windows
                 wins.push({ address: o.address, cls: o["class"] || "", title: o.title || "",
                             ax: o.at[0], ay: o.at[1], sw: o.size[0], sh: o.size[1],
                             workspaceId: wsId,
@@ -210,7 +236,9 @@ Item {
         // Hyprland drops an emptied special workspace; the row is still a place to drop windows.
         if (scratchpadShown && !haveScratch)
             wss.push({ id: Logic.SCRATCHPAD_ID, monitorName: focusedMonitorName, special: "scratchpad",
-                       focused: false, occupied: false })
+                       focused: false, occupied: false,
+                       armed: locks.isArmed(Logic.wsSelector(Logic.SCRATCHPAD_ID)),
+                       placeholder: locks.placeholder(Logic.wsSelector(Logic.SCRATCHPAD_ID)) })
         return { monitors: mons,
                  workspaces: Logic.padWorkspaces(wss, config.workspaces, focusedMonitorName),
                  windows: wins, focusedMonitorName: focusedMonitorName,
@@ -688,6 +716,7 @@ Item {
         if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
         config.probeMotion()                       // async; result lands for this or the next open
         targetScreen = focusedScreen(); hideScratchpad(); selectedIndex = -1; opened = true
+        lockInstall(); lockSync()
         resetFind()
         _showVisuals(true)                         // before the first rebuild: layout motion is gated on it
         rebuild()          // instant paint from current data
@@ -782,7 +811,10 @@ Item {
     // Window/workspace changes while open: refresh + settle (never an immediate stale rebuild).
     Connections {
         target: Hyprland
-        function onRawEvent() { if (root.opened) root.scheduleRebuild() }
+        function onRawEvent(event) {
+            if (event && event.name === "configreloaded") { root.lockInstall(); root.lockSync() }
+            if (root.opened) root.scheduleRebuild()
+        }
     }
     // The watched config file changing the padded workspace count while open: the compositor
     // data is not stale, so a plain rebuild re-lays the wells at once.
@@ -863,6 +895,7 @@ Item {
                     if (chord) {
                         if (chord === Qt.ControlModifier && e.key === Qt.Key_Backspace && finding) root.setQuery("")
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_S) root.toggleScratchpad()
+                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_L) root.lockToggleSelected()
                         return
                     }
                     if (e.key === Qt.Key_Escape) { if (finding) root.setQuery(""); else root.close(); return }
@@ -1248,7 +1281,7 @@ Item {
                     id: hintKeys
                     model: [ { k: "1–0", l: "jump" }, { k: "↑ ↓ ← →", l: "move" }, { k: "↵", l: "select" },
                              { k: "drag", l: "move window" }, { k: "type", l: "find" },
-                             { k: "ctrl+s", l: "scratchpad" }, { k: "esc", l: "close" } ]
+                             { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" }, { k: "esc", l: "close" } ]
                     Row {
                         required property var modelData
                         spacing: 5
