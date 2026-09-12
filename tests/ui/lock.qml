@@ -48,6 +48,12 @@ TestCase {
         for (var i = 0; i < view.boxes.length; i++) if (view.boxes[i].workspaceId === wsId) return view.boxes[i]
         return null
     }
+    function row(addr) {
+        for (var i = 0; i < view.testModel.count; i++)
+            if (view.testModel.get(i).address === addr) return view.testModel.get(i)
+        return null
+    }
+    function type(s) { for (var i = 0; i < s.length; i++) keyClick(s.charAt(i)) }
     function ctrlL() { keyClick("l", Qt.ControlModifier) }
 
     // Distinguishes: open() not installing, installing without syncing the loaded set, or
@@ -168,5 +174,118 @@ TestCase {
         var hints = view.testHintModel, found = false
         for (var i = 0; i < hints.length; i++) if (hints[i].k === "ctrl+l") found = true
         verify(found)
+    }
+    // Distinguishes: an invalidFile notification firing again on a re-emit within the same
+    // open (an echo), or never firing again after a fresh open.
+    function test_invalid_file_notified_once_per_open() {
+        view.testLocks.emitInvalid("bad json")
+        view.testLocks.emitInvalid("bad json")
+        compare(cmds().filter(function (c) { return c.indexOf("locks file ignored") >= 0 }).length, 1,
+                "reported at most once per open")
+        view.close(); view.open(); wait(400)
+        view.testLocks.emitInvalid("bad json")
+        compare(cmds().filter(function (c) { return c.indexOf("locks file ignored") >= 0 }).length, 2,
+                "a fresh open can report again")
+    }
+
+    function childNamed(item, name) {
+        var ch = item.children
+        for (var i = 0; i < ch.length; i++) if (ch[i].objectName === name) return ch[i]
+        return null
+    }
+    function canvasItems(name) {
+        var out = [], ch = view.testCanvas.children
+        for (var i = 0; i < ch.length; i++) if (ch[i].objectName === name) out.push(ch[i])
+        return out
+    }
+    function boxItemOf(wsId) {
+        var items = canvasItems("wsBox")
+        for (var i = 0; i < items.length; i++) if (items[i].model.workspaceId === wsId) return items[i]
+        return null
+    }
+    function badgeOf(wsId) {
+        var items = canvasItems("wsBadge")
+        for (var i = 0; i < items.length; i++) if (items[i].model.workspaceId === wsId) return items[i]
+        return null
+    }
+    // Distinguishes: the badge not showing the lock, or showing it on unarmed boxes.
+    function test_armed_box_shows_a_lock_badge_and_keeps_its_tiles() {
+        ctrlL()                                        // arms ws 1
+        verify(badgeOf(1).text.indexOf("\u{F033E}") >= 0, "lock glyph in the badge")
+        verify(badgeOf(2).text.indexOf("\u{F033E}") < 0)
+        verify(row("0xA") !== null, "not sharing: tiles stay")
+        compare(childNamed(boxItemOf(1), "lockGlyph").visible, false)
+    }
+    // Distinguishes: a placeholder box still holding a tile (a live capture) or hiding the glyph.
+    function test_share_turns_armed_boxes_into_placeholders() {
+        ctrlL()
+        view.testLocks.setSharing(true)
+        compare(row("0xA"), null, "no tile on the placeholder box")
+        verify(row("0xB") !== null, "unarmed box unaffected")
+        compare(childNamed(boxItemOf(1), "lockGlyph").visible, true)
+        compare(childNamed(boxItemOf(1), "wsNumeral").visible, false, "numeral hidden under the glyph")
+        view.testLocks.setSharing(false)
+        verify(row("0xA") !== null, "tiles return when the share ends")
+        compare(childNamed(boxItemOf(1), "lockGlyph").visible, false)
+    }
+    // Distinguishes: find still matching a window on a placeholder box. Positive control first.
+    function test_find_skips_placeholder_boxes_with_a_positive_control() {
+        type("chromium"); compare(view.matches.length, 1)
+        keyClick(Qt.Key_Escape)
+        ctrlL()
+        type("chromium"); compare(view.matches.length, 1, "armed but not sharing: still matches")
+        view.testLocks.setSharing(true)
+        compare(view.matches.length, 0, "placeholder: not in the input")
+        view.testLocks.setSharing(false)
+        compare(view.matches.length, 1, "back")
+    }
+    // Distinguishes: the selected match's box becoming a placeholder without the successor rule.
+    function test_selected_match_on_a_box_that_becomes_a_placeholder_falls_to_the_successor() {
+        var rows = view.compositor.workspaces.values
+        rows[1].toplevels.values.push({ lastIpcObject: client("0xC", "chromium2", "Chromium 2", 700, false) })
+        view.rebuild()
+        type("chromium")
+        compare(view.matches.length, 2); compare(view.selectedId, 1)
+        keyClick(Qt.Key_Escape); keyClick(Qt.Key_Escape)
+        // reopen not needed: select ws1, arm, query again
+        view.testLocks.loadArmed(["1"]); view.rebuild()
+        type("chromium"); compare(view.selectedMatchAddress, "0xA")
+        view.testLocks.setSharing(true)
+        compare(view.matches.length, 1); compare(view.selectedMatchAddress, "0xC"); compare(view.selectedId, 2)
+    }
+    function tileOf(addr) {
+        var ch = view.testCanvas.children
+        for (var i = 0; i < ch.length; i++) if (ch[i].model && ch[i].model.address === addr) return ch[i]
+        fail("no tile for " + addr)
+    }
+    function dragTo(addr, wsId) {
+        var t = tileOf(addr), p = t.mapToItem(tc, t.width / 2, t.height / 2)
+        var b = boxOf(wsId), goal = view.testCanvas.mapToItem(tc, b.x + b.w / 2, b.y + b.h / 2)
+        mousePress(tc, p.x, p.y, Qt.LeftButton)
+        mouseMove(tc, p.x + 12, p.y + 2, 20)
+        mouseMove(tc, goal.x, goal.y, 20)
+        mouseRelease(tc, goal.x, goal.y, Qt.LeftButton)
+    }
+    // Distinguishes: a drop onto a placeholder box creating an optimistic row (a live capture on
+    // a box that must show none) or not dispatching the move.
+    function test_drop_onto_a_placeholder_box_dispatches_but_keeps_no_tile() {
+        keyClick(Qt.Key_Right); ctrlL()                // arm ws 2
+        view.testLocks.setSharing(true)
+        var before = cmds().length
+        dragTo("0xA", 2)
+        compare(cmds().length, before + 1)
+        verify(cmds()[before].indexOf('workspace = "2"') >= 0)
+        compare(row("0xA").wsid, 1, "no optimistic move of the row")
+        compare(view.pendingMoves["0xA"], undefined, "no pending entry")
+    }
+    // Distinguishes: a pending drop's row surviving the box becoming a placeholder.
+    function test_pending_drop_row_is_dropped_when_the_box_becomes_a_placeholder() {
+        keyClick(Qt.Key_Right); ctrlL(); keyClick(Qt.Key_Left)   // arm ws 2, back on ws 1
+        dragTo("0xA", 2)
+        compare(row("0xA").wsid, 2, "optimistic row on ws 2 (not sharing yet)")
+        verify(view.pendingMoves["0xA"] !== undefined)
+        view.testLocks.setSharing(true)
+        compare(view.pendingMoves["0xA"], undefined, "pending cleared")
+        compare(row("0xA").wsid, 1, "row back on its authoritative workspace")
     }
 }

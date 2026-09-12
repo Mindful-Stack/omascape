@@ -126,7 +126,10 @@ Item {
     Connections {
         target: locks
         function onLoadedArmed() { root.lockSync(); if (root.opened) root.rebuild() }
-        function onSharingChanged() { if (root.opened) root.rebuild() }
+        // Unlike a loaded armed set (only enforcement-relevant until reopened), a share can
+        // start or stop while the overview sits closed-but-loaded, and stale placeholder state
+        // (windows, matches) must not survive to the next query — rebuild unconditionally.
+        function onSharingChanged() { root.rebuild() }
         function onWriteFailed(why) { Hyprland.dispatch(Logic.notifyLua("omyview: could not save locks: " + why)) }
         function onInvalidFile(why) {
             if (root.lockInvalidNotified) return
@@ -497,6 +500,14 @@ Item {
         var box = boxForWs(targetWs), mon = box ? _monByName[box.monitorName] : null
         var win = _windowByAddress[addr]
         if (!box || !mon || !win) return
+        if (box.placeholder) {                     // dispatch only: no optimistic row, no pending entry
+            var ppos = win.floating ? Logic.dropToWindowPos(dropX, dropY, box, mon, params, win) : null
+            if (ppos) Hyprland.dispatch(Logic.floatingMoveLua(addr, targetWs, ppos))
+            else Hyprland.dispatch('hl.dsp.window.move({ workspace = "' + Logic.wsSelector(targetWs) +
+                                   '", follow = false, window = "address:' + addr + '" })')
+            scheduleRebuild()
+            return
+        }
         var sourceWs = win.workspaceId // model.wsid may still be optimistic
         var tile = tileRectFor(addr)
         if (!win.floating && !win.grouped && tile && !Logic.isScratchpad(targetWs)) {
@@ -666,6 +677,7 @@ Item {
             var b = boxes[i]
             var row = { workspaceId: b.workspaceId, bx: b.x, by: b.y, bw: b.w, bh: b.h,
                         focused: !!b.focused, occupied: !!b.occupied,
+                        armed: !!b.armed, placeholder: !!b.placeholder,
                         // Reserved for the workspace-lock feature; nothing reads this yet.
                         special: b.special || "" }
             seen[b.workspaceId] = true
@@ -694,6 +706,11 @@ Item {
         var keepId = root.selectedId   // the workspace the user has selected, before layout
         buildHandles()
         var input = buildInput()
+        // A box that just became a placeholder must not keep an optimistic tile (it would be a
+        // live capture on a box that shows none): drop pending moves into it before applyTiles.
+        var ph = {}
+        for (var pw = 0; pw < input.workspaces.length; pw++) if (input.workspaces[pw].placeholder) ph[input.workspaces[pw].id] = true
+        for (var pa in pendingMoves) if (ph[pendingMoves[pa].workspaceId]) delete pendingMoves[pa]
         root._windows = input.windows
         var cmap = {}, tmap = {}, fmap = {}, wmap = {}
         for (var i = 0; i < input.windows.length; i++) {
@@ -1051,12 +1068,24 @@ Item {
                             Text {
                                 objectName: "wsNumeral"
                                 anchors.centerIn: parent
-                                visible: !boxItem.model.occupied
+                                visible: !boxItem.model.occupied && !boxItem.model.placeholder
                                 text: root.wsLabel(boxItem.model.workspaceId)
                                 color: root.foreground
                                 opacity: 0.10
                                 font.pixelSize: Math.round(boxItem.height * 0.45)
                                 font.weight: Font.DemiBold
+                            }
+                            // lock placeholder: the workspace is armed and a share is running —
+                            // no tiles are laid out, so the well shows only this glyph.
+                            Text {
+                                objectName: "lockGlyph"
+                                anchors.centerIn: parent
+                                visible: boxItem.model.placeholder
+                                text: "\u{F033E}"          // nf-md-lock
+                                color: root.foreground
+                                opacity: 0.25
+                                font.family: root.fontFamily
+                                font.pixelSize: Math.round(boxItem.height * 0.4)
                             }
                             MouseArea {   // click empty area of a workspace => jump
                                 anchors.fill: parent
@@ -1237,6 +1266,7 @@ Item {
                             id: badge
                             required property var model
                             objectName: "wsBadge"
+                            property alias text: badgeText.text
                             x: model.bx + 6; y: model.by + 6
                             Behavior on x { enabled: root.layoutMotion
                                 NumberAnimation { duration: root.motion.normal; easing.type: root.motion.move } }
@@ -1250,7 +1280,7 @@ Item {
                             Text {
                                 id: badgeText
                                 anchors.centerIn: parent
-                                text: root.wsLabel(badge.model.workspaceId)
+                                text: root.wsLabel(badge.model.workspaceId) + (badge.model.armed ? " \u{F033E}" : "")
                                 color: badge.model.focused ? root.background : root.foreground
                                 font.family: root.fontFamily
                                 font.pixelSize: root.labelSize

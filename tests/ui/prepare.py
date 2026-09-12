@@ -98,6 +98,7 @@ tile = tile[:start] + '    Rectangle { anchors.fill: parent; color: tile.bg }\n\
     '        if (r.changed) loadedArmed()\n'
     '    }\n'
     '    function setSharing(on) { sharing = on }\n'
+    '    function emitInvalid(why) { invalidFile(why) }\n'
     '    function toggle(sel) {\n'
     '        var next = Logic.toggleSelector(armed, sel)\n'
     '        if (next === null) return false\n'

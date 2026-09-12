@@ -935,6 +935,9 @@ TestCase {
     function test_applyLocksTo_ok() {
         var r = Logic.applyLocksTo(null, '{ "armed": ["3", "special:scratchpad"] }', "ok")
         compare(r.armed, ["3", "special:scratchpad"]); compare(r.changed, true); compare(r.error, null)
+        // A first load of an empty set must still count as a change — the start-up
+        // reconciliation sync depends on it firing even when nothing is armed.
+        compare(Logic.applyLocksTo(null, '{ "armed": [] }', "ok").changed, true)
     }
     // Distinguishes: every successful parse being reported as a change (a reload echo —
     // watchChanges/reload() re-emitting `loaded` with unchanged bytes — would then re-dispatch
