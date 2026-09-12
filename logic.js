@@ -843,25 +843,27 @@ function validLockSelector(sel) { return typeof sel === "string" && LOCK_SELECTO
 // $XDG_RUNTIME_DIR/omyview/share-state. Idempotent: re-running keeps the rules, the
 // subscription and the share counter. Dispatched at shell start, on configreloaded (a reload
 // drops every global) and at open().
+// The layer rule and the share observer are created FIRST, unconditionally inside the outer
+// pcall, before anything touches the filesystem: a broken $XDG_RUNTIME_DIR (or a write/rename
+// failure) must degrade only share detection, never the lock itself. `L.publish` is defined
+// unconditionally too (it reads L.dir at call time, so defining it before L.dir exists is
+// fine) — the observer's callback closes over it. The dir-creation-and-publish step runs in
+// its OWN inner pcall; on failure it is re-raised (`error(perr, 0)`) so the outer pcall's own
+// `ok, err` — which reportLua reads — carries the filesystem failure while the layer rule and
+// subscription it already created are left standing on `L`, unaffected by the raised error.
 function lockInstallLua() {
     return (
         'function()\n' +
         '  local ok, err = pcall(function()\n' +
         '    local L = _G.omyview_lock\n' +
         '    if not L then L = { rules = {}, sharing = 0, sub = nil, layer = nil, dir = nil }; _G.omyview_lock = L end\n' +
-        '    if not L.dir then\n' +
-        '      local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end\n' +
-        '      local dir = base .. "/omyview"\n' +
-        '      local r = os.execute("mkdir -p \'" .. dir .. "\'")\n' +
-        '      if r ~= true and r ~= 0 then error("mkdir failed") end\n' +
-        '      L.dir = dir\n' +
-        '    end\n' +
         '    function L.publish()\n' +
         '      local tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"\n' +
         '      local f = io.open(tmp, "w"); if not f then error("cannot write share-state") end\n' +
         '      local w = f:write(L.sharing > 0 and "1" or "0"); local c = f:close()\n' +
-        '      if not w or not c then error("write share-state failed") end\n' +
-        '      local rok, rerr = os.rename(tmp, dst); if not rok then error("rename share-state: " .. tostring(rerr)) end\n' +
+        '      if not w or not c then os.remove(tmp); error("write share-state failed") end\n' +
+        '      local rok, rerr = os.rename(tmp, dst)\n' +
+        '      if not rok then os.remove(tmp); error("rename share-state: " .. tostring(rerr)) end\n' +
         '    end\n' +
         '    if not L.layer then L.layer = hl.layer_rule({ name = "omyview-lock-layer", match = { namespace = "omyview" }, no_screen_share = true }) end\n' +
         '    if not (L.sub and L.sub:is_active()) then\n' +
@@ -870,7 +872,17 @@ function lockInstallLua() {
         '        if not sok then print("omyview: share observer failed: " .. tostring(serr)) end\n' +
         '      end)\n' +
         '    end\n' +
-        '    L.publish()\n' +
+        '    local pok, perr = pcall(function()\n' +
+        '      if not L.dir then\n' +
+        '        local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end\n' +
+        '        local dir = base .. "/omyview"\n' +
+        '        local r = os.execute("mkdir -p \'" .. dir .. "\'")\n' +
+        '        if r ~= true and r ~= 0 then error("mkdir failed") end\n' +
+        '        L.dir = dir\n' +
+        '      end\n' +
+        '      L.publish()\n' +
+        '    end)\n' +
+        '    if not pok then error(perr, 0) end\n' +
         '  end)\n' +
         '  ' + reportLua('lock install') + '\n' +
         'end'
@@ -880,7 +892,9 @@ function lockInstallLua() {
 // Reconcile the compositor's rule table with the full armed set: create (enabled) or re-enable
 // a named rule per armed selector, disable every other rule the table holds. Each step is
 // guarded on its own so one failure never leaves another selector unprotected; failures are
-// reported once, naming every selector that failed.
+// reported once, naming every selector that failed. A failed re-enable drops the dead handle
+// from L.rules (rather than leaving it there forever, unusable): the next sync that arms the
+// same selector sees no handle and creates a fresh rule instead of retrying a broken one.
 function lockSyncLua(armed) {
     var sels = []
     for (var i = 0; i < (armed || []).length; i++) if (validLockSelector(armed[i])) sels.push('"' + armed[i] + '"')
@@ -900,7 +914,8 @@ function lockSyncLua(armed) {
         '          r = hl.window_rule({ name = "omyview-lock-" .. sel, match = { workspace = sel }, no_screen_share = true, enabled = true })\n' +
         '          L.rules[sel] = r\n' +
         '        else\n' +
-        '          r:set_enabled(true)\n' +
+        '          local eok, eerr = pcall(function() r:set_enabled(true) end)\n' +
+        '          if not eok then L.rules[sel] = nil; error(eerr, 0) end\n' +
         '        end\n' +
         '      end)\n' +
         '    end\n' +

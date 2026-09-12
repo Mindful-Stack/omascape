@@ -98,26 +98,25 @@ per workspace, and the user chose to move it).
 All single-line guarded chunks in the existing style (`dispatchGuardLua`, `reportLua`), built in
 `logic.js`, parse- and behaviour-tested by `tests/lua-check.sh`.
 
-**`lockInstallLua()`** — idempotent:
+**`lockInstallLua()`** — idempotent. The layer rule and the share observer are created FIRST,
+unconditionally, before anything touches the filesystem, so a broken `$XDG_RUNTIME_DIR` (or a
+write/rename failure) degrades only share detection — never the lock rules themselves. The
+dir-creation-and-publish step runs in its own inner `pcall` and is re-raised on failure, so the
+outer `ok, err` (what `reportLua` reports) carries the filesystem failure while the layer rule
+and subscription created above it are left standing:
 ```lua
 local L = _G.omyview_lock
 if not L then
   L = { rules = {}, sharing = 0, sub = nil, layer = nil, dir = nil }
   _G.omyview_lock = L
 end
-if not L.dir then
-  local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end
-  local dir = base .. "/omyview"
-  local r = os.execute("mkdir -p '" .. dir .. "'")          -- once; Lua 5.4 returns true, 5.1 returns 0
-  if r ~= true and r ~= 0 then error("mkdir failed") end
-  L.dir = dir                                                -- assigned only on success, so a failed install can retry
-end
-function L.publish()
+function L.publish()                                          -- defined unconditionally; reads L.dir at call time
   local tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"
   local f = io.open(tmp, "w"); if not f then error("cannot write share-state") end
   local w = f:write(L.sharing > 0 and "1" or "0"); local c = f:close()
-  if not w or not c then error("write share-state failed") end
-  local ok, err = os.rename(tmp, dst); if not ok then error("rename share-state: " .. tostring(err)) end
+  if not w or not c then os.remove(tmp); error("write share-state failed") end
+  local ok, err = os.rename(tmp, dst)
+  if not ok then os.remove(tmp); error("rename share-state: " .. tostring(err)) end
 end
 if not L.layer then L.layer = hl.layer_rule({ name = "omyview-lock-layer", match = { namespace = "omyview" }, no_screen_share = true }) end
 if not (L.sub and L.sub:is_active()) then
@@ -128,7 +127,17 @@ if not (L.sub and L.sub:is_active()) then
     if not ok then print("omyview: share observer failed: " .. tostring(err)) end
   end)
 end
-L.publish()
+local pok, perr = pcall(function()                             -- filesystem step, isolated
+  if not L.dir then
+    local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end
+    local dir = base .. "/omyview"
+    local r = os.execute("mkdir -p '" .. dir .. "'")           -- once; Lua 5.4 returns true, 5.1 returns 0
+    if r ~= true and r ~= 0 then error("mkdir failed") end
+    L.dir = dir                                                 -- assigned only on success, so a failed install can retry
+  end
+  L.publish()
+end)
+if not pok then error(perr, 0) end                             -- re-raised so the outer ok, err (reportLua) sees it
 ```
 - `sharing` counts starts minus ends, clamped at 0. It only drives the placeholder; a stuck
   count shows the placeholder longer than needed, never exposes anything. An idempotent
@@ -136,8 +145,13 @@ L.publish()
   share already running when the observer is created is therefore not detected until the next
   share event: accepted false negative (enforcement does not depend on it).
 - `publish()` writes `1`/`0` atomically, checking write and close before the rename so a failed
-  write never replaces valid state; every install publishes the current value so a fresh shell
-  never reads a missing file for long.
+  write never replaces valid state, and removing the temp file on any failure (write, close, or
+  rename) so it never lingers; every install publishes the current value so a fresh shell never
+  reads a missing file for long.
+- The layer rule and observer subscription are created before the dir/publish step is attempted,
+  and are unaffected by its failure — a broken runtime directory (or a write/rename failure)
+  only means the share-state file goes stale or missing; the lock rules the layer rule and the
+  sync chunk maintain are never affected by it.
 
 **`lockSyncLua(armed)`** — `armed` is the full array of selectors (`"3"`, `"special:scratchpad"`):
 ```lua
@@ -152,7 +166,8 @@ for sel in pairs(want) do
       r = hl.window_rule({ name = "omyview-lock-" .. sel, match = { workspace = sel }, no_screen_share = true, enabled = true })
       L.rules[sel] = r
     else
-      r:set_enabled(true)
+      local eok, eerr = pcall(function() r:set_enabled(true) end)
+      if not eok then L.rules[sel] = nil; error(eerr, 0) end    -- drop the dead handle; the next sync recreates it
     end
   end)
 end
@@ -161,10 +176,12 @@ local ok, err = #failed == 0, table.concat(failed, "; ")
 -- reportLua('lock sync')   -- one report naming every selector that failed
 ```
 Every create/enable/disable is guarded on its own, so one failure never prevents the other
-selectors from being protected or stale rules from being disabled. `ARMED` is the array literal
-interpolated by the builder; **in JavaScript, before interpolation**, each selector must match
-`/^(\d+|special:[A-Za-z0-9_-]+)$/`; anything else is dropped from the chunk and reported via
-the notification path.
+selectors from being protected or stale rules from being disabled. A failed re-enable clears
+its selector's handle from `L.rules` rather than leaving a broken one there forever: the next
+sync that arms the same selector sees no handle and creates a fresh rule instead of retrying a
+handle that keeps throwing. `ARMED` is the array literal interpolated by the builder; **in
+JavaScript, before interpolation**, each selector must match `/^(\d+|special:[A-Za-z0-9_-]+)$/`;
+anything else is dropped from the chunk and reported via the notification path.
 
 **Rule semantics to prove in the plan's first task, on 0.56.2, with captured pixels** (not
 `is_enabled()`): create enabled → capture an existing window is black; `set_enabled(false)` →

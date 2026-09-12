@@ -6,6 +6,19 @@
 -- is a constant: tests assert dispatch order and end state, never geometry.
 -- A new dispatcher used by a chunk must be added to `hl.dsp` AND applied in `hl.dispatch`;
 -- never stub it as a no-op, or "ends tiled"-style checks become vacuous.
+--
+-- `hl.__fail_on` also drives the lock chunks' failure points, one string naming the single
+-- operation to break on the NEXT call to it (persists until changed; combine with `hl.__fail_sel`
+-- to target one selector): "window_rule" (hl.window_rule throws; scope with __fail_sel to one
+-- workspace selector), "rule.set_enabled" (any rule's set_enabled throws), "mkdir" (os.execute
+-- returns nil), "io.open" (returns nil), "io.write" (the open file's write returns nil),
+-- "io.close" (the open file's close returns nil, so nothing commits to hl.__files), "rename"
+-- (os.rename returns nil, err). `hl.__runtime_dir` overrides the fake XDG_RUNTIME_DIR (default
+-- "/run/user/1000"). `hl.__os`/`hl.__io` are the fakes tst_chunks.lua's `run()` installs in
+-- place of the real `os`/`io` inside a chunk's environment; each falls through to the real
+-- library (via `__index`) for anything not faked here. `hl.__env` is a per-mock cache of that
+-- environment (see tst_chunks.lua's `envFor`) — a fresh `Mock.new()` per test case is what
+-- keeps `_G` (and so `_G.omyview_lock`) from leaking between cases.
 local M = {}
 
 function M.new(opts)
@@ -67,20 +80,23 @@ function M.new(opts)
     return sub
   end
   -- Fake os/io: an in-memory filesystem so the observer's publish can be asserted without disk.
+  -- Both fall through to the real os/io library (via __index) for anything not faked here, so
+  -- a chunk calling e.g. os.time still works even though this mock never anticipated it.
   hl.__files, hl.__mkdirs = {}, {}
-  hl.__os = {
+  hl.__os = setmetatable({
     getenv = function(k) if k == "XDG_RUNTIME_DIR" then return hl.__runtime_dir or "/run/user/1000" end return nil end,
     execute = function(cmd) hl.__mkdirs[#hl.__mkdirs + 1] = cmd; if hl.__fail_on == "mkdir" then return nil end; return true end,
     rename = function(a, b) if hl.__fail_on == "rename" then return nil, "injected rename failure" end; hl.__files[b] = hl.__files[a]; hl.__files[a] = nil; return true end,
-  }
-  hl.__io = {
+    remove = function(path) hl.__files[path] = nil; return true end,
+  }, { __index = os })
+  hl.__io = setmetatable({
     open = function(path, mode)
       if hl.__fail_on == "io.open" then return nil end
       local buf = {}
-      return { write = function(self, s) buf[#buf + 1] = s; return self end,
-               close = function() hl.__files[path] = table.concat(buf); return true end }
+      return { write = function(self, s) if hl.__fail_on == "io.write" then return nil end; buf[#buf + 1] = s; return self end,
+               close = function() if hl.__fail_on == "io.close" then return nil end; hl.__files[path] = table.concat(buf); return true end }
     end,
-  }
+  }, { __index = io })
 
   -- Typed dispatcher table: each entry returns a descriptor; hl.dispatch applies it.
   local function d(name) return function(args) return { name = name, args = args } end end

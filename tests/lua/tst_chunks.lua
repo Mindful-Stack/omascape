@@ -221,7 +221,7 @@ case("scratchpad focus: focus throws → one notification, bring_to_top never ru
   eq(hl.__seen["window.bring_to_top"], nil, "bring_to_top never ran")
 end)
 
-local function state(hl) return hl.__files[(hl.__runtime_dir or "/run/user/1000") .. "/omyview/share-state"] end
+local function state(hl) return hl.__files[hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state"] end
 -- Distinguishes: a non-idempotent install (two layer rules / two subscriptions) or one that
 -- never publishes.
 case("lock install is idempotent and publishes 0", function()
@@ -268,6 +268,8 @@ case("share events publish 1/0 with a clamped counter and never touch rules", fu
   eq(state(hl), "1", "two starts, one end: still sharing")
   Mock.fire(hl, "screenshare.state", false, 0, "HDMI-A-1"); eq(state(hl), "0")
   Mock.fire(hl, "screenshare.state", false, 0, "eDP-1"); eq(state(hl), "0", "clamped at 0")
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  eq(state(hl), "1", "one start after the clamp is a share again (unclamped would be 0)")
   eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true, "rules untouched by share events")
 end)
 -- Distinguishes: one failing selector aborting the rest (a single pcall around both loops).
@@ -288,11 +290,27 @@ case("lock sync still disables stale rules when an enable throws", function()
   hl.__fail_on = nil
   run("LOCK_SYNC_NONE", hl)
   eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), false)
+  eq(Mock.ruleNamed(hl, "omyview-lock-special:scratchpad"):is_enabled(), false, "scratchpad also disabled")
+  eq(#hl.__notifications, 1, "the clean retry reports nothing new")
+end)
+-- Distinguishes: a dead handle left in L.rules after a failed re-enable (a later re-arm would
+-- keep retrying the same broken rule instead of creating a fresh one).
+case("lock sync drops a dead handle after a failed re-enable, so re-arm creates a fresh rule", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  run("LOCK_SYNC_3", hl)
+  hl.__fail_on = "rule.set_enabled"
+  run("LOCK_SYNC_3", hl)
+  eq(#hl.__notifications, 1, "reported")
+  hl.__fail_on = nil
+  run("LOCK_SYNC_3", hl)
+  eq(#hl.__window_rules, 2, "dead handle dropped, a new rule was created")
+  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true)
 end)
 -- Distinguishes: sync before install silently doing nothing.
 case("lock sync before install reports", function()
   local hl = Mock.new({}); run("LOCK_SYNC_3", hl)
   eq(#hl.__notifications, 1); eq(#hl.__window_rules, 0)
+  assert(hl.__notifications[1].text:find("lock not installed", 1, true), "names the reason")
 end)
 -- Distinguishes: a failed mkdir poisoning L.dir (a later install could never retry), and a
 -- failed write replacing valid state.
@@ -300,12 +318,34 @@ case("lock install: mkdir failure is reported and retried; write failure leaves 
   local hl = Mock.new({})
   hl.__fail_on = "mkdir"; run("LOCK_INSTALL", hl)
   eq(#hl.__notifications, 1, "mkdir failure reported"); eq(state(hl), nil, "nothing published")
+  -- The layer rule and the observer are created before the dir/publish step ever runs, so a
+  -- broken runtime dir must not take them down with it.
+  eq(#hl.__layer_rules, 1, "layer rule exists despite mkdir failure"); eq(#hl.__subs, 1)
   hl.__fail_on = nil; run("LOCK_INSTALL", hl)
   eq(state(hl), "0", "retry succeeded"); eq(#hl.__mkdirs, 2, "mkdir attempted again")
   hl.__fail_on = "io.open"; Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  -- 2, not 1: the earlier mkdir failure already logged one line via reportLua; this is the
-  -- observer's own (separate) failure log, on top of it.
-  eq(state(hl), "0", "failed write did not replace the state"); eq(#hl.__printed, 2, "observer failure logged")
+  eq(state(hl), "0", "failed write did not replace the state")
+  -- [2], not a count: the earlier mkdir failure already logged one line via reportLua; this is
+  -- the observer's own (separate) failure log, on top of it.
+  assert(hl.__printed[2] and hl.__printed[2]:find("share observer failed", 1, true), "observer failure logged")
+end)
+-- Distinguishes: a close failure silently committing the temp file's content as if it were the
+-- real state, or leaving the temp file behind instead of cleaning it up.
+case("lock install: publish close failure leaves state intact and is logged", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  hl.__fail_on = "io.close"
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  eq(state(hl), "0", "no rename happened")
+  assert(hl.__printed[#hl.__printed]:find("share observer failed", 1, true), "observer failure logged")
+end)
+-- Distinguishes: a rename failure silently committing state (or the write not being cleaned up
+-- when the rename that would have published it fails).
+case("lock install: publish rename failure leaves state intact and is logged", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  hl.__fail_on = "rename"
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  eq(state(hl), "0", "no rename happened")
+  assert(hl.__printed[#hl.__printed]:find("share observer failed", 1, true), "observer failure logged")
 end)
 
 if failures > 0 then io.stderr:write(failures .. " Lua chunk test(s) failed\n"); os.exit(1) end
