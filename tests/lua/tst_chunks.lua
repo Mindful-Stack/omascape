@@ -358,5 +358,15 @@ case("lock install: publish rename failure leaves state intact and is logged", f
   assert(hl.__printed[#hl.__printed]:find("share observer failed", 1, true), "observer failure logged")
 end)
 
+-- Distinguishes: a notify builder that interpolates raw text into the chunk (a backslash or a
+-- quote would break out of the Lua string, or a real newline would break the single-line
+-- chunk) instead of escaping/flattening it first.
+case("notification text round-trips a backslash, a quote and a newline safely", function()
+  local hl = Mock.new({})
+  run("NOTIFY", hl)
+  eq(#hl.__notifications, 1, "one notification")
+  eq(hl.__notifications[1].text, 'bad \\ " line break')
+end)
+
 if failures > 0 then io.stderr:write(failures .. " Lua chunk test(s) failed\n"); os.exit(1) end
 print("PASS: Lua chunk behaviour suite")

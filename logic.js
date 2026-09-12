@@ -943,3 +943,53 @@ function parseLocks(raw) {
     }
     return { ok: true, armed: out }
 }
+
+// Reduce a locks-file load result onto the current `armed` value. `status` is "ok" (raw holds
+// the file's fresh text), "missing" (the file does not exist: resolves to [] once, on the first
+// load only — a later "missing" load, e.g. the user deleted the file, keeps the last valid set)
+// or "error:<text>" (any other read/parse failure: keeps the previous value — still null if this
+// is the first load — and reports it). Returns { armed, changed, error }: `armed` is the value
+// the caller should store, `changed` says whether a `loadedArmed()`-style signal is due, `error`
+// is set (a string) when the file should be reported as unreadable/invalid.
+function applyLocksTo(current, raw, status) {
+    if (status === "missing") {
+        if (current === null) return { armed: [], changed: true, error: null }
+        return { armed: current, changed: false, error: null }
+    }
+    if (status !== "ok") {
+        var text = status.indexOf("error:") === 0 ? status.slice(6) : status
+        return { armed: current, changed: false, error: text }
+    }
+    var parsed = parseLocks(raw)
+    if (!parsed.ok) return { armed: current, changed: false, error: parsed.error }
+    return { armed: parsed.armed, changed: true, error: null }
+}
+
+// Toggle `sel` in `armed`. Returns a new array, or `null` when the toggle must be refused
+// (armed is unresolved, or the selector fails validation) — the caller treats null as "did
+// nothing" and must not sync or write.
+function toggleSelector(armed, sel) {
+    if (armed === null || !validLockSelector(sel)) return null
+    var next = armed.slice(); var i = next.indexOf(sel)
+    if (i >= 0) next.splice(i, 1); else next.push(sel)
+    return next
+}
+
+// One-line, pcall-guarded chunk that shows a Hyprland notification. Every value that reaches
+// here (a Quickshell FileView error, a JSON parse error) is untrusted text, so it is escaped
+// rather than interpolated raw: backslashes and quotes first (order matters — escaping the
+// quote first would double-escape the backslash it just introduced), then newlines/tabs
+// flattened to a single space (the chunk itself must stay single-line), then truncated so one
+// bad string cannot make the chunk unreasonably large or unreadable in a log.
+function notifyLua(text) {
+    var t = String(text === undefined || text === null ? "" : text)
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, "\\\"")
+        .replace(/[\n\r\t]+/g, " ")
+    if (t.length > 200) t = t.slice(0, 200)
+    return (
+        'function()\n' +
+        '  pcall(function() hl.notification.create({ text = "' + t + '", duration = 4000, icon = "error" }) end)\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}

@@ -22,20 +22,28 @@ QtObject {
     function isArmed(sel) { return armed !== null && armed.indexOf(sel) >= 0 }
     function placeholder(sel) { return isArmed(sel) && sharing }
 
-    // Parse the locks file. A malformed file keeps the previous value (still null on a first
-    // load) and is reported; a missing file resolves to [] (first run).
-    function applyLocks(raw, missing) {
-        if (missing) { if (armed === null) { armed = []; loadedArmed() } return }
-        var parsed = Logic.parseLocks(raw)
-        if (!parsed.ok) { invalidFile(parsed.error); return }
-        armed = parsed.armed
-        loadedArmed()
+    // Re-read both files. Quickshell's FileView watches the file's *parent directory*, not the
+    // file itself: if that directory does not exist at FileView creation (every fresh login,
+    // before the compositor's install chunk has run `mkdir -p $XDG_RUNTIME_DIR/omyview`), the
+    // watch never attaches, and no `fileChanged` ever fires for it later, even once the
+    // directory and file show up. Overview.qml calls this once, ~400ms after every
+    // lockInstall(), by which point the directory very likely exists.
+    function refresh() { stateFile.reload(); locksFile.reload() }
+
+    // Reduce a load result onto `armed` (see Logic.applyLocksTo): `status` is "ok" (raw holds
+    // the file's fresh text), "missing" (resolves to [] once, on the first load only) or
+    // "error:<text>" (keeps the previous value — still null on a first load — and reports it).
+    function applyLocks(raw, status) {
+        var r = Logic.applyLocksTo(armed, raw, status)
+        armed = r.armed
+        if (r.error) invalidFile(r.error)
+        if (r.changed) loadedArmed()
     }
-    // Memory first, then disk. Returns false while unresolved (the caller skips the sync).
+    // Memory first, then disk. Returns false while unresolved or the selector is invalid (the
+    // caller skips the sync).
     function toggle(sel) {
-        if (armed === null || !Logic.validLockSelector(sel)) return false
-        var next = armed.slice(); var i = next.indexOf(sel)
-        if (i >= 0) next.splice(i, 1); else next.push(sel)
+        var next = Logic.toggleSelector(armed, sel)
+        if (next === null) return false
         armed = next
         locksFile.setText(JSON.stringify({ armed: next }, null, 2) + "\n")
         return true
@@ -46,10 +54,17 @@ QtObject {
         watchChanges: true
         atomicWrites: true
         printErrors: false
-        onLoaded: locks.applyLocks(text(), false)
-        onLoadFailed: function (error) { locks.applyLocks("", true) }
+        onLoaded: locks.applyLocks(text(), "ok")
+        // FileViewError distinguishes "no such file" (first run: resolves to []) from every
+        // other failure (permission, a directory in its place, …): those must NOT be treated as
+        // "missing", or a merely-unreadable file would silently reset armed to [] and disable
+        // every rule the compositor holds.
+        onLoadFailed: function (error) {
+            locks.applyLocks("", error === FileViewError.FileNotFound
+                                  ? "missing" : "error:" + FileViewError.toString(error))
+        }
         onFileChanged: reload()
-        onSaveFailed: function (error) { locks.writeFailed(String(error)) }
+        onSaveFailed: function (error) { locks.writeFailed(FileViewError.toString(error)) }
     }
     property FileView stateFile: FileView {
         path: locks.statePath

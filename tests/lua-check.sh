@@ -43,6 +43,8 @@ TestCase {
         console.log("CHUNK LOCK_SYNC_3 " + Logic.lockSyncLua(["3"]))
         console.log("CHUNK LOCK_SYNC_3_SCRATCH " + Logic.lockSyncLua(["3", "special:scratchpad"]))
         console.log("CHUNK LOCK_SYNC_NONE " + Logic.lockSyncLua([]))
+        var badText = "bad \\\\ \" line\nbreak"
+        console.log("CHUNK NOTIFY " + Logic.notifyLua(badText))
     }
 }
 EOF
@@ -58,8 +60,8 @@ QT_QPA_PLATFORMTHEME=generic QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1
 sed -n 's/^.*CHUNK //p' "$fixture/qml.out" > "$fixture/chunks.txt"
 
 count=$(grep -c . "$fixture/chunks.txt" || true)
-if [ "$qml_status" -ne 0 ] || [ "$count" -lt 11 ]; then
-  echo "FAIL: $RUNNER exited $qml_status; expected 11 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
+if [ "$qml_status" -ne 0 ] || [ "$count" -lt 12 ]; then
+  echo "FAIL: $RUNNER exited $qml_status; expected 12 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
   echo "--- raw qml output:" >&2; cat "$fixture/qml.out" >&2
   exit 1
 fi

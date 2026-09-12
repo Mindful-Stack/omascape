@@ -194,11 +194,19 @@ rules are named for that reason.
 
 **State.** `OmyviewLocks.qml` (new, beside `OmyviewConfig.qml`): a watched `FileView` on the
 locks file. `armed: var` is **null until the first load resolves** ("unresolved"), then an array
-of selectors. A missing file resolves to `[]` (first run). A malformed file keeps the previous
+of selectors. `onLoadFailed` distinguishes `FileViewError.FileNotFound` from every other error
+(permission, a directory in its place, a transient I/O failure, …) via the `FileViewError` enum
+(`Quickshell.Io`) — a missing file resolves to `[]` once, on the first load only (a *later*
+"missing" load, e.g. the file was deleted after a successful read, keeps the in-memory set); any
+other error, and a malformed (parseable-but-invalid or unparseable) file, keeps the previous
 value — still null if it was the first load — and is reported once via the notification path.
-`toggle(sel)` is a no-op while unresolved. A second watched `FileView` on the share-state file
-exposes `sharing: bool` (`"1"`), false when missing or unreadable. `placeholder(sel) = armed !==
-null && armed.includes(sel) && sharing`.
+The reducer (`Logic.applyLocksTo(current, raw, status)`, status one of `"ok"` / `"missing"` /
+`"error:<text>"`) is pure and shared between the component and its offscreen test stub, so both
+agree on this. `toggle(sel)` is a no-op while unresolved or `sel` fails
+`Logic.validLockSelector` (shared as `Logic.toggleSelector(armed, sel)`, which returns the next
+array or `null` to mean "refused"). A second watched `FileView` on the share-state file exposes
+`sharing: bool` (`"1"`), false when missing or unreadable. `placeholder(sel) = armed !== null &&
+armed.includes(sel) && sharing`.
 
 **Persistence ordering in `toggle(sel)`:** update the in-memory `armed` first, dispatch
 `lockSyncLua(armed)` immediately (the compositor is the enforcement; it must not wait for disk),
@@ -218,6 +226,13 @@ no sync is sent, so a shell restart can never disable rules the compositor still
 `FileView` loads asynchronously; the retained rules keep protecting until the file is read).
 All dispatches are idempotent. Installation is not awaited: `Hyprland.dispatch` is fire-and-forget
 and there is no completion barrier before `open()` maps the surface (see Edge cases).
+
+Quickshell's `FileView` watches the file's *parent directory*, not the file itself: if that
+directory does not exist at `FileView` creation, the watch never attaches, and no `fileChanged`
+ever fires for it later even once the directory and file show up (see Edge cases, "Shell start
+before the runtime dir exists"). `OmyviewLocks.refresh()` (`stateFile.reload(); locksFile.reload()`)
+re-attaches it; `lockInstall()` restarts a 400ms `Timer` that calls it, and `open()` also calls it
+directly (after `lockInstall(); lockSync()`) as a belt-and-braces re-attach on every summon.
 
 **Keys.** Chord branch: `Ctrl+L` → `locks.toggle(Logic.wsSelector(selectedId))` when
 `Logic.hasWs(selectedId)`, then sync. Works with or without a query.
@@ -264,8 +279,28 @@ the input → `endDrag()`" check.
 - **Compositor crash leaving `share-state` = `1`**: the next install publishes `0` (counter
   resets). Until then the overview shows placeholders for armed boxes — a false positive, never
   a leak.
-- **Locks file missing/malformed**: keep the last valid set (empty on first run); report once;
-  the next toggle writes a fresh file.
+- **Shell start before the runtime dir exists**: `$XDG_RUNTIME_DIR/omyview` (holding
+  `share-state`) does not exist until the install chunk's `mkdir -p` runs — asynchronously, after
+  the `FileView` on it is already constructed. Quickshell watches a `FileView`'s *parent
+  directory*; a directory that is missing at construction means the watch never attaches, so
+  every later write to `share-state` (a share starting or ending) would go unseen for the rest of
+  the session, with no error — nothing fails, it just silently never updates. Mitigated by
+  `OmyviewLocks.refresh()` (`reload()` on both files, re-attaching the watch), called ~400ms
+  after every `lockInstall()` (a `Timer`, giving the directory time to appear) and once more
+  directly in `open()`. Applies in principle to the locks file's own directory too
+  (`~/.config/omarchy/`), but that directory is created well before omyview ever runs (Omarchy's
+  own config layout), so it is not observed to be missing in practice — `refresh()` covers it for
+  free regardless.
+- **Locks file missing on the first load**: resolves to `[]` (first run). **Missing on a later
+  load** (the user deleted the file after a successful read): the in-memory set is kept, not
+  reset to `[]` — only a first, never-yet-resolved load may treat "missing" as "empty".
+  **Malformed, or any other read error, on the first load**: `armed` stays null (still
+  unresolved); reported once via the notification path; `toggle` remains a no-op, and
+  `lockToggleSelected()` tells the user once per open why Ctrl+L is doing nothing ("omyview:
+  locks file unreadable — fix or delete ~/.config/omarchy/omyview-locks.json") rather than
+  silently swallowing the keypress. **Malformed, or any other read error, on a later load**: the
+  last valid set is kept and enforced; reported once; the next successful write (the next
+  accepted toggle) replaces the file with a fresh, valid one.
 - **A selector whose workspace does not exist**: kept in the file and in the rule table; the
   rule matches nothing until the workspace returns; the badge shows only when its box exists.
 - **Pinned windows**: reported on the workspace they were pinned from; whether a pinned window
@@ -289,9 +324,18 @@ the input → `endDrag()`" check.
   selector still created/enabled and every stale rule still disabled (per-step pcall); a
   failed mkdir → install reports and `L.dir` stays unset so the next install retries; a failed
   write → no rename (state file unchanged);
-  invalid selector dropped and reported; `os.rename` failing → reported.
+  invalid selector dropped and reported; `os.rename` failing → reported; `Logic.notifyLua(text)`
+  round-trips a backslash, a quote and a newline into a single valid Lua string (escaped, then
+  flattened) rather than breaking the chunk or losing the character.
 - **Tier 1, `tests/tst_layout.qml`**: a `placeholder` workspace yields a box with
-  `placeholder: true` and no tiles; an `armed` one without placeholder is unchanged.
+  `placeholder: true` and no tiles; an `armed` one without placeholder is unchanged;
+  `Logic.parseLocks` accepts a valid file (de-duplicated) and rejects a non-object, a missing
+  `armed` array and a bad selector; `Logic.applyLocksTo(current, raw, status)` — missing on the
+  first load → `[]`, changed; missing later → `current` kept, unchanged; an error or a malformed
+  file on the first load → still `null`, reported; the same later → the previous value kept,
+  reported; `"ok"` with a valid file → parsed, changed; `Logic.toggleSelector(armed, sel)` adds,
+  removes, and returns `null` (refused) for `null` armed or an invalid selector, without
+  mutating its input.
 - **Offscreen UI (`tests/ui/lock.qml`)**, with prepare.py replacing `OmyviewLocks.qml` by a
   stub (the fixture has no Quickshell.Io) whose `armed` starts null and offers `loadArmed`,
   `setSharing` and recorded `writes` — real file watching and atomic writes are live-check
@@ -307,7 +351,11 @@ the input → `endDrag()`" check.
   event re-dispatches install + sync; **no sync is dispatched before the locks file has
   loaded** (the fixture delays the load and asserts the dispatch list holds only the install);
   a write failure (unwritable path) is reported and the in-memory set still drives the badge
-  and the sync.
+  and the sync; open() installs and syncs the loaded set exactly once each, install before sync
+  (pinned by index, on a view built and reset right before that one `open()` call); a toggle
+  attempted while unresolved reports "locks file unreadable" once per open, not once per
+  keypress; a padded (synthetic, empty) workspace still carries `armed`/`placeholder` so an
+  otherwise-empty workspace can be armed and keeps its badge.
 - **Live (plan's first task, before any UI work)**: the rule-semantics sequence above with
   `grim` captures inspected as pixels (an unarmed workspace as positive control). (The
   `configreloaded` event name and the loss of globals on reload are already verified.) **Live (final)**: a

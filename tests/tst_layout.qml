@@ -908,5 +908,43 @@ TestCase {
         compare(Logic.parseLocks('{ "armed": ["x y"] }').ok, false)
         compare(Logic.parseLocks('{}').ok, false)
     }
+    // Distinguishes: a load reducer that treats every "missing" status the same regardless of
+    // whether armed has already resolved — a later missing load (the file was deleted after a
+    // successful first read) must keep the in-memory set, not silently disarm it.
+    function test_applyLocksTo_missing() {
+        var first = Logic.applyLocksTo(null, "", "missing")
+        compare(first.armed, []); compare(first.changed, true); compare(first.error, null)
+        var later = Logic.applyLocksTo(["3"], "", "missing")
+        compare(later.armed, ["3"]); compare(later.changed, false); compare(later.error, null)
+    }
+    // Distinguishes: a read error (permission, a directory in its place, …) mistaken for
+    // "missing" — that would silently disarm every rule the compositor holds.
+    function test_applyLocksTo_error() {
+        var first = Logic.applyLocksTo(null, "", "error:boom")
+        compare(first.armed, null); compare(first.changed, false); compare(first.error, "boom")
+        var later = Logic.applyLocksTo(["3"], "", "error:boom")
+        compare(later.armed, ["3"]); compare(later.changed, false); compare(later.error, "boom")
+    }
+    // Distinguishes: a malformed file's parse error not surfacing, or clobbering a good set.
+    function test_applyLocksTo_malformed() {
+        var first = Logic.applyLocksTo(null, "nope", "ok")
+        compare(first.armed, null); compare(first.changed, false); verify(first.error)
+        var later = Logic.applyLocksTo(["3"], "nope", "ok")
+        compare(later.armed, ["3"]); compare(later.changed, false); verify(later.error)
+    }
+    function test_applyLocksTo_ok() {
+        var r = Logic.applyLocksTo(null, '{ "armed": ["3", "special:scratchpad"] }', "ok")
+        compare(r.armed, ["3", "special:scratchpad"]); compare(r.changed, true); compare(r.error, null)
+    }
+    // Distinguishes: a toggle that mutates in place (aliasing the caller's array) or accepts an
+    // unresolved/invalid selector.
+    function test_toggleSelector() {
+        var armed = ["3"]
+        var next = Logic.toggleSelector(armed, "3")
+        compare(next, []); compare(armed, ["3"], "the input array is untouched")
+        compare(Logic.toggleSelector([], "3"), ["3"])
+        compare(Logic.toggleSelector(null, "3"), null, "refuses while unresolved")
+        compare(Logic.toggleSelector([], "bad selector"), null, "refuses an invalid selector")
+    }
 
 }

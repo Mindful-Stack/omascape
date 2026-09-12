@@ -89,15 +89,30 @@ Item {
 
     OmyviewConfig { id: config }
     OmyviewLocks { id: locks }
+    // "Reported once per open": a toggle attempted while the locks file is still unresolved
+    // (never loaded, or stuck on a malformed file) is a no-op; without feedback the user just
+    // sees Ctrl+L do nothing. Reset in open() so a later, working open() can warn again.
+    property bool lockUnresolvedNotified: false
     // Enforcement lives in the compositor; these keep it in step with the armed set. Install is
     // idempotent and cheap; sync is sent only once `armed` has resolved (never an unresolved set).
-    function lockInstall() { Hyprland.dispatch(Logic.lockInstallLua()) }
+    function lockInstall() {
+        Hyprland.dispatch(Logic.lockInstallLua())
+        lockRefreshTimer.restart()
+    }
     function lockSync() {
         if (locks.armed === null) return
         Hyprland.dispatch(Logic.lockSyncLua(locks.armed))
     }
     function lockToggleSelected() {
         if (!Logic.hasWs(selectedId)) return
+        if (locks.armed === null) {
+            if (!lockUnresolvedNotified) {
+                lockUnresolvedNotified = true
+                Hyprland.dispatch(Logic.notifyLua(
+                    "omyview: locks file unreadable — fix or delete ~/.config/omarchy/omyview-locks.json"))
+            }
+            return
+        }
         if (!locks.toggle(Logic.wsSelector(selectedId))) return
         lockSync()
         rebuild()
@@ -106,9 +121,16 @@ Item {
         target: locks
         function onLoadedArmed() { root.lockSync(); if (root.opened) root.rebuild() }
         function onSharingChanged() { if (root.opened) root.rebuild() }
-        function onWriteFailed(why) { Hyprland.dispatch('hl.notification.create({ text = "omyview: could not save locks: ' + String(why).replace(/"/g, "'") + '", duration = 4000, icon = "error" })') }
-        function onInvalidFile(why) { Hyprland.dispatch('hl.notification.create({ text = "omyview: locks file ignored: ' + String(why).replace(/"/g, "'") + '", duration = 4000, icon = "error" })') }
+        function onWriteFailed(why) { Hyprland.dispatch(Logic.notifyLua("omyview: could not save locks: " + why)) }
+        function onInvalidFile(why) { Hyprland.dispatch(Logic.notifyLua("omyview: locks file ignored: " + why)) }
     }
+    // Quickshell's FileView watches the file's *parent directory*, not the file itself: if
+    // $XDG_RUNTIME_DIR/omyview does not exist yet (every fresh login, before the compositor's
+    // install chunk has run its `mkdir -p`), the watch never attaches, and share-state changes
+    // go unseen for the rest of the session — reload() is the only thing that re-attaches it.
+    // Restarting this timer on every lockInstall() re-reads both files ~400ms later, by which
+    // point the directory has had time to appear, so watchChanges starts working from then on.
+    Timer { id: lockRefreshTimer; interval: 400; onTriggered: locks.refresh() }
     Component.onCompleted: lockInstall()           // shell start, before any open
 
     // Motion vocabulary. Every duration and easing in the picker comes from here; tiles get it
@@ -234,14 +256,26 @@ Item {
             }
         }
         // Hyprland drops an emptied special workspace; the row is still a place to drop windows.
-        if (scratchpadShown && !haveScratch)
+        if (scratchpadShown && !haveScratch) {
+            wsSel = Logic.wsSelector(Logic.SCRATCHPAD_ID)
             wss.push({ id: Logic.SCRATCHPAD_ID, monitorName: focusedMonitorName, special: "scratchpad",
                        focused: false, occupied: false,
-                       armed: locks.isArmed(Logic.wsSelector(Logic.SCRATCHPAD_ID)),
-                       placeholder: locks.placeholder(Logic.wsSelector(Logic.SCRATCHPAD_ID)) })
-        return { monitors: mons,
-                 workspaces: Logic.padWorkspaces(wss, config.workspaces, focusedMonitorName),
-                 windows: wins, focusedMonitorName: focusedMonitorName,
+                       armed: locks.isArmed(wsSel), placeholder: locks.placeholder(wsSel) })
+        }
+        // padWorkspaces() fills gaps with synthetic (empty) records that carry no armed/
+        // placeholder flags: without this, arming an empty workspace shows no badge, and a
+        // formerly-armed workspace loses its badge the instant its last window closes and it
+        // becomes a pad slot instead of a real record.
+        var padded = Logic.padWorkspaces(wss, config.workspaces, focusedMonitorName)
+        for (var pi = 0; pi < padded.length; pi++) {
+            var pw = padded[pi]
+            if (pw.armed === undefined) {
+                var pwSel = Logic.wsSelector(pw.id)
+                pw.armed = locks.isArmed(pwSel); pw.placeholder = locks.placeholder(pwSel)
+            }
+        }
+        return { monitors: mons, workspaces: padded, windows: wins,
+                 focusedMonitorName: focusedMonitorName,
                  availW: root.availCanvasW, params: root.params }
     }
 
@@ -716,7 +750,8 @@ Item {
         if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
         config.probeMotion()                       // async; result lands for this or the next open
         targetScreen = focusedScreen(); hideScratchpad(); selectedIndex = -1; opened = true
-        lockInstall(); lockSync()
+        lockUnresolvedNotified = false
+        lockInstall(); lockSync(); locks.refresh()
         resetFind()
         _showVisuals(true)                         // before the first rebuild: layout motion is gated on it
         rebuild()          // instant paint from current data

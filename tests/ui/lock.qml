@@ -48,20 +48,29 @@ TestCase {
         for (var i = 0; i < view.boxes.length; i++) if (view.boxes[i].workspaceId === wsId) return view.boxes[i]
         return null
     }
-    function row(addr) {
-        for (var i = 0; i < view.testModel.count; i++)
-            if (view.testModel.get(i).address === addr) return view.testModel.get(i)
-        return null
-    }
-    function type(s) { for (var i = 0; i < s.length; i++) keyClick(s.charAt(i)) }
     function ctrlL() { keyClick("l", Qt.ControlModifier) }
 
-    // Distinguishes: open() not installing, or installing without syncing the loaded set.
+    // Distinguishes: open() not installing, installing without syncing the loaded set, or
+    // installing/syncing more than once per open(). Builds its own view (rather than reusing
+    // `view` from init()) so `commands` can be reset right after the stub "loads" and before
+    // open() runs — pinning exactly what open() itself dispatches, nothing from
+    // Component.onCompleted or loadArmed().
     function test_open_installs_then_syncs_the_loaded_set() {
-        verify(installs() >= 1, "install dispatched")
-        verify(syncs().length >= 1, "sync dispatched after the file loaded")
-        verify(lastSync().indexOf("local ARMED = {}") >= 0)
-        verify(cmds().indexOf(lastSync()) > cmds().indexOf(cmds().filter(function (c) { return c.indexOf("omyview-lock-layer") >= 0 })[0]), "install before sync")
+        var v = createTemporaryObject(overview, tc); v.motion.scale = 0; seed(v)
+        v.testLocks.loadArmed([])          // the file has loaded: empty set
+        v.compositor.commands = []         // drop Component.onCompleted's install and loadArmed's sync
+        v.open(); wait(400)
+        var c = v.compositor.commands
+        var installIdx = -1, syncIdx = -1, installs = 0, syncs = 0
+        for (var i = 0; i < c.length; i++) {
+            if (c[i].indexOf("omyview-lock-layer") >= 0) { installs++; if (installIdx < 0) installIdx = i }
+            if (c[i].indexOf("local ARMED = {") >= 0) { syncs++; if (syncIdx < 0) syncIdx = i }
+        }
+        compare(installs, 1, "open() installs exactly once")
+        compare(syncs, 1, "open() syncs exactly once")
+        verify(c[syncIdx].indexOf("local ARMED = {}") >= 0, "the loaded (empty) set")
+        verify(installIdx < syncIdx, "install before sync")
+        v.close()
     }
     // Distinguishes: a sync dispatched while the locks file is still unresolved (would disable
     // rules the compositor holds). The view is created WITHOUT loadArmed().
@@ -71,14 +80,21 @@ TestCase {
         var s = v.compositor.commands.filter(function (c) { return c.indexOf("local ARMED = {") >= 0 })
         compare(s.length, 0, "no sync while armed is unresolved")
         verify(v.compositor.commands.some(function (c) { return c.indexOf("omyview-lock-layer") >= 0 }), "but install did run")
-        ctrlLOn(v)
+        // ctrlL() dispatches through whichever view last forced keyboard focus, which is `v`
+        // here (its own open() ran a Qt.callLater(forceActiveFocus) after `view`'s did).
+        ctrlL()
         compare(v.testLocks.writes.length, 0, "toggle is a no-op while unresolved")
+        verify(v.compositor.commands.some(function (c) { return c.indexOf("locks file unreadable") >= 0 }),
+               "the user is told why Ctrl+L did nothing")
+        var warned = v.compositor.commands.filter(function (c) { return c.indexOf("locks file unreadable") >= 0 }).length
+        ctrlL()
+        compare(v.compositor.commands.filter(function (c) { return c.indexOf("locks file unreadable") >= 0 }).length,
+                warned, "reported at most once per open")
         v.testLocks.loadArmed(["3"])
         var s2 = v.compositor.commands.filter(function (c) { return c.indexOf("local ARMED = {") >= 0 })
         compare(s2.length, 1, "the load itself triggers the sync"); verify(s2[0].indexOf('"3"') >= 0)
         v.close()
     }
-    function ctrlLOn(v) { keyClick("l", Qt.ControlModifier) }
     // Distinguishes: Ctrl+L not writing, writing the wrong selector, or not syncing the new set.
     function test_ctrl_l_arms_and_disarms_the_selected_box() {
         keyClick(Qt.Key_Right)                         // ws 2
@@ -119,6 +135,19 @@ TestCase {
         compare(view.testLocks.writeFailures, 1)
         compare(syncs().length, before + 1); verify(lastSync().indexOf('"1"') >= 0)
         compare(boxOf(1).armed, true)
+    }
+    // Distinguishes: a padded (empty, synthetic) workspace never carrying armed/placeholder
+    // flags, so arming an empty workspace shows no badge.
+    function test_padded_workspace_carries_armed_and_placeholder() {
+        view.testConfig.workspaces = 10
+        view.rebuild()
+        var idx = -1
+        for (var i = 0; i < view.boxes.length; i++) if (view.boxes[i].workspaceId === 7) idx = i
+        verify(idx >= 0, "workspace 7 is padded into the layout")
+        view.selectedIndex = idx
+        ctrlL()
+        compare(boxOf(7).armed, true)
+        verify(view.testLocks.writes[0].indexOf('"7"') >= 0)
     }
     // Distinguishes: the hint not advertising the key.
     function test_hint_mentions_ctrl_l() {
