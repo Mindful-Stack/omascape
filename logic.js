@@ -838,22 +838,27 @@ function scratchpadFocusLua(addr) {
 // A selector is a workspace id ("3") or a special workspace name ("special:scratchpad"). It is
 // interpolated into Lua, so anything else is refused here, in JavaScript, before it can reach
 // a chunk.
-var LOCK_SELECTOR_RE = /^(\d+|special:[A-Za-z0-9_-]+)$/
+// Hyprland parses "007" as workspace 7 (leading zeros stripped), so a hand-edited "007" would
+// arm workspace 7 with no badge to show it — numeric selectors must be a canonical decimal.
+var LOCK_SELECTOR_RE = /^([1-9]\d*|special:[A-Za-z0-9_-]+)$/
 function validLockSelector(sel) { return typeof sel === "string" && LOCK_SELECTOR_RE.test(sel) }
 
-// Install the compositor-side lock state: one table in _G, the layer rule that keeps the
-// overview out of every capture, and the share observer that publishes 1/0 to
-// $XDG_RUNTIME_DIR/omyview/share-state. Idempotent: re-running keeps the rules, the
-// subscription and the share counter. Dispatched at shell start, on configreloaded (a reload
-// drops every global) and at open().
-// The layer rule and the share observer are created FIRST, unconditionally inside the outer
-// pcall, before anything touches the filesystem: a broken $XDG_RUNTIME_DIR (or a write/rename
-// failure) must degrade only share detection, never the lock itself. `L.publish` is defined
-// unconditionally too (it reads L.dir at call time, so defining it before L.dir exists is
-// fine) — the observer's callback closes over it. The dir-creation-and-publish step runs in
-// its OWN inner pcall; on failure it is re-raised (`error(perr, 0)`) so the outer pcall's own
-// `ok, err` — which reportLua reads — carries the filesystem failure while the layer rule and
-// subscription it already created are left standing on `L`, unaffected by the raised error.
+// Install the compositor-side lock state: one table in _G, and the share observer that
+// publishes 1/0 to $XDG_RUNTIME_DIR/omyview/share-state. No layer rule for the overview's own
+// namespace: a `no_screen_share` layer renders as an opaque black rect over the whole layer box
+// while mapped (ScreenshareFrame.cpp), so it would blank the entire shared screen whenever the
+// overview is open — and toplevel export of an armed window is denied by Hyprland regardless
+// (see lockSyncLua's per-workspace window rules), so the overview cannot leak armed pixels
+// without it. Idempotent: re-running keeps the rules, the subscription and the share counter.
+// Dispatched at shell start, on configreloaded (a reload drops every global) and at open().
+// The share observer is created FIRST, unconditionally inside the outer pcall, before anything
+// touches the filesystem: a broken $XDG_RUNTIME_DIR (or a write/rename failure) must degrade
+// only share detection, never the lock itself. `L.publish` is defined unconditionally too (it
+// reads L.dir at call time, so defining it before L.dir exists is fine) — the observer's
+// callback closes over it. The dir-creation-and-publish step runs in its OWN inner pcall; on
+// failure it is re-raised (`error(perr, 0)`) so the outer pcall's own `ok, err` — which
+// reportLua reads — carries the filesystem failure while the subscription it already created is
+// left standing on `L`, unaffected by the raised error.
 // `os.execute`'s return value cannot be trusted here (live-verified on this Hyprland build):
 // the compositor reaps the child itself, so Lua never sees an exit status — `os.execute`
 // returns nil even when `mkdir -p` succeeded and the directory exists. Gating on that return
@@ -865,7 +870,7 @@ function lockInstallLua() {
         'function()\n' +
         '  local ok, err = pcall(function()\n' +
         '    local L = _G.omyview_lock\n' +
-        '    if not L then L = { rules = {}, sharing = 0, sub = nil, layer = nil, dir = nil }; _G.omyview_lock = L end\n' +
+        '    if not L then L = { rules = {}, sharing = 0, sub = nil, dir = nil }; _G.omyview_lock = L end\n' +
         '    function L.publish()\n' +
         '      local tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"\n' +
         '      local f = io.open(tmp, "w"); if not f then error("cannot write share-state") end\n' +
@@ -874,7 +879,6 @@ function lockInstallLua() {
         '      local rok, rerr = os.rename(tmp, dst)\n' +
         '      if not rok then os.remove(tmp); error("rename share-state: " .. tostring(rerr)) end\n' +
         '    end\n' +
-        '    if not L.layer then L.layer = hl.layer_rule({ name = "omyview-lock-layer", match = { namespace = "omyview" }, no_screen_share = true }) end\n' +
         '    if not (L.sub and L.sub:is_active()) then\n' +
         '      L.sub = hl.on("screenshare.state", function(active)\n' +
         '        local sok, serr = pcall(function() L.sharing = math.max(0, L.sharing + (active and 1 or -1)); L.publish() end)\n' +

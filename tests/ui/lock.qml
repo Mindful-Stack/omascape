@@ -41,7 +41,11 @@ TestCase {
     }
     function cleanup() { view.close() }
     function cmds() { return view.compositor.commands }
-    function installs() { return cmds().filter(function (c) { return c.indexOf("omyview-lock-layer") >= 0 }).length }
+    // "omyview_lock" appears in both the install and sync chunks (both touch the shared _G
+    // table); "local ARMED" is unique to sync, so excluding it isolates the install dispatches.
+    function installs() {
+        return cmds().filter(function (c) { return c.indexOf("omyview_lock") >= 0 && c.indexOf("local ARMED") < 0 }).length
+    }
     function syncs() { return cmds().filter(function (c) { return c.indexOf("local ARMED = {") >= 0 }) }
     function lastSync() { var s = syncs(); return s.length ? s[s.length - 1] : "" }
     function boxOf(wsId) {
@@ -69,7 +73,7 @@ TestCase {
         var c = v.compositor.commands
         var installIdx = -1, syncIdx = -1, installs = 0, syncs = 0
         for (var i = 0; i < c.length; i++) {
-            if (c[i].indexOf("omyview-lock-layer") >= 0) { installs++; if (installIdx < 0) installIdx = i }
+            if (c[i].indexOf("omyview_lock") >= 0 && c[i].indexOf("local ARMED") < 0) { installs++; if (installIdx < 0) installIdx = i }
             if (c[i].indexOf("local ARMED = {") >= 0) { syncs++; if (syncIdx < 0) syncIdx = i }
         }
         compare(installs, 1, "open() installs exactly once")
@@ -85,7 +89,8 @@ TestCase {
         v.open(); wait(400)
         var s = v.compositor.commands.filter(function (c) { return c.indexOf("local ARMED = {") >= 0 })
         compare(s.length, 0, "no sync while armed is unresolved")
-        verify(v.compositor.commands.some(function (c) { return c.indexOf("omyview-lock-layer") >= 0 }), "but install did run")
+        verify(v.compositor.commands.some(function (c) { return c.indexOf("omyview_lock") >= 0 && c.indexOf("local ARMED") < 0 }),
+               "but install did run")
         // ctrlL() dispatches through whichever view last forced keyboard focus, which is `v`
         // here (its own open() ran a Qt.callLater(forceActiveFocus) after `view`'s did).
         ctrlL()
@@ -156,6 +161,13 @@ TestCase {
         compare(syncs().length, before + 1); verify(lastSync().indexOf('"1"') >= 0)
         compare(boxOf(1).armed, true)
     }
+    // Distinguishes: the write landing before the sync (the compositor's enforcement would then
+    // wait on disk) from the spec's ordering — memory, then sync, then write.
+    function test_ctrl_l_syncs_before_it_writes() {
+        ctrlL()
+        compare(view.testLocks.writeAt.length, 1)
+        compare(view.testLocks.writeAt[0], cmds().length, "the write happened after the last sync")
+    }
     // Distinguishes: a padded (empty, synthetic) workspace never carrying armed/placeholder
     // flags, so arming an empty workspace shows no badge.
     function test_padded_workspace_carries_armed_and_placeholder() {
@@ -221,6 +233,17 @@ TestCase {
         verify(childNamed(badgeOf(2), "wsBadgeText").text.indexOf("\u{F033E}") < 0)
         verify(row("0xA") !== null, "not sharing: tiles stay")
         compare(childNamed(boxItemOf(1), "lockGlyph").visible, false)
+    }
+    // Distinguishes: an armed tile (outside a share) still trying a live capture, which Hyprland
+    // answers with its "permission denied" texture instead of the window — armed must fall back
+    // to the icon on its own, not only once the box becomes a placeholder.
+    function test_armed_box_tiles_fall_back_to_icons() {
+        compare(tileOf("0xA").capMode, "live")
+        ctrlL()                                        // arms ws 1
+        compare(tileOf("0xA").capMode, "icon")
+        compare(tileOf("0xB").capMode, "live", "unarmed ws 2 unaffected")
+        ctrlL()                                        // disarms ws 1
+        compare(tileOf("0xA").capMode, "live")
     }
     // Distinguishes: a placeholder box still holding a tile (a live capture) or hiding the glyph.
     function test_share_turns_armed_boxes_into_placeholders() {

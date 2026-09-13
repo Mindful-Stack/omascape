@@ -887,6 +887,11 @@ TestCase {
         compare(Logic.validLockSelector("special:my-pad_2"), true)
         compare(Logic.validLockSelector(""), false)
         compare(Logic.validLockSelector("-2"), false)
+        // Hyprland parses "007" as workspace 7 (leading zeros stripped): a hand-edited "007"
+        // would arm workspace 7 with no badge to show it, so leading zeros are refused; "0" is
+        // refused too (Hyprland workspaces are 1-indexed).
+        compare(Logic.validLockSelector("0"), false)
+        compare(Logic.validLockSelector("007"), false)
         compare(Logic.validLockSelector("3\"); error(\"x"), false)
         compare(Logic.validLockSelector("special:a b"), false)
         compare(Logic.validLockSelector(undefined), false)

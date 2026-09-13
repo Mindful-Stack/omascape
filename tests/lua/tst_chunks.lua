@@ -222,15 +222,23 @@ case("scratchpad focus: focus throws → one notification, bring_to_top never ru
 end)
 
 local function state(hl) return hl.__files[hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state"] end
--- Distinguishes: a non-idempotent install (two layer rules / two subscriptions) or one that
--- never publishes.
+local function statePath(hl) return hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state" end
+-- Distinguishes: a non-idempotent install (two subscriptions) or one that never publishes.
 case("lock install is idempotent and publishes 0", function()
   local hl = Mock.new({})
   run("LOCK_INSTALL", hl); run("LOCK_INSTALL", hl)
-  eq(#hl.__layer_rules, 1, "one layer rule"); eq(#hl.__subs, 1, "one subscription")
-  eq(hl.__layer_rules[1].spec.no_screen_share, true); eq(hl.__layer_rules[1].spec.match.namespace, "omyview")
+  eq(#hl.__subs, 1, "one subscription")
   eq(state(hl), "0", "published 0"); eq(#hl.__mkdirs, 1, "mkdir once")
   eq(#hl.__notifications, 0)
+end)
+-- Distinguishes: an install that only publishes on the very first run (a fresh mock's
+-- share-state pre-seeded, as a stale file from a previous session would be) from one that always
+-- publishes the live counter — a stale "1" left over from a crash must not survive an install.
+case("every install publishes the current value, even over a pre-seeded stale file", function()
+  local hl = Mock.new({})
+  hl.__files[statePath(hl)] = "1"
+  run("LOCK_INSTALL", hl)
+  eq(state(hl), "0", "the fresh counter (0) overwrites the stale value")
 end)
 -- Regression: os.execute("mkdir -p ...") returns nil on the real compositor even when the
 -- directory WAS created (it reaps the child itself, so Lua never sees an exit status). Gating
@@ -328,9 +336,9 @@ case("lock install: mkdir failure is reported and retried; write failure leaves 
   local hl = Mock.new({})
   hl.__fail_on = "mkdir"; run("LOCK_INSTALL", hl)
   eq(#hl.__notifications, 1, "mkdir failure reported"); eq(state(hl), nil, "nothing published")
-  -- The layer rule and the observer are created before the dir/publish step ever runs, so a
-  -- broken runtime dir must not take them down with it.
-  eq(#hl.__layer_rules, 1, "layer rule exists despite mkdir failure"); eq(#hl.__subs, 1)
+  -- The observer is created before the dir/publish step ever runs, so a broken runtime dir must
+  -- not take it down with it.
+  eq(#hl.__subs, 1, "subscription exists despite mkdir failure")
   hl.__fail_on = nil; run("LOCK_INSTALL", hl)
   eq(state(hl), "0", "retry succeeded"); eq(#hl.__mkdirs, 2, "mkdir attempted again")
   hl.__fail_on = "io.open"; Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")

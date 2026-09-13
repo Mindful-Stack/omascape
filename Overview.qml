@@ -119,8 +119,9 @@ Item {
             }
             return
         }
-        if (!locks.toggle(Logic.wsSelector(selectedId))) return
-        lockSync()
+        if (!locks.toggleInMemory(Logic.wsSelector(selectedId))) return
+        lockSync()          // the compositor is the enforcement; it must not wait for the write
+        locks.persist()
         rebuild()
     }
     Connections {
@@ -936,7 +937,7 @@ Item {
             readonly property real maxCardW: panel.width > 0 ? panel.width - 16 : 1616
             readonly property real maxCardH: panel.height > 0 ? panel.height - 64 : 900
             // The hint row never widens past the screen (maxCardW still caps it), but it does
-            // widen a narrow card: a layout with few/narrow workspaces must not clip the seven
+            // widen a narrow card: a layout with few/narrow workspaces must not clip the eight
             // key hints against the card edge.
             implicitWidth: Math.min(Math.max(canvas.implicitWidth, config.hint ? hint.implicitWidth : 0) + pad * 2, maxCardW)
             implicitHeight: Math.min(canvas.implicitHeight + pad * 2 + hintSpace, maxCardH)
@@ -1134,6 +1135,11 @@ Item {
                         model: tilesModel
                         WindowTile {
                             required property var model
+                            // Re-evaluates when `locks.armed` changes: an armed box's windows are under a
+                            // no_screen_share window rule, and Hyprland denies toplevel export of such a
+                            // window outright — capturing it live would show its "permission denied" texture,
+                            // not the window, so the tile falls back to its icon instead.
+                            readonly property bool boxArmed: locks.isArmed(Logic.wsSelector(model.wsid))
                             // Layout motion runs on these glide targets, not on x/y: the drag breaks the x/y
                             // bindings and owns them directly, so a glide still in flight can never fight the
                             // pointer. Release parks the targets at the drop point (Behaviors off), rebinds x/y,
@@ -1158,8 +1164,9 @@ Item {
                             dragging: root.draggingAddress === model.address
                             handle: root.handleByAddress[model.address] || null
                             // Kept loaded while hidden (keepLoaded): captures run only while the
-                            // surface is mapped.
-                            capMode: panel.visible ? "live" : "icon"
+                            // surface is mapped. An armed box always falls back to its icon, share
+                            // or not — the compositor denies the capture either way (see boxArmed).
+                            capMode: (panel.visible && !boxArmed) ? "live" : "icon"
                             borderColor: root.dropTargetAddress === model.address ? root.accent : root.hairline
                             dropTarget: root.dropTargetAddress === model.address
                             dropSide: root.dropTargetAddress === model.address ? root.dropTargetSide : ""

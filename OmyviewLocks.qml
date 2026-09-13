@@ -43,14 +43,20 @@ QtObject {
         if (r.error) invalidFile(r.error)
         if (r.changed) loadedArmed()
     }
-    // Memory first, then disk. Returns false while unresolved or the selector is invalid (the
-    // caller skips the sync).
-    function toggle(sel) {
+    // Memory, then the caller dispatches the sync, then disk (see docs/specs/2026-09-12-lock-
+    // design.md, "Persistence ordering"): the compositor is the enforcement and must not wait
+    // for a write. `toggleInMemory` returns false while unresolved or the selector
+    // is invalid (the caller skips both the sync and the write); `persist()` writes whatever
+    // `armed` currently holds, so it is only ever called right after a successful
+    // `toggleInMemory` and the sync that must precede the write.
+    function toggleInMemory(sel) {
         var next = Logic.toggleSelector(armed, sel)
         if (next === null) return false
         armed = next
-        locksFile.setText(JSON.stringify({ armed: next }, null, 2) + "\n")
         return true
+    }
+    function persist() {
+        locksFile.setText(JSON.stringify({ armed: armed }, null, 2) + "\n")
     }
 
     property FileView locksFile: FileView {

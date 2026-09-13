@@ -49,6 +49,9 @@ qml = qml.replace('id: root', '''id: root
         function refreshWorkspaces() {}
         function refreshMonitors() {}
     }
+    // Lets the locks stub's persist() record how many commands the compositor has seen so far
+    // (see the stub's `writeAt`), pinning that the sync always lands before the write.
+    Binding { target: locks; property: "compositorRef"; value: compositor }
 ''', 1)
 (dest / 'Overview.qml').write_text(qml)
 # Keep the real tile hover, scale and stacking bindings; replace capture-only visuals.
@@ -74,16 +77,21 @@ tile = tile[:start] + '    Rectangle { anchors.fill: parent; color: tile.bg }\n\
 # Lock state stub: the real OmyviewLocks.qml watches two files through Quickshell.Io. The stub
 # keeps the one property later tests depend on — `armed` is null until a load resolves — and
 # records writes instead of touching disk. Real file watching, atomic rename and load ordering
-# are NOT reproduced here (live check); `refresh()` is a no-op for the same reason. `toggle()`
-# and `loadArmed()` share Logic.toggleSelector/Logic.applyLocksTo with the real component, so
-# both agree on when a toggle is refused and — via applyLocksTo's array comparison — on when a
-# repeated load actually changed anything (an identical `loadArmed` must not re-fire
-# `loadedArmed()`, or every reload echo would re-sync and re-rebuild for nothing).
+# are NOT reproduced here (live check); `refresh()` is a no-op for the same reason.
+# `toggleInMemory()` and `loadArmed()` share Logic.toggleSelector/Logic.applyLocksTo with the
+# real component, so both agree on when a toggle is refused and — via applyLocksTo's array
+# comparison — on when a repeated load actually changed anything (an identical `loadArmed` must
+# not re-fire `loadedArmed()`, or every reload echo would re-sync and re-rebuild for nothing).
+# `compositorRef` (wired by a `Binding` where this stub is used) lets `persist()` record, per
+# write, how many commands the compositor had already seen (`writeAt`) — pinning that the
+# caller's sync always lands before the write, per the split `toggleInMemory`/`persist` ordering.
 (dest / 'OmyviewLocks.qml').write_text(
     'import QtQuick\nimport "logic.js" as Logic\nQtObject {\n'
     '    property var armed: null\n'
     '    property bool sharing: false\n'
     '    property var writes: []\n'
+    '    property var writeAt: []\n'
+    '    property QtObject compositorRef: null\n'
     '    property bool failWrites: false\n'
     '    property int writeFailures: 0\n'
     '    signal loadedArmed()\n'
@@ -99,13 +107,16 @@ tile = tile[:start] + '    Rectangle { anchors.fill: parent; color: tile.bg }\n\
     '    }\n'
     '    function setSharing(on) { sharing = on }\n'
     '    function emitInvalid(why) { invalidFile(why) }\n'
-    '    function toggle(sel) {\n'
+    '    function toggleInMemory(sel) {\n'
     '        var next = Logic.toggleSelector(armed, sel)\n'
     '        if (next === null) return false\n'
     '        armed = next\n'
-    '        if (failWrites) { writeFailures++; writeFailed("stub") }\n'
-    '        else writes = writes.concat([JSON.stringify({ armed: next })])\n'
     '        return true\n'
+    '    }\n'
+    '    function persist() {\n'
+    '        writeAt = writeAt.concat([compositorRef ? compositorRef.commands.length : -1])\n'
+    '        if (failWrites) { writeFailures++; writeFailed("stub") }\n'
+    '        else writes = writes.concat([JSON.stringify({ armed: armed })])\n'
     '    }\n'
     '}\n')
 # Emulates shell.qml's manifest-driven Loader.active (shell.qml:623-626): a standalone fixture

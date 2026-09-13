@@ -14,15 +14,16 @@ visible and easy to change.
 ## Scope
 
 **In:** per-workspace arming (including the scratchpad row), compositor-real exclusion via named
-`no_screen_share` window rules matched on the workspace, exclusion of the overview's own layer,
-a compositor-side share observer (presentation only), persistence of the armed set, full-set
-reconciliation on every sync, re-install on Hyprland config reload, overview visuals (badge,
-placeholder), tests.
+`no_screen_share` window rules matched on the workspace, a compositor-side share observer
+(presentation only), persistence of the armed set, full-set reconciliation on every sync,
+re-install on Hyprland config reload, overview visuals (badge, placeholder), tests.
 
 **Out:** per-window locks, blocking navigation to armed workspaces, an indicator outside the
-overview, locking by app class, protecting windows the user moves *off* an armed workspace,
-the unnamed `special` workspace (share-picker popups; never a box, cannot be armed), and any
-guarantee about the first frame after a *Hyprland config reload* (see Edge cases).
+overview, locking by app class, protecting windows the user moves *off* an armed workspace (a
+pinned window included: it follows the active workspace, so pinning it on an armed workspace and
+then switching away exposes it — the same class of exposure as moving a window off), the unnamed
+`special` workspace (share-picker popups; never a box, cannot be armed), and any guarantee about
+the first frame after a *Hyprland config reload* (see Edge cases).
 
 ## Verified facts (2026-09-12, Hyprland 0.56.2 on this machine)
 
@@ -46,6 +47,13 @@ guarantee about the first frame after a *Hyprland config reload* (see Edge cases
   fires `true` then `false`. Subscriptions have `:remove()` and `:is_active()`. The event is
   Lua-only; Quickshell cannot observe shares directly.
 - `hl.layer_rule({ match = { namespace = "omyview" }, no_screen_share = true })` is the layer form.
+- **A `no_screen_share` layer rule is NOT used on the overview's own layer**, despite the API
+  existing for it: verified from source (`ScreenshareFrame.cpp`) that Hyprland renders such a
+  layer as an opaque black rect over the *whole* layer box while it is mapped. The overview's
+  panel is fullscreen, so applying this to the overview's own namespace would blank the entire
+  shared screen (not just the overview) for as long as it is open — and toplevel export of an
+  armed window is denied by Hyprland regardless (the per-workspace `window_rule`, see Compositor
+  side), so the overview cannot leak armed pixels without the layer rule either.
 - Hyprland's IPC socket emits `configreloaded>>` on `hyprctl reload` (captured on socket2;
   Quickshell surfaces it via `Hyprland.rawEvent`). **A config reload discards the
   dispatched-chunk globals** (probed 2026-09-12: a global set before `hyprctl reload` is gone
@@ -73,11 +81,10 @@ guarantee about the first frame after a *Hyprland config reload* (see Edge cases
   rule is disabled and its handle kept, so re-arming re-enables it. No accumulation.
 - **Install at shell start, not first at open.** The install + sync run when the kept-loaded
   component is created, again on `configreloaded`, and again in `open()` (belt and braces).
-  The overview's layer rule therefore exists before the overview can be mapped, except in the
-  reload window (Edge cases).
 - **Placeholder, not blur.** While a share is active, an armed box renders no tiles and no
-  capture, and a lock glyph fills the well. Otherwise an armed box renders normally with a small
-  lock badge beside its number.
+  capture, and a lock glyph fills the well. Otherwise an armed box shows its windows as app icons
+  (the compositor denies toplevel export for windows under the rule) plus the lock badge; during
+  a share it shows the placeholder.
 - **Two files, one owner each.** omyview owns the locks file. The compositor observer owns
   `$XDG_RUNTIME_DIR/omyview/share-state`, written atomically; content `1`/`0`.
 - **Intent vs enforcement.** The badge shows the *armed* intent from the file. Enforcement
@@ -89,7 +96,7 @@ guarantee about the first frame after a *Hyprland config reload* (see Edge cases
 
 | Key / action (overview)   | effect                                                                        |
 |---------------------------|-------------------------------------------------------------------------------|
-| Ctrl+L                    | toggle armed on the selected box; write the locks file; dispatch `lockSyncLua` |
+| Ctrl+L                    | toggle armed on the selected box; dispatch `lockSyncLua`; write the locks file |
 | Enter / digits / click    | unchanged                                                                     |
 | drag / drop               | unchanged for the compositor; a window dropped on an armed box is matched by the rule on arrival. In the overview, a drop onto a box that is currently showing the placeholder creates **no optimistic tile** (dispatch only) |
 | find                      | never matches windows in a box showing the placeholder; armed boxes outside a share match normally |
@@ -103,16 +110,18 @@ per workspace, and the user chose to move it).
 All single-line guarded chunks in the existing style (`dispatchGuardLua`, `reportLua`), built in
 `logic.js`, parse- and behaviour-tested by `tests/lua-check.sh`.
 
-**`lockInstallLua()`** — idempotent. The layer rule and the share observer are created FIRST,
-unconditionally, before anything touches the filesystem, so a broken `$XDG_RUNTIME_DIR` (or a
-write/rename failure) degrades only share detection — never the lock rules themselves. The
-dir-creation-and-publish step runs in its own inner `pcall` and is re-raised on failure, so the
-outer `ok, err` (what `reportLua` reports) carries the filesystem failure while the layer rule
-and subscription created above it are left standing:
+**`lockInstallLua()`** — idempotent. No layer rule for the overview's own namespace (see Verified
+facts: it would blank the whole shared screen, and is unnecessary — toplevel export of an armed
+window is denied regardless, by the per-workspace `window_rule` below). The share observer is
+created FIRST, unconditionally, before anything touches the filesystem, so a broken
+`$XDG_RUNTIME_DIR` (or a write/rename failure) degrades only share detection — never the lock
+rules themselves. The dir-creation-and-publish step runs in its own inner `pcall` and is
+re-raised on failure, so the outer `ok, err` (what `reportLua` reports) carries the filesystem
+failure while the subscription created above it is left standing:
 ```lua
 local L = _G.omyview_lock
 if not L then
-  L = { rules = {}, sharing = 0, sub = nil, layer = nil, dir = nil }
+  L = { rules = {}, sharing = 0, sub = nil, dir = nil }
   _G.omyview_lock = L
 end
 function L.publish()                                          -- defined unconditionally; reads L.dir at call time
@@ -123,7 +132,6 @@ function L.publish()                                          -- defined uncondi
   local ok, err = os.rename(tmp, dst)
   if not ok then os.remove(tmp); error("rename share-state: " .. tostring(err)) end
 end
-if not L.layer then L.layer = hl.layer_rule({ name = "omyview-lock-layer", match = { namespace = "omyview" }, no_screen_share = true }) end
 if not (L.sub and L.sub:is_active()) then
   L.sub = hl.on("screenshare.state", function(active)
     local ok, err = pcall(function()
@@ -161,10 +169,10 @@ file inside it.
   write never replaces valid state, and removing the temp file on any failure (write, close, or
   rename) so it never lingers; every install publishes the current value so a fresh shell never
   reads a missing file for long.
-- The layer rule and observer subscription are created before the dir/publish step is attempted,
-  and are unaffected by its failure — a broken runtime directory (or a write/rename failure)
-  only means the share-state file goes stale or missing; the lock rules the layer rule and the
-  sync chunk maintain are never affected by it.
+- The observer subscription is created before the dir/publish step is attempted, and is
+  unaffected by its failure — a broken runtime directory (or a write/rename failure) only means
+  the share-state file goes stale or missing; the per-workspace rules the sync chunk maintains
+  are never affected by it.
 
 **`lockSyncLua(armed)`** — `armed` is the full array of selectors (`"3"`, `"special:scratchpad"`):
 ```lua
@@ -193,8 +201,13 @@ selectors from being protected or stale rules from being disabled. A failed re-e
 its selector's handle from `L.rules` rather than leaving a broken one there forever: the next
 sync that arms the same selector sees no handle and creates a fresh rule instead of retrying a
 handle that keeps throwing. `ARMED` is the array literal interpolated by the builder; **in
-JavaScript, before interpolation**, each selector must match `/^(\d+|special:[A-Za-z0-9_-]+)$/`;
-anything else is dropped from the chunk and reported via the notification path.
+JavaScript, before interpolation**, each selector must match
+`/^([1-9]\d*|special:[A-Za-z0-9_-]+)$/` — a leading zero is refused (Hyprland parses `"007"` as
+workspace `7`, so a hand-edited `"007"` would arm workspace 7 with no badge to show it) and `"0"`
+is refused (Hyprland workspaces are 1-indexed). Invalid selectors are refused by
+`Logic.parseLocks`/`Logic.toggleSelector` before they can reach a chunk at all; the array filter
+inside the sync builder itself is defense in depth, and drops anything that slips through
+silently, with no notification.
 
 **Rule semantics to prove in the plan's first task, on 0.56.2, with captured pixels** (not
 `is_enabled()`): create enabled → capture an existing window is black; `set_enabled(false)` →
@@ -215,17 +228,20 @@ other error, and a malformed (parseable-but-invalid or unparseable) file, keeps 
 value — still null if it was the first load — and is reported once via the notification path.
 The reducer (`Logic.applyLocksTo(current, raw, status)`, status one of `"ok"` / `"missing"` /
 `"error:<text>"`) is pure and shared between the component and its offscreen test stub, so both
-agree on this. `toggle(sel)` is a no-op while unresolved or `sel` fails
+agree on this. `toggleInMemory(sel)` is a no-op while unresolved or `sel` fails
 `Logic.validLockSelector` (shared as `Logic.toggleSelector(armed, sel)`, which returns the next
 array or `null` to mean "refused"). A second watched `FileView` on the share-state file exposes
 `sharing: bool` (`"1"`), false when missing or unreadable. `placeholder(sel) = armed !== null &&
 armed.includes(sel) && sharing`.
 
-**Persistence ordering in `toggle(sel)`:** update the in-memory `armed` first, dispatch
+**Persistence ordering:** update the in-memory `armed` first (`toggleInMemory(sel)`), dispatch
 `lockSyncLua(armed)` immediately (the compositor is the enforcement; it must not wait for disk),
-then write the file atomically (temp + rename). A write failure is reported and leaves the
-in-memory set as the truth for this session; the next toggle retries. Rapid toggles each
-dispatch the full set, so the last dispatch wins and the compositor never sees a partial state.
+then write the file atomically (`persist()`, temp + rename). The split exists so the CALLER
+(`lockToggleSelected()`) can enforce that ordering: `toggleInMemory` never touches disk, and
+`persist` writes whatever `armed` currently holds, so it must run only right after the sync that
+is supposed to precede it. A write failure is reported and leaves the in-memory set as the truth
+for this session; the next toggle retries. Rapid toggles each dispatch the full set, so the last
+dispatch wins and the compositor never sees a partial state.
 
 **Selectors.** `Logic.wsSelector(id)` already yields `"3"` / `"special:scratchpad"`; boxes are
 keyed by it for lock purposes. The file stores selectors, so the scratchpad entry survives its
@@ -234,7 +250,8 @@ dynamic id.
 **Sync points.** `lockInstallLua()` is dispatched on `Component.onCompleted` (kept loaded: shell
 start), on the `configreloaded` raw event, and in `open()`. `lockSyncLua(armed)` is dispatched
 **only when `armed` is resolved**: on the locks file's first successful load and every accepted
-change, on `configreloaded`, in `open()`, and after every `toggle`. While `armed` is unresolved
+change, on `configreloaded`, in `open()`, and after every accepted `toggleInMemory` (immediately,
+before `persist()`). While `armed` is unresolved
 no sync is sent, so a shell restart can never disable rules the compositor still holds (the
 `FileView` loads asynchronously; the retained rules keep protecting until the file is read).
 All dispatches are idempotent. Installation is not awaited: `Hyprland.dispatch` is fire-and-forget
@@ -257,15 +274,23 @@ the locks file, whose directory (`~/.config/omarchy`) exists before omyview ever
 restarts a 400ms `Timer` that calls it, and `open()` also calls it directly (after `lockInstall();
 lockSync()`) as a belt-and-braces re-attach on every summon.
 
-**Keys.** Chord branch: `Ctrl+L` → `locks.toggle(Logic.wsSelector(selectedId))` when
-`Logic.hasWs(selectedId)`, then sync. Works with or without a query.
+**Keys.** Chord branch: `Ctrl+L` → `locks.toggleInMemory(Logic.wsSelector(selectedId))` when
+`Logic.hasWs(selectedId)`, then `lockSync()`, then `locks.persist()`. Works with or without a
+query.
 
 **Rendering.** `buildInput()` marks each workspace record `armed: bool` and `placeholder: bool`
 (armed and sharing). `layout()` copies both onto the box and **emits no tiles** for windows on a
 placeholder workspace, so no capture starts. `buildInput()` also leaves those windows out of
 `windows`, so find and drag never see them. Box delegate: placeholder → a large lock glyph
 (nf-md-lock `\u{F033E}`) at 25 % opacity in the well, numeral hidden. Badge: armed → the lock
-glyph after the number. Boxes remain selectable, jump targets and drop targets.
+glyph after the number. Boxes remain selectable, jump targets and drop targets. An armed box
+shows its windows as app icons (the compositor denies toplevel export for windows under the
+rule) plus the lock badge; during a share it shows the placeholder instead. The tile's
+`capMode` is `"icon"` whenever its box is armed (`locks.isArmed(Logic.wsSelector(model.wsid))`,
+a readonly `boxArmed` property on the delegate so it re-evaluates as `locks.armed` changes),
+independent of `panel.visible` — armed and sharing both force `"icon"`, only "armed and not
+sharing" additionally still lays the tile out (a placeholder workspace emits no tiles at all, so
+`capMode` on it is moot).
 
 **Drops and pending state.** `submitDrop` onto a placeholder box dispatches the move but records
 no `pendingMoves` entry and sets no optimistic row (the row would keep a live capture on a box
@@ -288,14 +313,19 @@ the input → `endDrag()`" check.
   see armed windows. Accepted and documented; a reload is a user action (theme change, config
   edit), not something a share triggers. Probed: globals do NOT survive a reload, so this window
   is real and the `configreloaded` re-install is load-bearing, not redundant.
-- **Overview mapped before its layer rule exists** (a share running at shell start, and the
-  overview opened within the few milliseconds before the install chunk lands): the overview's
-  surface can be captured. Accepted. Two mitigations bound it: the rule is dispatched at shell
-  start, long before a human can press SUPER+P; and the overview's own thumbnails are screencopy
-  captures of windows that are themselves under `no_screen_share`, so they are expected to be
-  black too — a live-test item (below), not a claim.
-- **Hyprland restart**: ends every share and every capture client; the shell's next
-  `configreloaded`/open re-installs.
+- **Overview mapped before install completes** (a share running at shell start, and the overview
+  opened within the few milliseconds before the install/sync chunks land): the overview's own
+  surface is not layer-excluded (no layer rule at all, by design — see Verified facts) and so is
+  visible in the capture like any other window. What matters is what it shows: the overview's
+  thumbnails of armed windows are denied by the compositor (the per-workspace `window_rule`,
+  Compositor side above — but only once the sync for that selector has actually run), so the
+  only thing a viewer can see of the overview, even mapped this early, is unarmed thumbnails,
+  icons and glyphs — never an armed window's live content. The rule is dispatched at shell start,
+  long before a human can press SUPER+P, which bounds how early "before the sync has run" can
+  realistically be.
+- **Hyprland restart**: ends every share and every capture client. The shell process itself
+  restarts along with the compositor, so re-install happens via `Component.onCompleted` on the
+  fresh start — not a later `configreloaded` or `open()` on a process that survived the restart.
 - **Shell restart / crash**: the compositor table and rules are untouched (install is
   idempotent), so protection never lapses. Stale intent (a disarm written to the file but the
   shell died before syncing) is corrected by the full-set sync on the next start.
@@ -322,7 +352,7 @@ the input → `endDrag()`" check.
   unresolved); reported once per open via the notification path (a stuck `FileView` can re-emit
   `loaded` — or `onLoadFailed` again — without the error changing, and unlike the armed set a
   parse error has no "unchanged" case to compare against, so the guard is a simple once-per-open
-  latch instead); `toggle` remains a no-op, and `lockToggleSelected()` tells the user, also once
+  latch instead); `toggleInMemory` remains a no-op, and `lockToggleSelected()` tells the user, also once
   per open, why Ctrl+L is doing nothing ("omyview: locks file unreadable — fix or delete
   ~/.config/omarchy/omyview-locks.json") rather than silently swallowing the keypress.
   **Malformed, or any other read error, on a later load**: the last valid set is kept and
@@ -330,20 +360,25 @@ the input → `endDrag()`" check.
   replaces the file with a fresh, valid one.
 - **A selector whose workspace does not exist**: kept in the file and in the rule table; the
   rule matches nothing until the workspace returns; the badge shows only when its box exists.
-- **Pinned windows**: reported on the workspace they were pinned from; whether a pinned window
-  shown over an armed workspace is black is a live-test item, not a claim.
-- **Two monitors**: rules are per workspace, so the monitor does not matter. The overview's own
-  layer is excluded on every monitor by the layer rule.
+- **Pinned windows**: reported on the workspace they were pinned from, but a pinned window
+  follows the *active* workspace visually — so pinning a window on an armed workspace and then
+  switching to an unarmed one exposes it, the same class of exposure as moving a window off an
+  armed workspace (Scope/Out), and equally out of scope to prevent. Confirm and document with a
+  live capture (below), not a claim.
+- **Two monitors**: rules are per workspace, so the monitor does not matter.
 
 ## Tests
 
 - **Tier 1, Lua behaviour suite** — each case runs the chunks in a **fresh Lua environment**
   (`_G` isolated per case; the current runner shares the host `_G` and must be changed), with
   stubs for `os.getenv`, `os.execute`, `os.rename`, `io.open` (in-memory files) and a mock `hl`
-  gaining `layer_rule`, named rule objects with `set_enabled`/`is_enabled`, and `on` with a
-  `fire(event, ...)` helper. Cases: install twice → one layer rule, one active subscription, a publish on
+  gaining `layer_rule` (kept in the mock, harmless — unused by `lockInstallLua` since the layer
+  rule was dropped), named rule objects with `set_enabled`/`is_enabled`, and `on` with a
+  `fire(event, ...)` helper. Cases: install twice → one active subscription, a publish on
   each install (value `0` on a fresh state), and the counter preserved across the second
-  install; sync `["3"]` → rule `omyview-lock-3` created enabled; sync `[]` → disabled,
+  install; every install publishes the current value even over a pre-seeded stale share-state
+  file (a fresh mock's file seeded `"1"` before `LOCK_INSTALL` runs → `"0"` after); sync `["3"]`
+  → rule `omyview-lock-3` created enabled; sync `[]` → disabled,
   handle kept; sync `["3"]` again → same handle re-enabled (no second rule); sync
   `["3","special:scratchpad"]` → both enabled; share start → `1` published, rules untouched
   (already enabled); second start then one end → still `1`; last end → `0`; end without start
@@ -351,7 +386,7 @@ the input → `endDrag()`" check.
   selector still created/enabled and every stale rule still disabled (per-step pcall); a
   failed mkdir → install reports and `L.dir` stays unset so the next install retries; a failed
   write → no rename (state file unchanged);
-  invalid selector dropped and reported; `os.rename` failing → reported; `Logic.notifyLua(text)`
+  invalid selector dropped silently (no report — see Compositor side); `os.rename` failing → reported; `Logic.notifyLua(text)`
   round-trips a backslash, a quote and a newline into a single valid Lua string (escaped, then
   flattened) rather than breaking the chunk or losing the character; a text past the 200-character
   budget whose 200th raw character is a backslash still parses (the raw text is sliced BEFORE
@@ -370,11 +405,16 @@ the input → `endDrag()`" check.
   mutating its input.
 - **Offscreen UI (`tests/ui/lock.qml`)**, with prepare.py replacing `OmyviewLocks.qml` by a
   stub (the fixture has no Quickshell.Io) whose `armed` starts null and offers `loadArmed`,
-  `setSharing` and recorded `writes` — real file watching and atomic writes are live-check
-  items: Ctrl+L on ws 3 writes `armed: ["3"]` and dispatches install + sync
+  `setSharing` and recorded `writes`/`writeAt` — real file watching and atomic writes are
+  live-check items: Ctrl+L on ws 3 writes `armed: ["3"]` and dispatches install + sync
   with `"3"`; Ctrl+L again writes `[]` and dispatches a sync without it; the badge follows;
-  writing `1` to the state file locks armed boxes (tiles gone, glyph shown, capture handle
-  null) and `0` restores tiles; **positive control**: a query matching a window on ws 3 shows 1
+  **the sync is dispatched before the write** (`writeAt` records how many commands the
+  compositor had already seen when `persist()` ran, and it equals the total after Ctrl+L
+  returns — the write happened after the last dispatch, never before it); an armed box's tile
+  falls back to `capMode: "icon"` outside a share too (armed alone is enough — the compositor
+  denies the capture either way), unarmed tiles staying `"live"`; writing `1` to the state file
+  additionally drops the armed box's tiles entirely (glyph shown) and `0` restores them;
+  **positive control**: a query matching a window on ws 3 shows 1
   match before, 0 while placeholder, 1 after; a selected match whose box becomes a placeholder
   falls to the successor rule; Ctrl+L on the scratchpad row writes `special:scratchpad`; a drop
   onto a placeholder box dispatches the move and leaves no pending row; a pending drop onto ws 3
@@ -395,6 +435,9 @@ the input → `endDrag()`" check.
   `configreloaded` event name and the loss of globals on reload are already verified.) **Live (final)**: a
   real monitor share through the portal (e.g. a video-call test page or `wf-recorder`), armed
   workspaces black in the recorded output including the first frame after switching to them,
-  the overview absent from the recording, the overview's own thumbnail of an armed window black
-  (if it is not, the placeholder is load-bearing and the mapping gap above widens to "thumbnails
-  visible for milliseconds"), and the state file flipping on start and end.
+  the overview itself now visible in the recording (there is no overview-layer exclusion any
+  more — see Verified facts), the overview's own tile for an armed window showing its app icon
+  rather than the window's content (confirming the toplevel-export denial reaches the overview's
+  own captures, not only a fresh `grim` of the workspace directly), the placeholder glyph
+  in place of tiles once a share is active, and pinned-window exposure across a workspace switch
+  (Edge cases) confirmed and documented, and the state file flipping on start and end.
