@@ -37,6 +37,14 @@ removed `walker`.
 - **Scratchpad:** `Ctrl+S` shows Omarchy's scratchpad as its own row below the workspaces
   (hidden on every open). `Enter` or a click on it brings the scratchpad up; drop a window on it
   to send it there silently; find covers its windows while the row is shown.
+- **Lock for screen sharing:** `Ctrl+L` arms the selected workspace: its windows are black in
+  every screen capture from then on (shares, recordings, screenshots), it carries a lock badge,
+  and its box shows icons instead of thumbnails (the compositor denies their export); while a
+  share is running the box shows a placeholder instead. Press again to disarm. The set is kept
+  in `~/.config/omarchy/omyview-locks.json`. Arming is per workspace: the overview still shows
+  every other workspace's live thumbnails to a share viewer, and even an armed box only hides
+  its own app icons and window names behind the lock glyph while sharing — arm every workspace
+  you don't want seen.
 - **Theme-aware.** Pulls the active Omarchy theme's colors and fonts, so it matches the bar
   and re-themes automatically.
 - **Zero idle cost.** The component stays loaded with the shell so open and close can animate,
@@ -122,6 +130,7 @@ Press **SUPER+P**. The overlay opens on your focused monitor.
 | **Ctrl+S**                          | Show / hide the scratchpad row                        |
 | **Enter / click the empty row** (scratchpad) | Bring the scratchpad up and close           |
 | **click a tile in the row** (scratchpad) | Focus that window, raised above its siblings   |
+| **Ctrl+L**               | Arm / disarm the selected workspace for screen sharing     |
 | **Esc / click-out**      | Close                                                     |
 
 Digits jump to a workspace only while the query is empty; once you've typed a letter, digits
