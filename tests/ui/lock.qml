@@ -168,6 +168,12 @@ TestCase {
         ctrlL()
         compare(boxOf(7).armed, true)
         verify(view.testLocks.writes[0].indexOf('"7"') >= 0)
+        // Pin the numeral term: an empty, armed-then-sharing box shows only the lock glyph,
+        // never the big low-contrast numeral underneath it.
+        view.testLocks.setSharing(true)
+        compare(childNamed(boxItemOf(7), "lockGlyph").visible, true)
+        compare(childNamed(boxItemOf(7), "wsNumeral").visible, false,
+                "an empty armed box shows the glyph alone, never the numeral under it")
     }
     // Distinguishes: the hint not advertising the key.
     function test_hint_mentions_ctrl_l() {
@@ -211,8 +217,8 @@ TestCase {
     // Distinguishes: the badge not showing the lock, or showing it on unarmed boxes.
     function test_armed_box_shows_a_lock_badge_and_keeps_its_tiles() {
         ctrlL()                                        // arms ws 1
-        verify(badgeOf(1).text.indexOf("\u{F033E}") >= 0, "lock glyph in the badge")
-        verify(badgeOf(2).text.indexOf("\u{F033E}") < 0)
+        verify(childNamed(badgeOf(1), "wsBadgeText").text.indexOf("\u{F033E}") >= 0, "lock glyph in the badge")
+        verify(childNamed(badgeOf(2), "wsBadgeText").text.indexOf("\u{F033E}") < 0)
         verify(row("0xA") !== null, "not sharing: tiles stay")
         compare(childNamed(boxItemOf(1), "lockGlyph").visible, false)
     }
@@ -290,5 +296,24 @@ TestCase {
         view.testLocks.setSharing(true)
         compare(view.pendingMoves["0xA"], undefined, "pending cleared")
         compare(row("0xA").wsid, 1, "row back on its authoritative workspace")
+    }
+    // Distinguishes: a grab in flight surviving its source box becoming a placeholder (the
+    // dragged window itself is under the "no tiles on a placeholder box" rule too), instead of
+    // being cancelled the same way rebuild() already cancels a drag on a window that closed.
+    function test_drag_in_flight_from_a_box_that_becomes_a_placeholder_is_cancelled() {
+        ctrlL()                                          // arms ws 1 (selected by default)
+        compare(boxOf(1).armed, true)
+        var t = tileOf("0xA"), p = t.mapToItem(tc, t.width / 2, t.height / 2)
+        mousePress(tc, p.x, p.y, Qt.LeftButton)
+        mouseMove(tc, p.x + 12, p.y + 2, 20)
+        mouseMove(tc, p.x + 35, p.y + 20, 20)
+        verify(view.draggingAddress !== "")
+        var before = cmds().length
+        view.testLocks.setSharing(true)
+        compare(view.draggingAddress, "")
+        compare(view.dragTile, null)
+        compare(row("0xA"), null)
+        mouseRelease(tc, p.x + 35, p.y + 20, Qt.LeftButton)
+        compare(cmds().length, before, "no dispatch from the swallowed release")
     }
 }

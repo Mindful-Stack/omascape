@@ -259,7 +259,7 @@ Item {
                 wins.push({ address: o.address, cls: o["class"] || "", title: o.title || "",
                             ax: o.at[0], ay: o.at[1], sw: o.size[0], sh: o.size[1],
                             workspaceId: wsId,
-                            // Reserved for the workspace-lock feature; nothing reads this yet.
+                            // Not read by the overview yet.
                             special: special, floating: !!o.floating,
                             fullscreen: Logic.fullscreenMode(o),
                             grouped: !!(o.grouped && o.grouped.length) })
@@ -500,6 +500,8 @@ Item {
         if (box.placeholder) {                     // dispatch only: no optimistic row, no pending entry
             var ppos = win.floating ? Logic.dropToWindowPos(dropX, dropY, box, mon, params, win) : null
             if (ppos) Hyprland.dispatch(Logic.floatingMoveLua(addr, targetWs, ppos))
+            // A tiled source gets a plain move (no split side): a placeholder box shows no
+            // tiles, so there is no anchor window to insert against.
             else Hyprland.dispatch('hl.dsp.window.move({ workspace = "' + Logic.wsSelector(targetWs) +
                                    '", follow = false, window = "address:' + addr + '" })')
             scheduleRebuild()
@@ -675,7 +677,7 @@ Item {
             var row = { workspaceId: b.workspaceId, bx: b.x, by: b.y, bw: b.w, bh: b.h,
                         focused: !!b.focused, occupied: !!b.occupied,
                         armed: !!b.armed, placeholder: !!b.placeholder,
-                        // Reserved for the workspace-lock feature; nothing reads this yet.
+                        // Not read by the overview yet.
                         special: b.special || "" }
             seen[b.workspaceId] = true
             var idx = boxIndex(b.workspaceId)
@@ -705,9 +707,17 @@ Item {
         var input = buildInput()
         // A box that just became a placeholder must not keep an optimistic tile (it would be a
         // live capture on a box that shows none): drop pending moves into it before applyTiles.
-        var ph = {}
-        for (var pw = 0; pw < input.workspaces.length; pw++) if (input.workspaces[pw].placeholder) ph[input.workspaces[pw].id] = true
-        for (var pa in pendingMoves) if (ph[pendingMoves[pa].workspaceId]) delete pendingMoves[pa]
+        // Target-only: a pending move OUT of a box that becomes a placeholder keeps its row
+        // until it lands or times out — bounded by the pending deadline, and the window itself
+        // is under this same rule once it settles on the placeholder side.
+        if (Object.keys(pendingMoves).length) {
+            var ph = {}
+            for (var pw = 0; pw < input.workspaces.length; pw++) {
+                var w = input.workspaces[pw]
+                if (w.placeholder) ph[w.id] = true
+            }
+            for (var pa in pendingMoves) if (ph[pendingMoves[pa].workspaceId]) delete pendingMoves[pa]
+        }
         root._windows = input.windows
         var cmap = {}, tmap = {}, fmap = {}, wmap = {}
         for (var i = 0; i < input.windows.length; i++) {
@@ -1263,7 +1273,6 @@ Item {
                             id: badge
                             required property var model
                             objectName: "wsBadge"
-                            property alias text: badgeText.text
                             x: model.bx + 6; y: model.by + 6
                             Behavior on x { enabled: root.layoutMotion
                                 NumberAnimation { duration: root.motion.normal; easing.type: root.motion.move } }
@@ -1276,6 +1285,7 @@ Item {
                             color: model.focused ? root.accent : root.badgeColor
                             Text {
                                 id: badgeText
+                                objectName: "wsBadgeText"
                                 anchors.centerIn: parent
                                 text: root.wsLabel(badge.model.workspaceId) + (badge.model.armed ? " \u{F033E}" : "")
                                 color: badge.model.focused ? root.background : root.foreground
