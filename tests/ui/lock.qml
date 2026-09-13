@@ -240,15 +240,18 @@ TestCase {
         compare(view.matches.length, 1, "back")
     }
     // Distinguishes: the selected match's box becoming a placeholder without the successor rule.
+    // The overview stays open throughout — onSharingChanged only rebuilds while open, so a
+    // close/reopen cycle would mask a broken successor rule behind a fresh, unrelated rebuild.
     function test_selected_match_on_a_box_that_becomes_a_placeholder_falls_to_the_successor() {
         var rows = view.compositor.workspaces.values
         rows[1].toplevels.values.push({ lastIpcObject: client("0xC", "chromium2", "Chromium 2", 700, false) })
         view.rebuild()
         type("chromium")
         compare(view.matches.length, 2); compare(view.selectedId, 1)
-        keyClick(Qt.Key_Escape); keyClick(Qt.Key_Escape)
-        // reopen not needed: select ws1, arm, query again
-        view.testLocks.loadArmed(["1"]); view.rebuild()
+        keyClick(Qt.Key_Backspace, Qt.ControlModifier)   // clears the query; overview stays open
+        compare(view.selectedId, 1, "restored to the pre-query selection")
+        ctrlL()                                          // arms ws 1 (still selected)
+        compare(boxOf(1).armed, true)
         type("chromium"); compare(view.selectedMatchAddress, "0xA")
         view.testLocks.setSharing(true)
         compare(view.matches.length, 1); compare(view.selectedMatchAddress, "0xC"); compare(view.selectedId, 2)

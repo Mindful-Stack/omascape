@@ -126,10 +126,7 @@ Item {
     Connections {
         target: locks
         function onLoadedArmed() { root.lockSync(); if (root.opened) root.rebuild() }
-        // Unlike a loaded armed set (only enforcement-relevant until reopened), a share can
-        // start or stop while the overview sits closed-but-loaded, and stale placeholder state
-        // (windows, matches) must not survive to the next query — rebuild unconditionally.
-        function onSharingChanged() { root.rebuild() }
+        function onSharingChanged() { if (root.opened) root.rebuild() }
         function onWriteFailed(why) { Hyprland.dispatch(Logic.notifyLua("omyview: could not save locks: " + why)) }
         function onInvalidFile(why) {
             if (root.lockInvalidNotified) return
