@@ -232,6 +232,16 @@ case("lock install is idempotent and publishes 0", function()
   eq(state(hl), "0", "published 0"); eq(#hl.__mkdirs, 1, "mkdir once")
   eq(#hl.__notifications, 0)
 end)
+-- Regression: os.execute("mkdir -p ...") returns nil on the real compositor even when the
+-- directory WAS created (it reaps the child itself, so Lua never sees an exit status). Gating
+-- L.dir on that return value made every install fail: this pins that a nil return, with a
+-- filesystem that otherwise works, must NOT report and must still publish "0".
+case("lock install: os.execute returning nil does not fail the install (mkdir's return value is untrustworthy)", function()
+  local hl = Mock.new({})
+  run("LOCK_INSTALL", hl)
+  eq(#hl.__notifications, 0, "no failure reported")
+  eq(state(hl), "0", "published despite os.execute returning nil")
+end)
 -- Distinguishes: a counter reset by re-install, or an install that publishes stale state.
 case("lock install preserves the share counter", function()
   local hl = Mock.new({})

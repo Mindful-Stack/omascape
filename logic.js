@@ -854,6 +854,12 @@ function validLockSelector(sel) { return typeof sel === "string" && LOCK_SELECTO
 // its OWN inner pcall; on failure it is re-raised (`error(perr, 0)`) so the outer pcall's own
 // `ok, err` — which reportLua reads — carries the filesystem failure while the layer rule and
 // subscription it already created are left standing on `L`, unaffected by the raised error.
+// `os.execute`'s return value cannot be trusted here (live-verified on this Hyprland build):
+// the compositor reaps the child itself, so Lua never sees an exit status — `os.execute`
+// returns nil even when `mkdir -p` succeeded and the directory exists. Gating on that return
+// value made the dir step fail every time, which meant `L.dir` was never set, `L.publish()`
+// never ran, and the share-state file never existed. The directory is verified directly
+// instead: open (and immediately remove) a probe file in it.
 function lockInstallLua() {
     return (
         'function()\n' +
@@ -879,8 +885,10 @@ function lockInstallLua() {
         '      if not L.dir then\n' +
         '        local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end\n' +
         '        local dir = base .. "/omyview"\n' +
-        '        local r = os.execute("mkdir -p \'" .. dir .. "\'")\n' +
-        '        if r ~= true and r ~= 0 then error("mkdir failed") end\n' +
+        '        os.execute("mkdir -p \'" .. dir .. "\'")\n' +
+        '        local probe = io.open(dir .. "/.omyview-probe", "w")\n' +
+        '        if not probe then error("runtime dir unavailable: " .. dir) end\n' +
+        '        probe:close(); os.remove(dir .. "/.omyview-probe")\n' +
         '        L.dir = dir\n' +
         '      end\n' +
         '      L.publish()\n' +

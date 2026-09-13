@@ -36,6 +36,11 @@ guarantee about the first frame after a *Hyprland config reload* (see Edge cases
 - Lua globals persist between dispatched chunks (one interpreter). `io.open`, `os.getenv`,
   `os.execute("mkdir -p …")` and `os.rename` all work from a dispatched chunk (probed
   2026-09-12), so the observer can create its directory and publish the state file atomically.
+  **`os.execute`'s return value cannot be trusted, though** (found by the Task 6 live check,
+  2026-09-13): the compositor reaps the child itself, so Lua never sees an exit status —
+  `os.execute` returns `nil` even when `mkdir -p` succeeded and the directory exists. The
+  install chunk does not gate on it; it verifies the directory by opening (and immediately
+  removing) a probe file instead.
 - `hl.on("screenshare.state", cb)` fires with `(active: boolean, type: number, name: string)`
   (upstream documents Active, Type, Name; the second argument is not a session id). A screenshot
   fires `true` then `false`. Subscriptions have `:remove()` and `:is_active()`. The event is
@@ -131,14 +136,22 @@ local pok, perr = pcall(function()                             -- filesystem ste
   if not L.dir then
     local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end
     local dir = base .. "/omyview"
-    local r = os.execute("mkdir -p '" .. dir .. "'")           -- once; Lua 5.4 returns true, 5.1 returns 0
-    if r ~= true and r ~= 0 then error("mkdir failed") end
+    os.execute("mkdir -p '" .. dir .. "'")                     -- return value ignored: see below
+    local probe = io.open(dir .. "/.omyview-probe", "w")       -- verify the directory directly
+    if not probe then error("runtime dir unavailable: " .. dir) end
+    probe:close(); os.remove(dir .. "/.omyview-probe")
     L.dir = dir                                                 -- assigned only on success, so a failed install can retry
   end
   L.publish()
 end)
 if not pok then error(perr, 0) end                             -- re-raised so the outer ok, err (reportLua) sees it
 ```
+`os.execute`'s return value is ignored, not checked: on this Hyprland build it is always `nil`,
+even when `mkdir -p` succeeded and the directory exists (the compositor reaps the child itself,
+so Lua never sees an exit status — found by the Task 6 live check). Gating `L.dir` on that
+return value made every install fail, so `L.publish()` never ran and the share-state file never
+existed. The directory is verified directly instead: opening (and immediately removing) a probe
+file inside it.
 - `sharing` counts starts minus ends, clamped at 0. It only drives the placeholder; a stuck
   count shows the placeholder longer than needed, never exposes anything. An idempotent
   re-install preserves it; only a fresh Lua state (Hyprland start or reload) starts at 0. A
