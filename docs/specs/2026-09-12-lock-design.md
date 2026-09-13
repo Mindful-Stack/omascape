@@ -69,7 +69,10 @@ the first frame after a *Hyprland config reload* (see Edge cases).
   and a screenshot's first frame is the whole disclosure. Cost: the user's own screenshots of an
   armed workspace are black too; disarm first. No force switch (arming is already immediate).
 - **Share detection is presentation only.** The compositor observer only tells the overview
-  whether a share is active so it can show the placeholder; a race there is harmless.
+  whether a share is active so it can show the placeholder. A detection race or failure never
+  exposes window pixels (armed tiles are icons, and the compositor denies their export); what it
+  can expose to a viewer is the armed workspace's app identity — icons, names, a find count —
+  until the placeholder lands.
 - **No navigation blocking.**
 - **Persisted** in `~/.config/omarchy/omyview-locks.json` (`{ "armed": ["3", "special:scratchpad"] }`),
   written atomically by omyview (temp file + rename), re-applied at shell start, on
