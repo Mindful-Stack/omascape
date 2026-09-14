@@ -810,6 +810,8 @@ TestCase {
         verify(s !== null, "one box for the scratchpad")
         compare(s.special, "scratchpad")
         compare(s.w, r.cell.w); compare(s.h, boxById(r, 1).h, "same monitor, same cell height")
+        fuzzyCompare(s.x + s.w / 2, r.canvasSize.w / 2, 1, "centred in the row")
+        compare(r.groups[1].w, r.canvasSize.w, "the row spans the canvas")
         compare(s.y, r.groups[1].y + 22, "under the band")
         fuzzyCompare(r.canvasSize.h, s.y + s.h, 0.5)
     }

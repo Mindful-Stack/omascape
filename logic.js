@@ -266,12 +266,16 @@ function layout(input) {
                        inset: inset, headerH: P.headerH, focused: false }
         groups.push(sgroup)
         y += inset + P.headerH
+        // The row spans the canvas and the single cell sits centred in it (a left-aligned lone
+        // cell under a full-width grid read as misplaced in use).
+        var rowW = Math.max(canvasW, cw + 2 * inset)
         var sbox = { workspaceId: sws.id, monitorName: sws.monitorName, monFocused: false,
-                     special: sws.special, x: inset, y: y, w: cw, h: cellHeightFor(monByName[sws.monitorName]),
+                     special: sws.special, x: inset + Math.round((rowW - 2 * inset - cw) / 2), y: y, w: cw,
+                     h: cellHeightFor(monByName[sws.monitorName]),
                      focused: !!sws.focused, occupied: !!sws.occupied }
         boxes.push(sbox); boxByWs[sbox.workspaceId] = sbox
         y += sbox.h + inset
-        sgroup.w = cw + 2 * inset; sgroup.h = y - sgroup.y
+        sgroup.w = rowW; sgroup.h = y - sgroup.y
         if (sgroup.w > canvasW) canvasW = sgroup.w
         break
     }
