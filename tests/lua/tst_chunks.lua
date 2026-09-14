@@ -391,7 +391,11 @@ case("lock sync still disables stale rules when an enable throws", function()
   eq(#hl.__notifications, 1, "the clean retry reports nothing new")
 end)
 -- Distinguishes: a dead handle left in L.rules after a failed re-enable (a later re-arm would
--- keep retrying the same broken rule instead of creating a fresh one).
+-- keep retrying the same broken rule instead of creating a fresh one). `hl.__fail_on =
+-- "rule.set_enabled"` is global (not scoped to one rule), so it also breaks the border's own
+-- set_enabled inside the same sync's L.reconcileBorders() call — dropping ITS handle too (the
+-- point of item 4/minor 6-8: a failed border toggle must drop L.borders[sel]), hence two fresh
+-- rules (exclusion + border) on the next sync, not one.
 case("lock sync drops a dead handle after a failed re-enable, so re-arm creates a fresh rule", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   run("LOCK_SYNC_3", hl)
@@ -400,8 +404,9 @@ case("lock sync drops a dead handle after a failed re-enable, so re-arm creates 
   eq(#hl.__notifications, 1, "reported")
   hl.__fail_on = nil
   run("LOCK_SYNC_3", hl)
-  eq(#hl.__window_rules, 3, "dead handle dropped, a fresh exclusion rule created (plus the earlier border rule)")
-  eq(lastRuleNamed(hl, "omyview-lock-3"):is_enabled(), true, "the fresh rule is enabled")
+  eq(#hl.__window_rules, 4, "dead handles dropped (exclusion AND border), a fresh rule of each created")
+  eq(lastRuleNamed(hl, "omyview-lock-3"):is_enabled(), true, "the fresh exclusion rule is enabled")
+  eq(lastRuleNamed(hl, "omyview-lock-border-3"):is_enabled(), false, "the fresh border rule starts disabled (not sharing)")
 end)
 
 -- Share-time reminder border (docs/specs/2026-09-12-lock-design.md, addendum, 2026-09-14).
@@ -472,6 +477,39 @@ case("install over a stale subVer = 2 (pre-border) subscription replaces it unde
   local active = 0
   for _, s in ipairs(hl.__subs) do if s:is_active() then active = active + 1 end end
   eq(active, 1, "exactly one active subscription")
+end)
+
+-- Quality-review fix (item 3, 2026-09-14): lockSyncLua must not fold a failing L.publish() into
+-- its own ok/err report -- publishing the share-state file is the observer/install's job
+-- (L.reconcileBorders(), not L.apply(), is what a sync calls), so a broken runtime dir must never
+-- turn "every rule reconciled fine" into a reported "lock sync failed". Distinguishes: a
+-- regression that reintroduces L.apply() (and so L.publish()) into the sync chunk's own ok/err.
+case("a failing publish does not fail the sync report, and rules are still reconciled", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  hl.__fail_on = "io.open"          -- would break L.ensureDir()/L.publish() if the sync called them
+  run("LOCK_SYNC_3", hl)
+  eq(#hl.__notifications, 0, "publish is not this chunk's job; no error reported")
+  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true, "exclusion rule still enabled")
+  eq(Mock.ruleNamed(hl, "omyview-lock-border-3") ~= nil, true, "border rule still created")
+end)
+-- Quality-review fix (item 4 / minor 6-8, 2026-09-14): a border rule whose set_enabled throws
+-- (inside L.reconcileBorders(), reached here via the share observer's L.apply()) must drop its
+-- handle from L.borders so the next sync recreates it, exactly like a dead exclusion-rule handle
+-- already does -- and that failure must never touch the exclusion rule, which L.reconcileBorders()
+-- never calls set_enabled on.
+case("a border rule's failed enable drops its handle; the exclusion rule is unaffected; the next sync recreates and re-enables it", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  local before = Mock.ruleNamed(hl, "omyview-lock-border-3")
+  eq(before:is_enabled(), true, "enabled while sharing")
+  hl.__fail_on = "rule.set_enabled"
+  Mock.fire(hl, "screenshare.state", true, 0, "HDMI-A-1")   -- another share start: L.apply() re-affirms the border, fails
+  hl.__fail_on = nil
+  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true, "exclusion rule untouched by the border's failure")
+  run("LOCK_SYNC_3", hl)
+  local fresh = lastRuleNamed(hl, "omyview-lock-border-3")
+  eq(fresh ~= before, true, "a fresh border rule handle was created")
+  eq(fresh:is_enabled(), true, "the fresh handle is enabled (still sharing)")
 end)
 
 -- Distinguishes: sync before install silently doing nothing.

@@ -891,6 +891,11 @@ Item {
     Connections {
         target: config
         function onWorkspacesChanged() { if (root.opened) root.rebuild() }
+        // Share-time reminder border (addendum): a config edit re-syncs borders live.
+        // lockSync() already returns early when `locks.armed === null`, so this is a no-op
+        // before the locks file has resolved.
+        function onLockBorderChanged() { root.lockSync() }
+        function onLockBorderSizeChanged() { root.lockSync() }
     }
 
     PanelWindow {

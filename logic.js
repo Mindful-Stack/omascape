@@ -917,6 +917,13 @@ function lockInstallLua() {
         '  local ok, err = pcall(function()\n' +
         '    local L = _G.omyview_lock\n' +
         '    if not L then L = { rules = {}, sharing = 0, sub = nil, subVer = nil, dir = nil, borders = {}, borderCfg = nil }; _G.omyview_lock = L end\n' +
+        // Mirrors how the exclusion table (`L.rules`) is always present: an observer re-install
+        // after a shell restart can land on an `_G.omyview_lock` created by an OLDER omyview
+        // build that predates the border addendum (so `L.borders` was never set at all, and the
+        // `if not L` branch above is skipped because L already exists) -- this keeps that
+        // observer's border handles (an empty table the first time, whatever it already holds
+        // otherwise) instead of leaving `L.borders` nil until the next sync happens to set it.
+        '    L.borders = L.borders or {}\n' +
         '    function L.ensureDir()\n' +
         '      local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end\n' +
         '      local dir = base .. "/omyview"\n' +
@@ -943,20 +950,29 @@ function lockInstallLua() {
         '      local rok, rerr = os.rename(tmp, dst)\n' +
         '      if not rok then os.remove(tmp); error("rename share-state: " .. tostring(rerr)) end\n' +
         '    end\n' +
-        // L.apply() is defined here — before the subVer check and the observer subscription
-        // below, which calls it — so a fresh subscription's callback always closes over a
-        // fully-defined L.apply (never a stale/partial one from an earlier install). It is the
-        // single place that both republishes the share-state file AND reconciles every border
-        // rule's enabled state against the current sharing count and its exclusion rule's own
-        // state; every border rule is created DISABLED by lockSyncLua and only ever toggled here.
-        // Each toggle is guarded on its own (never letting one bad rule handle abort the rest, or
-        // — called from the observer's own pcall — surface as anything worse than a missed cue).
-        '    function L.apply()\n' +
-        '      L.publish()\n' +
+        // L.reconcileBorders()/L.apply() are defined here — before the subVer check and the
+        // observer subscription below, which calls L.apply() — so a fresh subscription's
+        // callback always closes over fully-defined functions (never stale/partial ones from an
+        // earlier install). L.reconcileBorders() toggles every border rule's enabled state
+        // against the current sharing count and its exclusion rule's own state; every border
+        // rule is created DISABLED by lockSyncLua and only ever toggled here. Each toggle is
+        // guarded on its own (never letting one bad rule handle abort the rest); a handle whose
+        // set_enabled throws is dropped from L.borders so the next sync recreates it instead of
+        // retrying a dead handle. L.apply() runs the border reconcile BEFORE L.publish() — a
+        // publish failure (raised out of L.apply()) must not leave the border rules untouched;
+        // reconciling first means it always runs regardless of the publish outcome. lockSyncLua
+        // calls L.reconcileBorders() directly, never L.apply(): publishing the share-state file
+        // is the observer/install's job, not a rule sync's — see lockSyncLua below.
+        '    function L.reconcileBorders()\n' +
         '      for sel, b in pairs(L.borders or {}) do\n' +
         '        local r = L.rules[sel]\n' +
-        '        pcall(function() b:set_enabled(L.sharing > 0 and r ~= nil and r:is_enabled()) end)\n' +
+        '        local tok = pcall(function() b:set_enabled(L.sharing > 0 and r ~= nil and r:is_enabled()) end)\n' +
+        '        if not tok then L.borders[sel] = nil end\n' +
         '      end\n' +
+        '    end\n' +
+        '    function L.apply()\n' +
+        '      L.reconcileBorders()\n' +
+        '      L.publish()\n' +
         '    end\n' +
         '    if L.subVer ~= ' + LOCK_OBSERVER_VERSION + ' then\n' +
         '      if L.sub then pcall(function() L.sub:remove() end) end\n' +
@@ -992,9 +1008,16 @@ function lockInstallLua() {
 // size coerced to an integer 0..20, exactly like parseConfig — this builder must not trust that
 // every caller already went through parseConfig. A second, disabled, named rule per armed
 // selector (`omyview-lock-border-<sel>`) carries the border; it is only ever ENABLED by
-// `L.apply()` (called at the end of this chunk, and by the share observer), never here — this
-// function only creates/keeps the rule disabled and, on a colour/size change, disables and drops
-// every existing border rule so they are rebuilt against the new config on demand.
+// `L.reconcileBorders()` (called directly at the end of this chunk, and via `L.apply()` by the
+// share observer and install), never here — this function only creates/keeps the rule disabled
+// and, on a colour/size change, disables and drops every existing border rule so they are
+// rebuilt against the new config on demand. This chunk calls `L.reconcileBorders()`, NOT
+// `L.apply()`: `L.apply()` also republishes the share-state file, but a sync never changes
+// `L.sharing` (only the observer does), so republishing here would be redundant and — being a
+// filesystem operation — could fail for reasons that have nothing to do with rule reconciliation.
+// Folding that failure into this chunk's `ok, err` would make "lock sync failed" notifications
+// fire for a stale runtime directory even though every rule was reconciled correctly; skipping
+// the publish keeps this chunk's report about rule reconciliation only, per the addendum.
 function lockSyncLua(armed, border) {
     var sels = []
     for (var i = 0; i < (armed || []).length; i++) if (validLockSelector(armed[i])) sels.push('"' + armed[i] + '"')
@@ -1027,6 +1050,12 @@ function lockSyncLua(armed, border) {
         '    for sel, r in pairs(L.rules) do if not want[sel] then step(sel, function() r:set_enabled(false) end) end end\n' +
         '    L.borders = L.borders or {}\n' +
         '    local cfgKey = BORDER.color .. "/" .. BORDER.size\n' +
+        // A dropped rule cannot be destroyed in this Hyprland Lua API (0.56.2) -- only disabled.
+        // A colour/size change therefore disables every existing border rule and drops it from
+        // L.borders (not from the compositor's rule table, which has no removal call); the loop
+        // below re-creates one under the SAME name (`omyview-lock-border-<sel>`) per still-armed
+        // selector. The stale, disabled, unreferenced rule handle is simply abandoned -- inert
+        // and harmless, the same trade-off lockSyncLua already makes for a dead exclusion handle.
         '    if L.borderCfg ~= cfgKey then\n' +
         '      for _, br in pairs(L.borders) do pcall(function() br:set_enabled(false) end) end\n' +
         '      L.borders = {}\n' +
@@ -1042,8 +1071,7 @@ function lockSyncLua(armed, border) {
         '      end)\n' +
         '    end\n' +
         '    ok, err = #failed == 0, table.concat(failed, "; ")\n' +
-        '    local aok, aerr = pcall(function() L.apply() end)\n' +
-        '    if not aok then ok, err = false, (err ~= "" and (err .. "; ") or "") .. tostring(aerr) end\n' +
+        '    L.reconcileBorders()\n' +
         '  end\n' +
         '  ' + reportLua('lock sync') + '\n' +
         'end'

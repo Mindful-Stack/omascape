@@ -44,7 +44,10 @@ removed `walker`.
   in `~/.config/omarchy/omyview-locks.json`. Arming is per workspace: the overview still shows
   every other workspace's live thumbnails to a share viewer, and even an armed box only hides
   its own app icons and window names behind the lock glyph while sharing — arm every workspace
-  you don't want seen.
+  you don't want seen. While a share is active, an armed workspace's own windows also carry a
+  coloured border as a local reminder (`lockBorder`/`lockBorderSize` below) — that rim is for you
+  only: a viewer's capture shows just the plain black box with a thin rim around it, never your
+  windows.
 - **Theme-aware.** Pulls the active Omarchy theme's colors and fonts, so it matches the bar
   and re-themes automatically.
 - **Zero idle cost.** The component stays loaded with the shell so open and close can animate,
@@ -171,7 +174,9 @@ Optional user settings live in `~/.config/omarchy/omyview.json` (watched; edits 
   "scrim": true,
   "hint": true,
   "workspaces": 10,
-  "motion": "auto"
+  "motion": "auto",
+  "lockBorder": "rgb(ff4444)",
+  "lockBorderSize": 6
 }
 ```
 
@@ -185,6 +190,12 @@ Optional user settings live in `~/.config/omarchy/omyview.json` (watched; edits 
   follows. `0` shows only what Hyprland reports.
 - `motion` — `"auto"` (default) animates only when Hyprland's `animations:enabled` is on;
   `"full"` always animates; `"off"` never does (every duration is 0).
+- `lockBorder` — colour of the share-time reminder border on an armed workspace's windows
+  (default `"rgb(ff4444)"`); only the `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are accepted,
+  anything else falls back to the default.
+- `lockBorderSize` — width of that border, `0`–`20` (default `6`); `0` disables the cue. The rim
+  is a local reminder only — a viewer's capture always shows a plain black box with, at most, a
+  thin rim around it, never your windows.
 
 ### Blurred scrim (optional, Hyprland side)
 

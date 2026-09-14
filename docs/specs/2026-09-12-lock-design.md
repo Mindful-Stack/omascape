@@ -89,7 +89,7 @@ the first frame after a *Hyprland config reload* (see Edge cases).
 - **Persisted** in `~/.config/omarchy/omyview-locks.json` (`{ "armed": ["3", "special:scratchpad"] }`),
   written atomically by omyview (temp file + rename), re-applied at shell start, on
   `configreloaded`, and on every open.
-- **One sync chunk reconciles the whole set.** `lockSyncLua(armed)` creates or enables one
+- **One sync chunk reconciles the whole set.** `lockSyncLua(armed, border)` creates or enables one
   named rule per armed selector and disables every other rule the table knows. There is no
   separate arm/disarm; every change re-sends the full set. Idempotent by construction.
 - **Named rules, one retained handle per selector.** `name = "omyview-lock-" .. sel`; a disarmed
@@ -139,6 +139,8 @@ if not L then
   L = { rules = {}, sharing = 0, sub = nil, subVer = nil, dir = nil, borders = {}, borderCfg = nil }
   _G.omyview_lock = L
 end
+L.borders = L.borders or {}   -- mirrors L.rules always being present: an observer re-install can
+                               -- land on an _G.omyview_lock from a pre-addendum omyview build
 function L.ensureDir()                                         -- probe first; called on EVERY install, see below
   local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end
   local dir = base .. "/omyview"
@@ -165,16 +167,26 @@ function L.publish()                                          -- defined uncondi
   local ok, err = os.rename(tmp, dst)
   if not ok then os.remove(tmp); error("rename share-state: " .. tostring(err)) end
 end
--- Share-time reminder border (addendum): the single place that both republishes share-state AND
--- reconciles every border rule's enabled state, so it must be defined before the subVer check
--- and the observer subscription below, which calls it instead of L.publish() directly. Each
--- toggle is its own pcall: one bad rule handle never blocks the republish or the other borders.
-function L.apply()
-  L.publish()
+-- Share-time reminder border (addendum, revised 2026-09-14 quality-review pass): L.reconcileBorders()
+-- toggles every border rule's enabled state; each toggle is its own pcall (one bad rule handle
+-- never blocks the others), and a handle whose set_enabled throws is dropped from L.borders so
+-- the next sync recreates it instead of retrying a dead handle (mirrors the exclusion rule's own
+-- dead-handle handling in lockSyncLua below). L.apply() -- the single place that both reconciles
+-- borders AND republishes share-state -- runs the border reconcile BEFORE L.publish(): a publish
+-- failure raises out of L.apply(), and reconciling first means that failure can never leave the
+-- border rules untouched. Both functions are defined here, before the subVer check and the
+-- observer subscription below (which calls L.apply()), so a fresh subscription's callback always
+-- closes over fully-defined functions.
+function L.reconcileBorders()
   for sel, b in pairs(L.borders or {}) do
     local r = L.rules[sel]
-    pcall(function() b:set_enabled(L.sharing > 0 and r ~= nil and r:is_enabled()) end)
+    local ok = pcall(function() b:set_enabled(L.sharing > 0 and r ~= nil and r:is_enabled()) end)
+    if not ok then L.borders[sel] = nil end
   end
+end
+function L.apply()
+  L.reconcileBorders()
+  L.publish()
 end
 if L.subVer ~= LOCK_OBSERVER_VERSION then                      -- see LOCK_OBSERVER_VERSION below
   if L.sub then pcall(function() L.sub:remove() end) end
@@ -269,7 +281,10 @@ for sel in pairs(want) do
 end
 for sel, r in pairs(L.rules) do if not want[sel] then step(sel, function() r:set_enabled(false) end) end end
 -- Share-time reminder border (addendum): a colour/size change disables and drops every existing
--- border rule so each armed selector gets a fresh one built against the new config.
+-- border rule so each armed selector gets a fresh one built against the new config. A dropped
+-- rule cannot be destroyed in this Hyprland Lua API (0.56.2) -- only disabled -- so the stale,
+-- disabled, unreferenced handle is simply abandoned; the loop below re-creates one under the SAME
+-- name per still-armed selector, the same trade-off already made for a dead exclusion handle.
 L.borders = L.borders or {}
 local cfgKey = BORDER.color .. "/" .. BORDER.size
 if L.borderCfg ~= cfgKey then
@@ -287,7 +302,12 @@ for sel in pairs(want) do
   end)
 end
 local ok, err = #failed == 0, table.concat(failed, "; ")
-pcall(function() L.apply() end)                    -- publish + reconcile every border's enabled state
+-- L.reconcileBorders(), NOT L.apply(): a sync never changes L.sharing (only the observer does),
+-- so republishing share-state here would be redundant, and folding a publish failure into this
+-- chunk's own ok/err would report "lock sync failed" for a stale runtime directory even though
+-- every rule was reconciled correctly. Publishing is the observer/install's job (see L.apply()
+-- above); this chunk's report describes rule reconciliation only.
+L.reconcileBorders()
 -- reportLua('lock sync')   -- one report naming every selector that failed
 ```
 Every create/enable/disable is guarded on its own, so one failure never prevents the other
@@ -333,7 +353,7 @@ array or `null` to mean "refused"). A second watched `FileView` on the share-sta
 armed.includes(sel) && sharing`.
 
 **Persistence ordering:** update the in-memory `armed` first (`toggleInMemory(sel)`), dispatch
-`lockSyncLua(armed)` immediately (the compositor is the enforcement; it must not wait for disk),
+`lockSyncLua(armed, border)` immediately (the compositor is the enforcement; it must not wait for disk),
 then write the file atomically (`persist()`, temp + rename). The split exists so the CALLER
 (`lockToggleSelected()`) can enforce that ordering: `toggleInMemory` never touches disk, and
 `persist` writes whatever `armed` currently holds, so it must run only right after the sync that
@@ -346,7 +366,7 @@ keyed by it for lock purposes. The file stores selectors, so the scratchpad entr
 dynamic id.
 
 **Sync points.** `lockInstallLua()` is dispatched on `Component.onCompleted` (kept loaded: shell
-start), on the `configreloaded` raw event, and in `open()`. `lockSyncLua(armed)` is dispatched
+start), on the `configreloaded` raw event, and in `open()`. `lockSyncLua(armed, border)` is dispatched
 **only when `armed` is resolved**: on the locks file's first successful load and every accepted
 change, on `configreloaded`, in `open()`, and after every accepted `toggleInMemory` (immediately,
 before `persist()`). While `armed` is unresolved
@@ -408,10 +428,14 @@ by your audience" cue, because a workspace armed for one meeting is easy to forg
 - **Mechanism.** For every armed selector the compositor holds a *second* named rule,
   `omyview-lock-border-<sel>`, `{ match = { workspace = sel }, border_color = <color>,
   border_size = <size> }` (`border_size` only when size > 0). It is created **disabled** by
-  `lockSyncLua` and enabled by the observer while `L.sharing > 0` **and** the selector's
-  exclusion rule is enabled; `L.apply()` does both the publish and this toggling, and the
-  observer calls `L.apply()` (observer version bumped, since its body changed). Disarming
-  disables both rules; re-arming during a share enables both on the same sync.
+  `lockSyncLua` and enabled while `L.sharing > 0` **and** the selector's exclusion rule is
+  enabled, by `L.reconcileBorders()` — called directly by `lockSyncLua` (rule arm/disarm changed,
+  publish did not) and via `L.apply()` (`L.reconcileBorders()` then `L.publish()`, in that order
+  so a publish failure can never leave a border rule unreconciled) by the share observer and
+  install (observer version bumped, since its body changed to call `L.apply()`). A border rule
+  whose `set_enabled` throws is dropped from `L.borders`, exactly like a dead exclusion handle:
+  the next sync recreates it. Disarming disables both rules; re-arming during a share enables
+  both on the same sync.
 - **What a viewer sees.** Probed 2026-09-14: the capture shows the black exclusion box with a
   thin rim of the border colour around it. Locally the windows carry a wide coloured frame.
   Accepted: the rim gives the audience nothing, and no new surface is added to the capture.
@@ -421,16 +445,23 @@ by your audience" cue, because a workspace armed for one meeting is easy to forg
   chunk) and `lockBorderSize` (integer 0–20, default 6; 0 keeps the user's border size).
   `Overview` passes both into `lockSyncLua(armed, { color, size })`. When the pair differs from
   what the compositor's rules were created with (`L.borderCfg`), the sync disables the old
-  border rules, drops them, and recreates them with the new values.
+  border rules, drops them, and recreates them with the new values. `OmyviewConfig`'s watched
+  `FileView` applies an edit live, and the `Connections { target: config }` block's
+  `onLockBorderChanged`/`onLockBorderSizeChanged` handlers re-run `lockSync()` so the change
+  reaches the compositor immediately, not only on the next arm/disarm (guarded, like every other
+  `lockSync()` call site, by `locks.armed === null`).
 - **Presentation only.** The reminder shares the observer's race and its `kind == 1` filter;
   a missed event costs the cue, never protection.
 - **Tests.** Lua: sync creates border rules disabled outside a share; a share start enables
   them only for armed selectors; a share end disables them; disarm disables both rules; re-arm
   during a share enables both; a config change recreates the border rules with the new
-  colour/size; the observer-version bump removes the old subscription. Tier 1: `parseConfig`
-  accepts the hex forms and rejects `red`, `rgb(zz)` and injection-shaped strings; the sync
-  chunk carries the colour and size. UI: the sync command dispatched after Ctrl+L contains
-  `border_color = "rgb(ff4444)"`.
+  colour/size; the observer-version bump removes the old subscription; a failing publish during
+  a sync is not folded into the sync's own report and the exclusion rules stay enabled; a border
+  rule's failed enable drops its handle without touching the exclusion rule, and the next sync
+  recreates and re-enables it. Tier 1: `parseConfig` accepts the hex forms and rejects `red`,
+  `rgb(zz)` and injection-shaped strings; the sync chunk carries the colour and size. UI: the
+  sync command dispatched after Ctrl+L contains the configured colour and size (`rgb(ff4444)`,
+  `6`).
 
 ## Edge cases
 
