@@ -136,11 +136,13 @@ while the subscription created above it is left standing:
 ```lua
 local L = _G.omyview_lock
 if not L then
-  L = { rules = {}, sharing = 0, sub = nil, subVer = nil, dir = nil, borders = {}, borderCfg = nil }
+  L = { rules = {}, sharing = 0, effective = false, grace = nil, sub = nil, subVer = nil,
+        dir = nil, borders = {}, borderCfg = nil }
   _G.omyview_lock = L
 end
 L.borders = L.borders or {}   -- mirrors L.rules always being present: an observer re-install can
                                -- land on an _G.omyview_lock from a pre-addendum omyview build
+if L.effective == nil then L.effective = L.sharing > 0 end   -- same, for a pre-hysteresis build
 function L.ensureDir()                                         -- probe first; called on EVERY install, see below
   local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end
   local dir = base .. "/omyview"
@@ -162,7 +164,7 @@ function L.publish()                                          -- defined uncondi
     f = io.open(tmp, "w")
   end
   if not f then error("cannot write share-state") end
-  local w = f:write(L.sharing > 0 and "1" or "0"); local c = f:close()
+  local w = f:write(L.effective and "1" or "0"); local c = f:close()   -- the debounced value, not the raw count
   if not w or not c then os.remove(tmp); error("write share-state failed") end
   local ok, err = os.rename(tmp, dst)
   if not ok then os.remove(tmp); error("rename share-state: " .. tostring(err)) end
@@ -180,13 +182,20 @@ end
 -- reconcile BEFORE L.publish(): a publish failure raises out of L.apply(), and reconciling first
 -- means that failure can never leave the border rules untouched. Both functions are defined
 -- here, before the subVer check and the observer subscription below (which calls L.apply()), so
--- a fresh subscription's callback always closes over fully-defined functions.
+-- a fresh subscription's callback always closes over fully-defined functions. Round 3: the
+-- reconcile follows L.effective (the debounced share state, see the hysteresis note below), and
+-- is idempotent -- a rule already in the wanted state is left alone, because every set_enabled on
+-- a border rule relayouts the workspace and this runs on every sync. The is_enabled() read is
+-- pcall'd too: a handle that throws on the read is "unknown", and unknown means set it.
 function L.reconcileBorders()
   for sel, b in pairs(L.borders or {}) do
     local r = L.rules[sel]
-    local want = L.sharing > 0 and r ~= nil and r:is_enabled()
-    local ok = pcall(function() b:set_enabled(want) end)
-    if not ok and want then L.borders[sel] = nil end   -- keep the handle when the retry is a disable
+    local want = L.effective and r ~= nil and r:is_enabled()
+    local iok, cur = pcall(function() return b:is_enabled() end)
+    if (not iok) or cur ~= want then
+      local ok = pcall(function() b:set_enabled(want) end)
+      if not ok and want then L.borders[sel] = nil end   -- keep the handle when the retry is a disable
+    end
   end
 end
 function L.apply()
@@ -202,7 +211,20 @@ if not (L.sub and L.sub:is_active()) then
   L.sub = hl.on("screenshare.state", function(active, kind)
     if kind == 1 then return end                               -- 1 = window export (the overview's own thumbnails)
     local ok, err = pcall(function()
-      L.sharing = math.max(0, L.sharing + (active and 1 or -1)); L.apply()
+      L.sharing = math.max(0, L.sharing + (active and 1 or -1))
+      if L.sharing > 0 then                                    -- ON edge: immediate, and cancels a pending off
+        if L.grace then pcall(function() L.grace:set_enabled(false) end); L.grace = nil end
+        if not L.effective then L.effective = true; L.apply() end
+      else                                                     -- OFF edge: only arm the grace timer
+        if L.grace then pcall(function() L.grace:set_enabled(false) end) end
+        L.grace = hl.timer(function()                          -- a FRESH oneshot per off-edge; see below
+          L.grace = nil
+          local gok, gerr = pcall(function()
+            if L.sharing == 0 and L.effective then L.effective = false; L.apply() end
+          end)
+          if not gok then print("omyview: share grace timer failed: " .. tostring(gerr)) end
+        end, { timeout = LOCK_SHARE_GRACE_MS, type = "oneshot" })
+      end
     end)
     if not ok then print("omyview: share observer failed: " .. tostring(err)) end
   end)
@@ -232,8 +254,9 @@ nothing, and `L.publish()` — called from every install *and* every share event
 set to `/run/user/1000/omyview` while the directory did not exist, after the user's first manual
 restart.
 
-**`LOCK_OBSERVER_VERSION`** (a `logic.js` constant, currently `3` — bumped for the share-time
-reminder border addendum below, whose callback change is `L.publish()` → `L.apply()`) guards the subscription
+**`LOCK_OBSERVER_VERSION`** (a `logic.js` constant, currently `4` — bumped at 3 for the
+share-time reminder border addendum below, whose callback change was `L.publish()` → `L.apply()`,
+and at 4 for the share-state hysteresis below) guards the subscription
 itself, not just the directory: the observer's callback is a closure created once and owned by
 the subscription object, and `_G.omyview_lock` — including that subscription — survives a shell
 restart untouched. `L.sub:is_active()` alone would stay `true` forever, so the install's own
@@ -244,11 +267,41 @@ ever happening, leaving the OLD behaviour running against the NEW shell indefini
 change to the callback body must bump `LOCK_OBSERVER_VERSION`; a mismatch on install removes the
 existing subscription (even though it is still active) before the block below creates a fresh
 one.
-- `sharing` counts starts minus ends, clamped at 0. It only drives the placeholder; a stuck
-  count shows the placeholder longer than needed, never exposes anything. An idempotent
-  re-install preserves it; only a fresh Lua state (Hyprland start or reload) starts at 0. A
-  share already running when the observer is created is therefore not detected until the next
-  share event: accepted false negative (enforcement does not depend on it).
+
+**`LOCK_SHARE_GRACE_MS`** (a `logic.js` constant, `3000`) — the share signal flaps, so the OFF
+direction is debounced. `src/managers/screenshare/ScreenshareSession.cpp` (0.56.2) emits
+`screenshare.state(true, …)` on every successfully **copied frame** and `screenshare.state(false,
+…)` from a 500 ms timer that fires whenever no frame arrived for half a second. A consumer that
+pulls frames irregularly — OBS recording a mostly static screen — therefore makes the compositor
+emit false/true pairs for the whole recording: measured 2026-09-14, 20 events in 30 s, every
+false run under ~1 s. Applying each edge (versions ≤ 3 did) toggled `border_size` off and on,
+which relayouts the workspace — the user saw every window on the armed workspace "constantly
+resizing" — and rewrote `share-state` twice a second, which the shell's `FileView` dutifully
+reloaded. So:
+- `L.sharing` stays the raw balanced counter, incremented/decremented and clamped on every edge.
+- `L.effective` is the debounced boolean the border rules (`L.reconcileBorders()`) and the state
+  file (`L.publish()`) follow. A true edge sets it immediately (no delay on the ON edge — the
+  reminder must never lag the share starting) and cancels any pending grace; a false edge leaves
+  it alone and arms `L.grace`, a `LOCK_SHARE_GRACE_MS` oneshot that clears it only if the count
+  is still 0 when it fires. A flap inside the window produces no `set_enabled` on any rule and no
+  state-file write at all.
+- A **fresh timer per off-edge**, never a re-armed one. Probed live on 0.56.2:
+  `hl.timer(cb, { timeout = <ms>, type = "oneshot" })` starts immediately; `set_enabled(false)`
+  before it fires cancels it for good (it never fires); `set_enabled(false)` then `(true)` before
+  the deadline still fires once, at the original deadline; but a timer that has already fired can
+  **not** be restarted — `set_enabled(true)`/`set_timeout` after firing do nothing. `is_enabled()`
+  is true only while pending.
+- The timer callback carries its own `pcall` + `print`: it runs on the compositor's clock, outside
+  the event handler's `pcall`, and `L.apply()` can raise (a publish failure).
+- 3 s leaves headroom over the longest measured gap for a fully static screen. The trade-off is
+  one-sided: too short means flicker; too long means the rim (and the overview's placeholder)
+  lingers a few seconds after the share really ended — cosmetic only, because the exclusion rules
+  are always on and privacy never depends on this signal.
+- `sharing` counts starts minus ends, clamped at 0. It only drives the placeholder (through
+  `L.effective`); a stuck count shows the placeholder longer than needed, never exposes anything.
+  An idempotent re-install preserves it; only a fresh Lua state (Hyprland start or reload) starts
+  at 0. A share already running when the observer is created is therefore not detected until the
+  next share event: accepted false negative (enforcement does not depend on it).
 - `publish()` writes `1`/`0` atomically, checking write and close before the rename so a failed
   write never replaces valid state, and removing the temp file on any failure (write, close, or
   rename) so it never lingers; every install publishes the current value so a fresh shell never
@@ -266,7 +319,10 @@ one.
 
 **`lockSyncLua(armed, border)`** — `armed` is the full array of selectors (`"3"`,
 `"special:scratchpad"`); `border` is `{ color, size }` (the share-time reminder border, see the
-addendum below), re-validated by the builder and interpolated as a `BORDER` local:
+addendum below), re-validated by the builder and interpolated as a `BORDER` local —
+`{ color = <c>, pair = "<c> <c>", size = <n> }`, where `pair` is the same colour twice (see the
+addendum: a single value colours only the ACTIVE border) and `color` stays the single configured
+value, which is what the user sets and what `L.borderCfg` compares:
 ```lua
 local L = _G.omyview_lock; if not L then error("lock not installed") end
 local want = {}; for _, sel in ipairs(ARMED) do want[sel] = true end
@@ -300,7 +356,7 @@ end
 for sel in pairs(want) do
   step(sel, function()
     if not L.borders[sel] then
-      local spec = { name = "omyview-lock-border-" .. sel, match = { workspace = sel }, border_color = BORDER.color, enabled = false }
+      local spec = { name = "omyview-lock-border-" .. sel, match = { workspace = sel }, border_color = BORDER.pair, enabled = false }
       if BORDER.size > 0 then spec.border_size = BORDER.size end
       L.borders[sel] = hl.window_rule(spec)
     end
@@ -433,9 +489,16 @@ Approved after the first manual pass: the user wanted a local "this workspace is
 by your audience" cue, because a workspace armed for one meeting is easy to forget in the next.
 
 - **Mechanism.** For every armed selector the compositor holds a *second* named rule,
-  `omyview-lock-border-<sel>`, `{ match = { workspace = sel }, border_color = <color>,
-  border_size = <size> }` (`border_size` only when size > 0). It is created **disabled** by
-  `lockSyncLua` and enabled while `L.sharing > 0` **and** the selector's exclusion rule is
+  `omyview-lock-border-<sel>`, `{ match = { workspace = sel }, border_color = "<color> <color>",
+  border_size = <size> }` (`border_size` only when size > 0). The colour is emitted **twice**
+  (round 3, 2026-09-14): `parseBorderColorRule` in `src/desktop/rule/windowRule/WindowRule.cpp`
+  fills only `active` from a single value and sets `inactive` only when the string holds exactly
+  two colour tokens and no `deg`, and `WindowRuleApplicator.cpp` overrides the inactive border
+  colour only if `inactive` is present — so a single value rims just the focused window, which is
+  what the user saw live. (The round-1 probe note claiming a single value rims every window was
+  wrong; the source is authoritative here.) The rule is created **disabled** by
+  `lockSyncLua` and enabled while `L.effective` (the debounced share state — see
+  `LOCK_SHARE_GRACE_MS` above) **and** the selector's exclusion rule is
   enabled, by `L.reconcileBorders()` — called directly by `lockSyncLua` (rule arm/disarm changed,
   publish did not) and via `L.apply()` (`L.reconcileBorders()` then `L.publish()`, in that order
   so a publish failure can never leave a border rule unreconciled) by the share observer and
@@ -444,8 +507,10 @@ by your audience" cue, because a workspace armed for one meeting is easy to forg
   dead exclusion handle: the next sync recreates it. A failed DISABLE keeps the handle instead
   (rules cannot be destroyed in this Hyprland Lua API, only disabled — dropping it there would
   leave the rule stuck enabled and unreachable) so the next reconcile can retry it, exactly like
-  the exclusion handles' own disable-direction safety. Disarming disables both rules; re-arming
-  during a share enables both on the same sync.
+  the exclusion handles' own disable-direction safety. The reconcile is idempotent (round 3): a
+  rule already in the wanted state is never re-set, because each `set_enabled` on a border rule
+  relayouts the workspace and a reconcile runs on every sync. Disarming disables both rules;
+  re-arming during a share enables both on the same sync.
 - **What a viewer sees.** Probed 2026-09-14: the capture shows the black exclusion box with a
   thin rim of the border colour around it. Locally the windows carry a wide coloured frame.
   Accepted: the rim gives the audience nothing, and no new surface is added to the capture.
@@ -453,6 +518,8 @@ by your audience" cue, because a workspace armed for one meeting is easy to forg
   (string, default `"rgb(ff4444)"`; only `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are
   accepted, anything else falls back to the default — the value is interpolated into a Lua
   chunk) and `lockBorderSize` (integer 0–20, default 6; 0 keeps the user's border size).
+  `lockBorder` stays a **single** colour in the config and the README — the doubling into
+  `"<c> <c>"` is a rendering detail of the emitted rule, not something the user writes.
   `Overview` passes both into `lockSyncLua(armed, { color, size })`. When the pair differs from
   what the compositor's rules were created with (`L.borderCfg`), the sync disables the old
   border rules, drops them, and recreates them with the new values. `OmyviewConfig`'s watched
@@ -461,17 +528,28 @@ by your audience" cue, because a workspace armed for one meeting is easy to forg
   reaches the compositor immediately, not only on the next arm/disarm (guarded, like every other
   `lockSync()` call site, by `locks.armed === null`).
 - **Presentation only.** The reminder shares the observer's race and its `kind == 1` filter;
-  a missed event costs the cue, never protection.
-- **Tests.** Lua: sync creates border rules disabled outside a share; a share start enables
-  them only for armed selectors; a share end disables them; disarm disables both rules; re-arm
-  during a share enables both; a config change recreates the border rules with the new
-  colour/size; the observer-version bump removes the old subscription; a failing publish during
-  a sync is not folded into the sync's own report and the exclusion rules stay enabled; a border
-  rule's failed enable drops its handle without touching the exclusion rule, and the next sync
-  recreates and re-enables it. Tier 1: `parseConfig` accepts the hex forms and rejects `red`,
-  `rgb(zz)` and injection-shaped strings; the sync chunk carries the colour and size. UI: the
-  sync command dispatched after Ctrl+L contains the configured colour and size (`rgb(ff4444)`,
-  `6`).
+  a missed event costs the cue, never protection. Since round 3 it also lags the *end* of a share
+  by up to `LOCK_SHARE_GRACE_MS` (3 s), by design — same reasoning: the cue may linger, never
+  under-report.
+- **Tests.** Lua: sync creates border rules disabled outside a share, carrying the configured
+  colour **doubled** (`"rgb(ff4444) rgb(ff4444)"`, so unfocused windows are rimmed too); a share
+  start enables them only for armed selectors; a share end disables them once the grace expires;
+  disarm disables both rules; re-arm during a share enables both; a config change recreates the
+  border rules with the new (doubled) colour/size; the observer-version bump removes the old
+  subscription (cases for a stale `subVer` of 2 and of 3); a failing publish during a sync is not
+  folded into the sync's own report and the exclusion rules stay enabled; a border rule's failed
+  enable drops its handle without touching the exclusion rule, and the next sync recreates and
+  re-enables it; a failed disable keeps it for the next reconcile. Hysteresis (round 3, driving
+  the mock's `hl.timer`/`M.elapse` and a per-rule `__set_calls` counter): four flapping edges
+  inside the grace window produce no `set_enabled` and no state-file write; an off edge takes
+  effect only after the full `LOCK_SHARE_GRACE_MS` (checked at grace − 1 ms and at grace); a true
+  edge inside the window cancels the pending timer for good; a sync while sharing does not re-set
+  an already-enabled border rule. The suite reads `LOCK_SHARE_GRACE_MS` out of the same rendered
+  chunk file rather than copying the number. Tier 1: `parseConfig` accepts the hex forms and
+  rejects `red`, `rgb(zz)` and injection-shaped strings; the sync chunk carries the colour and
+  size. UI: the sync command dispatched after Ctrl+L contains the configured size and the doubled
+  colour (`"rgb(3355ff) rgb(3355ff)"`, `3`), and a live `lockBorder`/`lockBorderSize` edit
+  re-syncs.
 
 ## Edge cases
 
@@ -553,7 +631,9 @@ by your audience" cue, because a workspace armed for one meeting is easy to forg
   handle kept; sync `["3"]` again → same handle re-enabled (no second rule); sync
   `["3","special:scratchpad"]` → both enabled; share start → `1` published, rules untouched
   (already enabled); second start then one end → still `1`; last end → `0`; end without start
-  → clamped at `0`; a rule creation or setter throwing → one report naming it, every other
+  → clamped at `0` (since round 3 the mock also models `hl.timer`, and every "end" case advances
+  its fake clock past `LOCK_SHARE_GRACE_MS` — an end that leaves another share running arms no
+  timer at all); a rule creation or setter throwing → one report naming it, every other
   selector still created/enabled and every stale rule still disabled (per-step pcall); a
   failed mkdir → install reports and `L.dir` stays unset so the next install retries; a failed
   write → no rename (state file unchanged);

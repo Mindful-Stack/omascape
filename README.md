@@ -47,7 +47,9 @@ removed `walker`.
   you don't want seen. While a share is active, an armed workspace's own windows also carry a
   coloured border as a local reminder (`lockBorder`/`lockBorderSize` below) — that rim is for you
   only: a viewer's capture shows just the plain black box with a thin rim around it, never your
-  windows.
+  windows. The rim (and the placeholder in the overview) can lag a few seconds behind the end of
+  a share: the compositor signals sharing per captured frame, so omyview waits out a short grace
+  period before believing a share is over, rather than flickering whenever the frames pause.
 - **Theme-aware.** Pulls the active Omarchy theme's colors and fonts, so it matches the bar
   and re-themes automatically.
 - **Zero idle cost.** The component stays loaded with the shell so open and close can animate,
