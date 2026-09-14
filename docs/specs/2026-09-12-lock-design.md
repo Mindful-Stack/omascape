@@ -363,6 +363,38 @@ the input → `endDrag()`" check.
 
 **Hint row.** Adds `ctrl+l · lock`.
 
+## Share-time reminder border (addendum, 2026-09-14)
+
+Approved after the first manual pass: the user wanted a local "this workspace is not viewable
+by your audience" cue, because a workspace armed for one meeting is easy to forget in the next.
+
+- **Mechanism.** For every armed selector the compositor holds a *second* named rule,
+  `omyview-lock-border-<sel>`, `{ match = { workspace = sel }, border_color = <color>,
+  border_size = <size> }` (`border_size` only when size > 0). It is created **disabled** by
+  `lockSyncLua` and enabled by the observer while `L.sharing > 0` **and** the selector's
+  exclusion rule is enabled; `L.apply()` does both the publish and this toggling, and the
+  observer calls `L.apply()` (observer version bumped, since its body changed). Disarming
+  disables both rules; re-arming during a share enables both on the same sync.
+- **What a viewer sees.** Probed 2026-09-14: the capture shows the black exclusion box with a
+  thin rim of the border colour around it. Locally the windows carry a wide coloured frame.
+  Accepted: the rim gives the audience nothing, and no new surface is added to the capture.
+- **Config** (`~/.config/omarchy/omyview.json`, parsed by `Logic.parseConfig`): `lockBorder`
+  (string, default `"rgb(ff4444)"`; only `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are
+  accepted, anything else falls back to the default — the value is interpolated into a Lua
+  chunk) and `lockBorderSize` (integer 0–20, default 6; 0 keeps the user's border size).
+  `Overview` passes both into `lockSyncLua(armed, { color, size })`. When the pair differs from
+  what the compositor's rules were created with (`L.borderCfg`), the sync disables the old
+  border rules, drops them, and recreates them with the new values.
+- **Presentation only.** The reminder shares the observer's race and its `kind == 1` filter;
+  a missed event costs the cue, never protection.
+- **Tests.** Lua: sync creates border rules disabled outside a share; a share start enables
+  them only for armed selectors; a share end disables them; disarm disables both rules; re-arm
+  during a share enables both; a config change recreates the border rules with the new
+  colour/size; the observer-version bump removes the old subscription. Tier 1: `parseConfig`
+  accepts the hex forms and rejects `red`, `rgb(zz)` and injection-shaped strings; the sync
+  chunk carries the colour and size. UI: the sync command dispatched after Ctrl+L contains
+  `border_color = "rgb(ff4444)"`.
+
 ## Edge cases
 
 - **Share starts while the overview is open**: the state file flips → `FileView` fires →
