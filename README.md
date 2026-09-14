@@ -44,12 +44,14 @@ removed `walker`.
   in `~/.config/omarchy/omyview-locks.json`. Arming is per workspace: the overview still shows
   every other workspace's live thumbnails to a share viewer, and even an armed box only hides
   its own app icons and window names behind the lock glyph while sharing — arm every workspace
-  you don't want seen. While a share is active, an armed workspace's own windows also carry a
-  coloured border as a local reminder (`lockBorder`/`lockBorderSize` below) — that rim is for you
-  only: a viewer's capture shows just the plain black box with a thin rim around it, never your
-  windows. The rim (and the placeholder in the overview) can lag a few seconds behind the end of
-  a share: the compositor signals sharing per captured frame, so omyview waits out a short grace
-  period before believing a share is over, rather than flickering whenever the frames pause.
+  you don't want seen. While a share is running, any monitor showing an armed workspace gets a
+  thin coloured frame around its edges as a local reminder (`lockBorder`/`lockBorderSize` below) —
+  that frame is for you only: it is blanked in every capture, so a viewer just sees the plain
+  black box, never your windows and never the frame. It follows whatever that monitor is showing,
+  the scratchpad included, and it is click-through and reserves no space. The frame (and the
+  placeholder in the overview) can lag a few seconds behind the end of a share: the compositor
+  signals sharing per captured frame, so omyview waits out a short grace period before believing a
+  share is over, rather than flickering whenever the frames pause.
 - **Theme-aware.** Pulls the active Omarchy theme's colors and fonts, so it matches the bar
   and re-themes automatically.
 - **Zero idle cost.** The component stays loaded with the shell so open and close can animate,
@@ -192,12 +194,13 @@ Optional user settings live in `~/.config/omarchy/omyview.json` (watched; edits 
   follows. `0` shows only what Hyprland reports.
 - `motion` — `"auto"` (default) animates only when Hyprland's `animations:enabled` is on;
   `"full"` always animates; `"off"` never does (every duration is 0).
-- `lockBorder` — colour of the share-time reminder border on an armed workspace's windows
-  (default `"rgb(ff4444)"`); only the `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are accepted,
-  anything else falls back to the default.
-- `lockBorderSize` — width of that border, `0`–`20` (default `6`); `0` omits the width override —
-  the rim uses your Hyprland border size. The rim is a local reminder only — a viewer's capture
-  always shows a plain black box with, at most, a thin rim around it, never your windows.
+- `lockBorder` — colour of the share-time reminder frame drawn around a monitor showing an armed
+  workspace (default `"rgb(ff4444)"`); only the `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are
+  accepted (Hyprland's own colour syntax), anything else falls back to the default. The alpha of
+  `rgba(...)` is honoured, so e.g. `"rgba(ff444480)"` is a half-transparent red.
+- `lockBorderSize` — thickness of that frame in pixels, `0`–`20` (default `6`); `0` turns the
+  reminder off. The frame is a local reminder only — it is blanked in every capture, so a
+  viewer always sees a plain black box, never your windows and never the frame.
 
 ### Blurred scrim (optional, Hyprland side)
 
