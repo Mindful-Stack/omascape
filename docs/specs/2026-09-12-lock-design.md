@@ -136,7 +136,7 @@ while the subscription created above it is left standing:
 ```lua
 local L = _G.omyview_lock
 if not L then
-  L = { rules = {}, sharing = 0, sub = nil, subVer = nil, dir = nil }
+  L = { rules = {}, sharing = 0, sub = nil, subVer = nil, dir = nil, borders = {}, borderCfg = nil }
   _G.omyview_lock = L
 end
 function L.ensureDir()                                         -- probe first; called on EVERY install, see below
@@ -165,6 +165,17 @@ function L.publish()                                          -- defined uncondi
   local ok, err = os.rename(tmp, dst)
   if not ok then os.remove(tmp); error("rename share-state: " .. tostring(err)) end
 end
+-- Share-time reminder border (addendum): the single place that both republishes share-state AND
+-- reconciles every border rule's enabled state, so it must be defined before the subVer check
+-- and the observer subscription below, which calls it instead of L.publish() directly. Each
+-- toggle is its own pcall: one bad rule handle never blocks the republish or the other borders.
+function L.apply()
+  L.publish()
+  for sel, b in pairs(L.borders or {}) do
+    local r = L.rules[sel]
+    pcall(function() b:set_enabled(L.sharing > 0 and r ~= nil and r:is_enabled()) end)
+  end
+end
 if L.subVer ~= LOCK_OBSERVER_VERSION then                      -- see LOCK_OBSERVER_VERSION below
   if L.sub then pcall(function() L.sub:remove() end) end
   L.sub = nil
@@ -174,14 +185,14 @@ if not (L.sub and L.sub:is_active()) then
   L.sub = hl.on("screenshare.state", function(active, kind)
     if kind == 1 then return end                               -- 1 = window export (the overview's own thumbnails)
     local ok, err = pcall(function()
-      L.sharing = math.max(0, L.sharing + (active and 1 or -1)); L.publish()
+      L.sharing = math.max(0, L.sharing + (active and 1 or -1)); L.apply()
     end)
     if not ok then print("omyview: share observer failed: " .. tostring(err)) end
   end)
 end
 local pok, perr = pcall(function()                             -- filesystem step, isolated
   L.ensureDir()                                                 -- unconditional: see below
-  L.publish()
+  L.apply()
 end)
 if not pok then error(perr, 0) end                             -- re-raised so the outer ok, err (reportLua) sees it
 ```
@@ -204,7 +215,8 @@ nothing, and `L.publish()` — called from every install *and* every share event
 set to `/run/user/1000/omyview` while the directory did not exist, after the user's first manual
 restart.
 
-**`LOCK_OBSERVER_VERSION`** (a `logic.js` constant, currently `2`) guards the subscription
+**`LOCK_OBSERVER_VERSION`** (a `logic.js` constant, currently `3` — bumped for the share-time
+reminder border addendum below, whose callback change is `L.publish()` → `L.apply()`) guards the subscription
 itself, not just the directory: the observer's callback is a closure created once and owned by
 the subscription object, and `_G.omyview_lock` — including that subscription — survives a shell
 restart untouched. `L.sub:is_active()` alone would stay `true` forever, so the install's own
@@ -235,7 +247,9 @@ one.
   both count as real shares — a window share cannot capture the overview or any other window, so
   only a window capture is safe to assume is the overview's own thumbnail traffic.
 
-**`lockSyncLua(armed)`** — `armed` is the full array of selectors (`"3"`, `"special:scratchpad"`):
+**`lockSyncLua(armed, border)`** — `armed` is the full array of selectors (`"3"`,
+`"special:scratchpad"`); `border` is `{ color, size }` (the share-time reminder border, see the
+addendum below), re-validated by the builder and interpolated as a `BORDER` local:
 ```lua
 local L = _G.omyview_lock; if not L then error("lock not installed") end
 local want = {}; for _, sel in ipairs(ARMED) do want[sel] = true end
@@ -254,7 +268,26 @@ for sel in pairs(want) do
   end)
 end
 for sel, r in pairs(L.rules) do if not want[sel] then step(sel, function() r:set_enabled(false) end) end end
+-- Share-time reminder border (addendum): a colour/size change disables and drops every existing
+-- border rule so each armed selector gets a fresh one built against the new config.
+L.borders = L.borders or {}
+local cfgKey = BORDER.color .. "/" .. BORDER.size
+if L.borderCfg ~= cfgKey then
+  for _, b in pairs(L.borders) do pcall(function() b:set_enabled(false) end) end
+  L.borders = {}
+  L.borderCfg = cfgKey
+end
+for sel in pairs(want) do
+  step(sel, function()
+    if not L.borders[sel] then
+      local spec = { name = "omyview-lock-border-" .. sel, match = { workspace = sel }, border_color = BORDER.color, enabled = false }
+      if BORDER.size > 0 then spec.border_size = BORDER.size end
+      L.borders[sel] = hl.window_rule(spec)
+    end
+  end)
+end
 local ok, err = #failed == 0, table.concat(failed, "; ")
+pcall(function() L.apply() end)                    -- publish + reconcile every border's enabled state
 -- reportLua('lock sync')   -- one report naming every selector that failed
 ```
 Every create/enable/disable is guarded on its own, so one failure never prevents the other
@@ -268,7 +301,11 @@ workspace `7`, so a hand-edited `"007"` would arm workspace 7 with no badge to s
 is refused (Hyprland workspaces are 1-indexed). Invalid selectors are refused by
 `Logic.parseLocks`/`Logic.toggleSelector` before they can reach a chunk at all; the array filter
 inside the sync builder itself is defense in depth, and drops anything that slips through
-silently, with no notification.
+silently, with no notification. `border.color` is validated again, in JavaScript, against the
+same `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex regex as `Logic.parseConfig` (defense in depth: the
+value is interpolated into a Lua string literal) and `border.size` is coerced to an integer
+0..20; either falling back to the default (`"rgb(ff4444)"` / `6`) rather than reaching the chunk
+unvalidated.
 
 **Rule semantics to prove in the plan's first task, on 0.56.2, with captured pixels** (not
 `is_enabled()`): create enabled → capture an existing window is black; `set_enabled(false)` →

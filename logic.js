@@ -681,6 +681,14 @@ function hyprAnimationsEnabled(json) {
     return true
 }
 
+// Share-time reminder border colour (docs/specs/2026-09-12-lock-design.md, addendum): only the
+// `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are accepted, on both sides — here in parseConfig,
+// and again in lockSyncLua right before the value is interpolated into a Lua chunk (defense in
+// depth: a config value could reach the builder through a path that never went through
+// parseConfig, e.g. a future caller, and the value is untrusted text landing inside a Lua string
+// literal).
+var LOCK_BORDER_RE = /^rgba?\([0-9a-fA-F]{6}([0-9a-fA-F]{2})?\)$/
+
 // ~/.config/omarchy/omyview.json → a fully-defaulted settings object. Every key has a default;
 // a missing file, a parse error, a wrong type or an unknown key never changes behaviour.
 function parseConfig(raw) {
@@ -692,7 +700,11 @@ function parseConfig(raw) {
         hint: (typeof o.hint === "boolean") ? o.hint : true,
         workspaces: (typeof o.workspaces === "number" && isFinite(o.workspaces))
             ? Math.max(0, Math.floor(o.workspaces)) : 10,
-        motion: (o.motion === "full" || o.motion === "off") ? o.motion : "auto"
+        motion: (o.motion === "full" || o.motion === "off") ? o.motion : "auto",
+        lockBorder: (typeof o.lockBorder === "string" && LOCK_BORDER_RE.test(o.lockBorder))
+            ? o.lockBorder : "rgb(ff4444)",
+        lockBorderSize: (typeof o.lockBorderSize === "number" && isFinite(o.lockBorderSize))
+            ? Math.max(0, Math.min(20, Math.floor(o.lockBorderSize))) : 6
     }
 }
 
@@ -856,7 +868,12 @@ function validLockSelector(sel) { return typeof sel === "string" && LOCK_SELECTO
 // (`if not (L.sub and L.sub:is_active())`) would keep the STALE callback forever; a shell
 // restart alone could never deliver a behaviour change to a running compositor, only a
 // `configreloaded` (which drops `_G` entirely) would.
-var LOCK_OBSERVER_VERSION = 2
+// 3 (share-time reminder border, 2026-09-14 addendum): the callback body changed from calling
+// `L.publish()` to calling `L.apply()` (publish, then toggle every border rule's enabled state
+// against the current sharing/exclusion state) — a running compositor whose callback still only
+// publishes would never toggle a border added after it started, so the body change itself must
+// force the stale callback out, the same as the `kind` filter did at version 2.
+var LOCK_OBSERVER_VERSION = 3
 
 // Install the compositor-side lock state: one table in _G, and the share observer that
 // publishes 1/0 to $XDG_RUNTIME_DIR/omyview/share-state. No layer rule for the overview's own
@@ -899,7 +916,7 @@ function lockInstallLua() {
         'function()\n' +
         '  local ok, err = pcall(function()\n' +
         '    local L = _G.omyview_lock\n' +
-        '    if not L then L = { rules = {}, sharing = 0, sub = nil, subVer = nil, dir = nil }; _G.omyview_lock = L end\n' +
+        '    if not L then L = { rules = {}, sharing = 0, sub = nil, subVer = nil, dir = nil, borders = {}, borderCfg = nil }; _G.omyview_lock = L end\n' +
         '    function L.ensureDir()\n' +
         '      local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end\n' +
         '      local dir = base .. "/omyview"\n' +
@@ -926,6 +943,21 @@ function lockInstallLua() {
         '      local rok, rerr = os.rename(tmp, dst)\n' +
         '      if not rok then os.remove(tmp); error("rename share-state: " .. tostring(rerr)) end\n' +
         '    end\n' +
+        // L.apply() is defined here — before the subVer check and the observer subscription
+        // below, which calls it — so a fresh subscription's callback always closes over a
+        // fully-defined L.apply (never a stale/partial one from an earlier install). It is the
+        // single place that both republishes the share-state file AND reconciles every border
+        // rule's enabled state against the current sharing count and its exclusion rule's own
+        // state; every border rule is created DISABLED by lockSyncLua and only ever toggled here.
+        // Each toggle is guarded on its own (never letting one bad rule handle abort the rest, or
+        // — called from the observer's own pcall — surface as anything worse than a missed cue).
+        '    function L.apply()\n' +
+        '      L.publish()\n' +
+        '      for sel, b in pairs(L.borders or {}) do\n' +
+        '        local r = L.rules[sel]\n' +
+        '        pcall(function() b:set_enabled(L.sharing > 0 and r ~= nil and r:is_enabled()) end)\n' +
+        '      end\n' +
+        '    end\n' +
         '    if L.subVer ~= ' + LOCK_OBSERVER_VERSION + ' then\n' +
         '      if L.sub then pcall(function() L.sub:remove() end) end\n' +
         '      L.sub = nil\n' +
@@ -934,13 +966,13 @@ function lockInstallLua() {
         '    if not (L.sub and L.sub:is_active()) then\n' +
         '      L.sub = hl.on("screenshare.state", function(active, kind)\n' +
         '        if kind == 1 then return end\n' +
-        '        local sok, serr = pcall(function() L.sharing = math.max(0, L.sharing + (active and 1 or -1)); L.publish() end)\n' +
+        '        local sok, serr = pcall(function() L.sharing = math.max(0, L.sharing + (active and 1 or -1)); L.apply() end)\n' +
         '        if not sok then print("omyview: share observer failed: " .. tostring(serr)) end\n' +
         '      end)\n' +
         '    end\n' +
         '    local pok, perr = pcall(function()\n' +
         '      L.ensureDir()\n' +
-        '      L.publish()\n' +
+        '      L.apply()\n' +
         '    end)\n' +
         '    if not pok then error(perr, 0) end\n' +
         '  end)\n' +
@@ -955,12 +987,25 @@ function lockInstallLua() {
 // reported once, naming every selector that failed. A failed re-enable drops the dead handle
 // from L.rules (rather than leaving it there forever, unusable): the next sync that arms the
 // same selector sees no handle and creates a fresh rule instead of retrying a broken one.
-function lockSyncLua(armed) {
+// `border` ({ color, size }) is the share-time reminder border (addendum, 2026-09-14):
+// validated again here with LOCK_BORDER_RE (the value is interpolated into the chunk) and its
+// size coerced to an integer 0..20, exactly like parseConfig — this builder must not trust that
+// every caller already went through parseConfig. A second, disabled, named rule per armed
+// selector (`omyview-lock-border-<sel>`) carries the border; it is only ever ENABLED by
+// `L.apply()` (called at the end of this chunk, and by the share observer), never here — this
+// function only creates/keeps the rule disabled and, on a colour/size change, disables and drops
+// every existing border rule so they are rebuilt against the new config on demand.
+function lockSyncLua(armed, border) {
     var sels = []
     for (var i = 0; i < (armed || []).length; i++) if (validLockSelector(armed[i])) sels.push('"' + armed[i] + '"')
+    var b = border || {}
+    var color = (typeof b.color === "string" && LOCK_BORDER_RE.test(b.color)) ? b.color : "rgb(ff4444)"
+    var sizeNum = Number(b.size)
+    var size = isFinite(sizeNum) ? Math.max(0, Math.min(20, Math.floor(sizeNum))) : 6
     return (
         'function()\n' +
         '  local ARMED = {' + sels.join(', ') + '}\n' +
+        '  local BORDER = { color = "' + color + '", size = ' + size + ' }\n' +
         '  local L = _G.omyview_lock\n' +
         '  local ok, err = L ~= nil, "lock not installed"\n' +
         '  if L then\n' +
@@ -980,7 +1025,25 @@ function lockSyncLua(armed) {
         '      end)\n' +
         '    end\n' +
         '    for sel, r in pairs(L.rules) do if not want[sel] then step(sel, function() r:set_enabled(false) end) end end\n' +
+        '    L.borders = L.borders or {}\n' +
+        '    local cfgKey = BORDER.color .. "/" .. BORDER.size\n' +
+        '    if L.borderCfg ~= cfgKey then\n' +
+        '      for _, br in pairs(L.borders) do pcall(function() br:set_enabled(false) end) end\n' +
+        '      L.borders = {}\n' +
+        '      L.borderCfg = cfgKey\n' +
+        '    end\n' +
+        '    for sel in pairs(want) do\n' +
+        '      step(sel, function()\n' +
+        '        if not L.borders[sel] then\n' +
+        '          local spec = { name = "omyview-lock-border-" .. sel, match = { workspace = sel }, border_color = BORDER.color, enabled = false }\n' +
+        '          if BORDER.size > 0 then spec.border_size = BORDER.size end\n' +
+        '          L.borders[sel] = hl.window_rule(spec)\n' +
+        '        end\n' +
+        '      end)\n' +
+        '    end\n' +
         '    ok, err = #failed == 0, table.concat(failed, "; ")\n' +
+        '    local aok, aerr = pcall(function() L.apply() end)\n' +
+        '    if not aok then ok, err = false, (err ~= "" and (err .. "; ") or "") .. tostring(aerr) end\n' +
         '  end\n' +
         '  ' + reportLua('lock sync') + '\n' +
         'end'

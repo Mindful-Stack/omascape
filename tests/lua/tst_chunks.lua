@@ -224,6 +224,16 @@ end)
 
 local function state(hl) return hl.__files[hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state"] end
 local function statePath(hl) return hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state" end
+-- Mock.ruleNamed returns the FIRST rule matching `name` in hl.__window_rules (a flat log that
+-- keeps every rule ever created, including dead handles a failed re-enable dropped from
+-- L.rules/L.borders). A border config change intentionally creates a SECOND rule with the same
+-- name as the one it just disabled and dropped — this returns the LAST match instead, i.e. the
+-- one still referenced by the compositor's tables.
+local function lastRuleNamed(hl, name)
+  local found = nil
+  for _, r in ipairs(hl.__window_rules) do if r.spec.name == name then found = r end end
+  return found
+end
 -- Distinguishes: a non-idempotent install (two subscriptions) or one that never publishes. The
 -- runtime dir is re-verified on every install by design (see lockInstallLua's L.ensureDir), but
 -- probe-first — a bare mkdir costs ~2.5ms of compositor main-thread time, paid on every overview
@@ -330,7 +340,7 @@ end)
 case("lock sync creates one enabled named rule per selector", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   run("LOCK_SYNC_3_SCRATCH", hl)
-  eq(#hl.__window_rules, 2)
+  eq(#hl.__window_rules, 4, "one exclusion rule and one (disabled) border rule per selector")
   local r3 = Mock.ruleNamed(hl, "omyview-lock-3"); eq(r3 ~= nil, true, "named rule for 3")
   eq(r3:is_enabled(), true); eq(r3.spec.match.workspace, "3"); eq(r3.spec.no_screen_share, true)
   eq(Mock.ruleNamed(hl, "omyview-lock-special:scratchpad"):is_enabled(), true)
@@ -343,7 +353,7 @@ case("lock sync disables removed selectors and reuses the handle on re-arm", fun
   run("LOCK_SYNC_3", hl); run("LOCK_SYNC_NONE", hl)
   eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), false, "disabled")
   run("LOCK_SYNC_3", hl)
-  eq(#hl.__window_rules, 1, "same handle re-enabled, no second rule")
+  eq(#hl.__window_rules, 2, "same handle re-enabled, no second rule (plus the earlier border rule)")
   eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true)
 end)
 -- Distinguishes: the share observer touching rules (they must stay as the sync left them) or
@@ -390,9 +400,80 @@ case("lock sync drops a dead handle after a failed re-enable, so re-arm creates 
   eq(#hl.__notifications, 1, "reported")
   hl.__fail_on = nil
   run("LOCK_SYNC_3", hl)
-  eq(#hl.__window_rules, 2, "dead handle dropped, a new rule was created")
-  eq(hl.__window_rules[2]:is_enabled(), true, "the fresh rule is enabled")
+  eq(#hl.__window_rules, 3, "dead handle dropped, a fresh exclusion rule created (plus the earlier border rule)")
+  eq(lastRuleNamed(hl, "omyview-lock-3"):is_enabled(), true, "the fresh rule is enabled")
 end)
+
+-- Share-time reminder border (docs/specs/2026-09-12-lock-design.md, addendum, 2026-09-14).
+-- Distinguishes: a border rule created enabled (it must start disabled — only L.apply() ever
+-- toggles it), unnamed, matched on something other than the workspace, or missing the
+-- configured colour/size.
+case("lock sync creates a disabled border rule with the configured colour and size, outside a share", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  run("LOCK_SYNC_3", hl)
+  local border = Mock.ruleNamed(hl, "omyview-lock-border-3")
+  eq(border ~= nil, true, "border rule created")
+  eq(border:is_enabled(), false, "disabled outside a share")
+  eq(border.spec.match.workspace, "3")
+  eq(border.spec.border_color, "rgb(ff4444)")
+  eq(border.spec.border_size, 6)
+end)
+-- Distinguishes: the border rule not following a share starting/ending, or following it for a
+-- selector that is not armed.
+case("a share start enables the border rule for an armed selector; a share end disables it", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
+  local border = Mock.ruleNamed(hl, "omyview-lock-border-3")
+  eq(border:is_enabled(), false)
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  eq(border:is_enabled(), true, "enabled: armed and a share is active")
+  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
+  eq(border:is_enabled(), false, "disabled once the share ends")
+end)
+-- Distinguishes: disarming during a share leaving the border enabled (it must follow the
+-- exclusion rule, not the share state alone), or re-arming not restoring it.
+case("disarming during a share disables both rules; re-arming enables both", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  local excl, border = Mock.ruleNamed(hl, "omyview-lock-3"), Mock.ruleNamed(hl, "omyview-lock-border-3")
+  eq(excl:is_enabled(), true); eq(border:is_enabled(), true)
+  run("LOCK_SYNC_NONE", hl)
+  eq(excl:is_enabled(), false, "exclusion disarmed"); eq(border:is_enabled(), false, "border follows it")
+  run("LOCK_SYNC_3", hl)
+  eq(excl:is_enabled(), true, "re-armed"); eq(border:is_enabled(), true, "border re-enabled: still sharing")
+end)
+-- Distinguishes: a colour/size change reusing the stale rule (never picking up the new value)
+-- instead of disabling and dropping it so a fresh one is built; and a size of 0 leaving a stray
+-- `border_size` field in the spec instead of omitting it outright.
+case("a config change disables the old border rule and creates a new one with the new colour, omitting border_size at 0", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
+  local old = Mock.ruleNamed(hl, "omyview-lock-border-3")
+  local n0 = #hl.__window_rules
+  run("LOCK_SYNC_3_BLUE", hl)
+  eq(old:is_enabled(), false, "old colour rule disabled")
+  eq(#hl.__window_rules, n0 + 1, "a fresh border rule was created")
+  local fresh = lastRuleNamed(hl, "omyview-lock-border-3")
+  eq(fresh ~= old, true, "a distinct rule object")
+  eq(fresh.spec.border_color, "rgb(3355ff)")
+  eq(fresh.spec.border_size, nil, "size 0 omits border_size entirely")
+  eq(fresh:is_enabled(), false, "created disabled (not sharing)")
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  eq(fresh:is_enabled(), true, "enabled now that a share is active")
+end)
+-- Distinguishes: a running compositor whose OLD callback only calls L.publish() (pre-border)
+-- surviving a shell restart unreplaced — it would never pick up border toggling. LOCK_OBSERVER_VERSION
+-- was bumped to 3 for exactly this; a stale subVer of 2 (the pre-addendum version) must be
+-- replaced just like any other mismatch.
+case("install over a stale subVer = 2 (pre-border) subscription replaces it under the current LOCK_OBSERVER_VERSION", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  local oldSub = hl.__subs[1]
+  hl.__env._G.omyview_lock.subVer = 2
+  run("LOCK_INSTALL", hl)
+  eq(oldSub:is_active(), false, "the v2 subscription was removed")
+  local active = 0
+  for _, s in ipairs(hl.__subs) do if s:is_active() then active = active + 1 end end
+  eq(active, 1, "exactly one active subscription")
+end)
+
 -- Distinguishes: sync before install silently doing nothing.
 case("lock sync before install reports", function()
   local hl = Mock.new({}); run("LOCK_SYNC_3", hl)

@@ -40,9 +40,12 @@ TestCase {
         console.log("CHUNK SCRATCHPAD_SHOW " + Logic.scratchpadShowLua())
         console.log("CHUNK SCRATCHPAD_FOCUS " + Logic.scratchpadFocusLua("0xabc"))
         console.log("CHUNK LOCK_INSTALL " + Logic.lockInstallLua())
-        console.log("CHUNK LOCK_SYNC_3 " + Logic.lockSyncLua(["3"]))
-        console.log("CHUNK LOCK_SYNC_3_SCRATCH " + Logic.lockSyncLua(["3", "special:scratchpad"]))
-        console.log("CHUNK LOCK_SYNC_NONE " + Logic.lockSyncLua([]))
+        console.log("CHUNK LOCK_SYNC_3 " + Logic.lockSyncLua(["3"], { color: "rgb(ff4444)", size: 6 }))
+        console.log("CHUNK LOCK_SYNC_3_SCRATCH " + Logic.lockSyncLua(["3", "special:scratchpad"], { color: "rgb(ff4444)", size: 6 }))
+        console.log("CHUNK LOCK_SYNC_NONE " + Logic.lockSyncLua([], { color: "rgb(ff4444)", size: 6 }))
+        // Share-time reminder border (addendum): a different colour AND size 0, to prove a
+        // config change recreates the border rule and that size 0 omits border_size entirely.
+        console.log("CHUNK LOCK_SYNC_3_BLUE " + Logic.lockSyncLua(["3"], { color: "rgb(3355ff)", size: 0 }))
         var badText = "bad \\\\ \" line\nbreak"
         console.log("CHUNK NOTIFY " + Logic.notifyLua(badText))
         // Regression guard for the escape-then-truncate bug: the 200th raw character (index 199,
@@ -67,8 +70,8 @@ QT_QPA_PLATFORMTHEME=generic QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1
 sed -n 's/^.*CHUNK //p' "$fixture/qml.out" > "$fixture/chunks.txt"
 
 count=$(grep -c . "$fixture/chunks.txt" || true)
-if [ "$qml_status" -ne 0 ] || [ "$count" -lt 13 ]; then
-  echo "FAIL: $RUNNER exited $qml_status; expected 13 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
+if [ "$qml_status" -ne 0 ] || [ "$count" -lt 14 ]; then
+  echo "FAIL: $RUNNER exited $qml_status; expected 14 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
   echo "--- raw qml output:" >&2; cat "$fixture/qml.out" >&2
   exit 1
 fi

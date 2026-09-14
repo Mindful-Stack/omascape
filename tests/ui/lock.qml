@@ -128,6 +128,10 @@ TestCase {
         ctrlL()
         compare(view.testLocks.writes.length, 1); compare(JSON.parse(view.testLocks.writes[0]).armed, ["2"])
         compare(syncs().length, before + 1); verify(lastSync().indexOf('"2"') >= 0)
+        // Share-time reminder border (addendum): config.lockBorder/lockBorderSize (the stub's
+        // defaults) must reach the dispatched sync chunk.
+        verify(lastSync().indexOf('color = "rgb(ff4444)"') >= 0, "border colour reached the sync, got: " + lastSync())
+        verify(lastSync().indexOf('size = 6') >= 0, "border size reached the sync, got: " + lastSync())
         compare(boxOf(2).armed, true)
         ctrlL()
         compare(JSON.parse(view.testLocks.writes[1]).armed, [])

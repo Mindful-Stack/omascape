@@ -184,6 +184,24 @@ TestCase {
         compare(Logic.parseConfig('').workspaces, 10)
         compare(Logic.parseConfig('{"workspaces": 4}').motion, "auto")   // other keys keep defaults
     }
+    // Share-time reminder border (docs/specs/2026-09-12-lock-design.md, addendum): `lockBorder`
+    // accepts only the rgb(hhhhhh) / rgba(hhhhhhhh) hex forms, `lockBorderSize` is an integer
+    // 0..20 defaulting to 6. Anything else falls back to the default, including an
+    // injection-shaped string trying to break out of the Lua string the builder puts it in.
+    function test_parse_config_lock_border() {
+        compare(Logic.parseConfig('{"lockBorder": "rgb(ff4444)"}').lockBorder, "rgb(ff4444)")
+        compare(Logic.parseConfig('{"lockBorder": "rgba(ff444488)"}').lockBorder, "rgba(ff444488)")
+        compare(Logic.parseConfig('{"lockBorder": "red"}').lockBorder, "rgb(ff4444)")
+        compare(Logic.parseConfig('{"lockBorder": "rgb(zz)"}').lockBorder, "rgb(ff4444)")
+        compare(Logic.parseConfig('{"lockBorder": "rgb(ff4444)\\"); error(\\"x"}').lockBorder, "rgb(ff4444)")
+        compare(Logic.parseConfig('').lockBorder, "rgb(ff4444)")
+        compare(Logic.parseConfig('{"lockBorderSize": 10}').lockBorderSize, 10)
+        compare(Logic.parseConfig('{"lockBorderSize": 0}').lockBorderSize, 0)
+        compare(Logic.parseConfig('{"lockBorderSize": 25}').lockBorderSize, 20)
+        compare(Logic.parseConfig('{"lockBorderSize": -3}').lockBorderSize, 0)
+        compare(Logic.parseConfig('{"lockBorderSize": "six"}').lockBorderSize, 6)
+        compare(Logic.parseConfig('').lockBorderSize, 6)
+    }
     // a single group gets neither the header band nor the inset
     function test_single_group_has_no_inset() {
         var r = Logic.layout({ monitors:[edp()],

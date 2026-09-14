@@ -73,6 +73,7 @@ tile = tile[:start] + '    Rectangle { anchors.fill: parent; color: tile.bg }\n\
     '           property int workspaces: 0\n'
     '           property string motion: "auto"; property string motionEffective: "full"\n'
     '           property bool motionResolved: true\n'
+    '           property string lockBorder: "rgb(ff4444)"; property int lockBorderSize: 6\n'
     '           function probeMotion() {} }\n')
 # Lock state stub: the real OmyviewLocks.qml watches two files through Quickshell.Io. The stub
 # keeps the one property later tests depend on — `armed` is null until a load resolves — and

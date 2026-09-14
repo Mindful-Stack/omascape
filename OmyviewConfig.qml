@@ -11,6 +11,12 @@ QtObject {
     property bool hint: true         // key hints under the workspace grid
     property int workspaces: 10      // always show ids 1..N, even ones Hyprland has not created; 0 = off
     property string motion: "auto"   // "auto" follows Hyprland animations:enabled; "full" | "off"
+    // Share-time reminder border (docs/specs/2026-09-12-lock-design.md, addendum): local-only
+    // cue on an armed workspace's windows while a share is active. `lockBorder` accepts only the
+    // `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms (Logic.parseConfig); anything else falls back to
+    // the default. `lockBorderSize` 0 keeps the user's own border size (no `border_size` field).
+    property string lockBorder: "rgb(ff4444)"
+    property int lockBorderSize: 6
 
     // Hyprland's own animation switch, probed once per open (async, cheap) and cached. A
     // probe that cannot be read counts as enabled (Logic.hyprAnimationsEnabled).
@@ -28,6 +34,8 @@ QtObject {
         cfg.hint = o.hint
         cfg.workspaces = o.workspaces
         cfg.motion = o.motion
+        cfg.lockBorder = o.lockBorder
+        cfg.lockBorderSize = o.lockBorderSize
     }
 
     property FileView file: FileView {

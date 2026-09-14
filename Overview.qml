@@ -107,7 +107,7 @@ Item {
     }
     function lockSync() {
         if (locks.armed === null) return
-        Hyprland.dispatch(Logic.lockSyncLua(locks.armed))
+        Hyprland.dispatch(Logic.lockSyncLua(locks.armed, { color: config.lockBorder, size: config.lockBorderSize }))
     }
     function lockToggleSelected() {
         if (!Logic.hasWs(selectedId)) return
