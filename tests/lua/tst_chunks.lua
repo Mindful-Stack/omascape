@@ -223,13 +223,55 @@ end)
 
 local function state(hl) return hl.__files[hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state"] end
 local function statePath(hl) return hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state" end
--- Distinguishes: a non-idempotent install (two subscriptions) or one that never publishes.
+-- Distinguishes: a non-idempotent install (two subscriptions) or one that never publishes. The
+-- runtime dir is re-verified on every install by design (see lockInstallLua's L.ensureDir) —
+-- cheap, and what lets a stale L.dir recover after the directory vanishes — so mkdir is
+-- attempted every time, not only on the first install.
 case("lock install is idempotent and publishes 0", function()
   local hl = Mock.new({})
   run("LOCK_INSTALL", hl); run("LOCK_INSTALL", hl)
   eq(#hl.__subs, 1, "one subscription")
-  eq(state(hl), "0", "published 0"); eq(#hl.__mkdirs, 1, "mkdir once")
+  eq(state(hl), "0", "published 0"); eq(#hl.__mkdirs, 2, "mkdir re-verified on every install")
   eq(#hl.__notifications, 0)
+end)
+-- Distinguishes: an install that trusts a stale L.dir left over from a previous session — the
+-- compositor's Lua state (and L) outlives the shell, but the runtime directory does not (a
+-- cleaner, or just the directory being gone after a restart). Confirmed live: L.dir stayed set
+-- to a directory that no longer existed, and every publish failed with "cannot write
+-- share-state" forever, since nothing ever re-checked.
+case("lock install re-verifies the runtime dir on every run, recreating it if it vanished", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  eq(state(hl), "0")
+  local dir = hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview"
+  for path in pairs(hl.__files) do if path:sub(1, #dir) == dir then hl.__files[path] = nil end end
+  hl.__dir_exists = false                              -- the directory itself is gone now
+  run("LOCK_INSTALL", hl)
+  eq(state(hl), "0", "republished after recreating the directory")
+  eq(#hl.__mkdirs, 2, "the second mkdir is recorded")
+  eq(#hl.__notifications, 0, "a routine install recovers silently")
+end)
+-- Distinguishes: an observer whose first io.open failure is fatal (no retry) from one that
+-- recovers by calling L.ensureDir() itself, within the same publish, before the next install.
+case("share observer recovers from a vanished runtime dir without waiting for a fresh install", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  local dir = hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview"
+  for path in pairs(hl.__files) do if path:sub(1, #dir) == dir then hl.__files[path] = nil end end
+  hl.__dir_exists = false
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  eq(state(hl), "1", "publish recreated the directory and wrote the live value")
+  eq(#hl.__notifications, 0, "recovered silently")
+end)
+-- Distinguishes: a counter that reacts to the overview's own thumbnail captures (type 1,
+-- toplevel export) instead of only whole-output shares (type 0) — every overview open would
+-- otherwise flip armed boxes to the placeholder for no real share at all.
+case("share observer ignores toplevel (window) capture events, only output captures count", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  Mock.fire(hl, "screenshare.state", true, 1, "Some window")
+  eq(state(hl), "0", "a toplevel capture (the overview's own thumbnails) does not count as a share")
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  eq(state(hl), "1", "an output capture still counts")
+  Mock.fire(hl, "screenshare.state", false, 1, "Some window")
+  eq(state(hl), "1", "a toplevel end must not decrement the counter either")
 end)
 -- Distinguishes: an install that only publishes on the very first run (a fresh mock's
 -- share-state pre-seeded, as a stale file from a previous session would be) from one that always

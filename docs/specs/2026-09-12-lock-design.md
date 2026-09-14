@@ -45,7 +45,12 @@ the first frame after a *Hyprland config reload* (see Edge cases).
 - `hl.on("screenshare.state", cb)` fires with `(active: boolean, type: number, name: string)`
   (upstream documents Active, Type, Name; the second argument is not a session id). A screenshot
   fires `true` then `false`. Subscriptions have `:remove()` and `:is_active()`. The event is
-  Lua-only; Quickshell cannot observe shares directly.
+  Lua-only; Quickshell cannot observe shares directly. **`type` distinguishes what is being
+  captured** (live-probed 2026-09-14): `0` is a whole-output capture (`grim`, a monitor/screen
+  share — `name` is the output, e.g. `eDP-1`); `1` is a toplevel (single-window) export — and
+  opening the overview itself fires exactly this, once per visible thumbnail, with `name` the
+  window's title. The observer counts only `type == 0`: otherwise every overview open would
+  bump the counter and flip armed boxes to the placeholder for no real share at all.
 - `hl.layer_rule({ match = { namespace = "omyview" }, no_screen_share = true })` is the layer form.
 - **A `no_screen_share` layer rule is NOT used on the overview's own layer**, despite the API
   existing for it: verified from source (`ScreenshareFrame.cpp`) that Hyprland renders such a
@@ -118,25 +123,37 @@ facts: it would blank the whole shared screen, and is unnecessary — toplevel e
 window is denied regardless, by the per-workspace `window_rule` below). The share observer is
 created FIRST, unconditionally, before anything touches the filesystem, so a broken
 `$XDG_RUNTIME_DIR` (or a write/rename failure) degrades only share detection — never the lock
-rules themselves. The dir-creation-and-publish step runs in its own inner `pcall` and is
-re-raised on failure, so the outer `ok, err` (what `reportLua` reports) carries the filesystem
-failure while the subscription created above it is left standing:
+rules themselves. The verify-dir-and-publish step runs in its own inner `pcall` and is re-raised
+on failure, so the outer `ok, err` (what `reportLua` reports) carries the filesystem failure
+while the subscription created above it is left standing:
 ```lua
 local L = _G.omyview_lock
 if not L then
   L = { rules = {}, sharing = 0, sub = nil, dir = nil }
   _G.omyview_lock = L
 end
+function L.ensureDir()                                         -- mkdir + verify; called on EVERY install, see below
+  local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end
+  local dir = base .. "/omyview"
+  os.execute("mkdir -p '" .. dir .. "'")                       -- return value ignored: see below
+  local probe = io.open(dir .. "/.omyview-probe", "w")         -- verify the directory directly
+  if not probe then error("runtime dir unavailable: " .. dir) end
+  probe:close(); os.remove(dir .. "/.omyview-probe")
+  L.dir = dir
+end
 function L.publish()                                          -- defined unconditionally; reads L.dir at call time
   local tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"
-  local f = io.open(tmp, "w"); if not f then error("cannot write share-state") end
+  local f = io.open(tmp, "w")
+  if not f then L.ensureDir(); f = io.open(tmp, "w") end       -- the dir may have vanished since install; retry once
+  if not f then error("cannot write share-state") end
   local w = f:write(L.sharing > 0 and "1" or "0"); local c = f:close()
   if not w or not c then os.remove(tmp); error("write share-state failed") end
   local ok, err = os.rename(tmp, dst)
   if not ok then os.remove(tmp); error("rename share-state: " .. tostring(err)) end
 end
 if not (L.sub and L.sub:is_active()) then
-  L.sub = hl.on("screenshare.state", function(active)
+  L.sub = hl.on("screenshare.state", function(active, kind)
+    if kind ~= 0 then return end                               -- 1 = toplevel export (the overview's own thumbnails)
     local ok, err = pcall(function()
       L.sharing = math.max(0, L.sharing + (active and 1 or -1)); L.publish()
     end)
@@ -144,15 +161,7 @@ if not (L.sub and L.sub:is_active()) then
   end)
 end
 local pok, perr = pcall(function()                             -- filesystem step, isolated
-  if not L.dir then
-    local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end
-    local dir = base .. "/omyview"
-    os.execute("mkdir -p '" .. dir .. "'")                     -- return value ignored: see below
-    local probe = io.open(dir .. "/.omyview-probe", "w")       -- verify the directory directly
-    if not probe then error("runtime dir unavailable: " .. dir) end
-    probe:close(); os.remove(dir .. "/.omyview-probe")
-    L.dir = dir                                                 -- assigned only on success, so a failed install can retry
-  end
+  L.ensureDir()                                                 -- unconditional: see below
   L.publish()
 end)
 if not pok then error(perr, 0) end                             -- re-raised so the outer ok, err (reportLua) sees it
@@ -163,6 +172,16 @@ so Lua never sees an exit status — found by the Task 6 live check). Gating `L.
 return value made every install fail, so `L.publish()` never ran and the share-state file never
 existed. The directory is verified directly instead: opening (and immediately removing) a probe
 file inside it.
+
+`L.ensureDir()` runs on **every** install, not only when `L.dir` is nil, and `L.publish()`
+retries it once on its own if `io.open` fails. `_G.omyview_lock` is compositor Lua state, and it
+survives a shell restart — but the runtime directory does not: it can be removed by a cleaner,
+or is simply gone after a restart. Without re-verifying, a stale `L.dir` from a previous session
+would point at nothing, and `L.publish()` — called from every install *and* every share event —
+would fail with "cannot write share-state" forever, since nothing ever re-checked. Confirmed
+live: `L.dir` was set to `/run/user/1000/omyview` while the directory did not exist, after the
+user's first manual restart. Re-verifying is cheap (one `mkdir`, one file open), so paying the
+cost on every install is not a tradeoff worth avoiding.
 - `sharing` counts starts minus ends, clamped at 0. It only drives the placeholder; a stuck
   count shows the placeholder longer than needed, never exposes anything. An idempotent
   re-install preserves it; only a fresh Lua state (Hyprland start or reload) starts at 0. A
@@ -176,6 +195,10 @@ file inside it.
   unaffected by its failure — a broken runtime directory (or a write/rename failure) only means
   the share-state file goes stale or missing; the per-workspace rules the sync chunk maintains
   are never affected by it.
+- The observer ignores `kind ~= 0` (see Verified facts): the overview's own thumbnails fire
+  `screenshare.state` with `kind = 1` (toplevel export) for every visible tile, which would
+  otherwise flip armed boxes to the placeholder every time the overview itself is open, with no
+  real share happening. Only `kind = 0` (a whole-output capture — `grim`, a screen share) counts.
 
 **`lockSyncLua(armed)`** — `armed` is the full array of selectors (`"3"`, `"special:scratchpad"`):
 ```lua

@@ -10,21 +10,27 @@
 -- `hl.__fail_on` also drives the lock chunks' failure points, one string naming the single
 -- operation to break on the NEXT call to it (persists until changed; combine with `hl.__fail_sel`
 -- to target one selector): "window_rule" (hl.window_rule throws; scope with __fail_sel to one
--- workspace selector), "rule.set_enabled" (any rule's set_enabled throws), "mkdir" (any
--- `io.open` under the runtime dir returns nil, modelling a directory that `mkdir -p` failed to
--- create — see below, `os.execute`'s own return value is never a failure signal), "io.open"
--- (returns nil for any path), "io.write" (the open file's write returns nil), "io.close" (the
--- open file's close returns nil, so nothing commits to hl.__files), "rename" (os.rename
--- returns nil, err). `hl.__runtime_dir` overrides the fake XDG_RUNTIME_DIR (default
+-- workspace selector), "rule.set_enabled" (any rule's set_enabled throws), "mkdir" (the fake
+-- `os.execute` runs but does NOT mark the runtime dir as existing — see `hl.__dir_exists`
+-- below), "io.open" (returns nil for any path), "io.write" (the open file's write returns nil),
+-- "io.close" (the open file's close returns nil, so nothing commits to hl.__files), "rename"
+-- (os.rename returns nil, err). `hl.__runtime_dir` overrides the fake XDG_RUNTIME_DIR (default
 -- "/run/user/1000"). `hl.__os`/`hl.__io` are the fakes tst_chunks.lua's `run()` installs in
 -- place of the real `os`/`io` inside a chunk's environment; each falls through to the real
 -- library (via `__index`) for anything not faked here. `hl.__os.execute` always returns nil,
 -- like the real compositor's Lua (it reaps the child itself, so the exit status never reaches
 -- Lua) — `hl.__mkdirs` still records every call so "mkdir attempted" assertions work; a chunk
 -- must verify the directory some other way (a probe file), never by trusting this return
--- value. `hl.__env` is a per-mock cache of that environment (see tst_chunks.lua's `envFor`) —
--- a fresh `Mock.new()` per test case is what keeps `_G` (and so `_G.omyview_lock`) from
--- leaking between cases.
+-- value. `hl.__dir_exists` models whether the runtime directory is actually there on "disk":
+-- it starts false, an `os.execute` whose command starts with "mkdir" sets it true (unless
+-- `hl.__fail_on == "mkdir"`, modelling a failed create), and `io.open` for any path under the
+-- runtime dir returns nil while it is false. A test can clear it back to false mid-case to
+-- simulate the directory vanishing after a successful install (it survives a shell restart in
+-- `_G`, but the directory on disk does not) — combine with deleting the relevant `hl.__files`
+-- entries so a stale in-memory file doesn't make a vanished directory look intact.
+-- `hl.__env` is a per-mock cache of that environment (see tst_chunks.lua's `envFor`) — a fresh
+-- `Mock.new()` per test case is what keeps `_G` (and so `_G.omyview_lock`) from leaking between
+-- cases.
 local M = {}
 
 function M.new(opts)
@@ -89,22 +95,29 @@ function M.new(opts)
   -- Both fall through to the real os/io library (via __index) for anything not faked here, so
   -- a chunk calling e.g. os.time still works even though this mock never anticipated it.
   hl.__files, hl.__mkdirs = {}, {}
+  hl.__dir_exists = false          -- set true by a real "mkdir" execute; a test can clear it to
+                                    -- simulate the runtime dir vanishing after a successful install
   hl.__os = setmetatable({
     getenv = function(k) if k == "XDG_RUNTIME_DIR" then return hl.__runtime_dir or "/run/user/1000" end return nil end,
     -- Always nil: the real compositor reaps the child itself, so os.execute's return value is
     -- never a usable success/failure signal (verified live). Still recorded in hl.__mkdirs so
-    -- "attempted the mkdir" assertions have something to check.
-    execute = function(cmd) hl.__mkdirs[#hl.__mkdirs + 1] = cmd; return nil end,
+    -- "attempted the mkdir" assertions have something to check, and marks the directory as
+    -- existing (unless __fail_on == "mkdir", modelling a create that didn't take).
+    execute = function(cmd)
+      hl.__mkdirs[#hl.__mkdirs + 1] = cmd
+      if hl.__fail_on ~= "mkdir" and cmd:match("^mkdir") then hl.__dir_exists = true end
+      return nil
+    end,
     rename = function(a, b) if hl.__fail_on == "rename" then return nil, "injected rename failure" end; hl.__files[b] = hl.__files[a]; hl.__files[a] = nil; return true end,
     remove = function(path) hl.__files[path] = nil; return true end,
   }, { __index = os })
   hl.__io = setmetatable({
     open = function(path, mode)
       if hl.__fail_on == "io.open" then return nil end
-      -- "mkdir" models a directory mkdir -p failed to create: any open under the runtime dir
-      -- (the install chunk's probe file, or later its share-state files) fails.
-      local rtdir = hl.__runtime_dir or "/run/user/1000"
-      if hl.__fail_on == "mkdir" and path:sub(1, #rtdir) == rtdir then return nil end
+      -- Any open under the runtime dir (the install chunk's probe file, or later its
+      -- share-state files) fails while the directory isn't there.
+      local dir = (hl.__runtime_dir or "/run/user/1000") .. "/omyview"
+      if path:sub(1, #dir) == dir and not hl.__dir_exists then return nil end
       local buf = {}
       return { write = function(self, s) if hl.__fail_on == "io.write" then return nil end; buf[#buf + 1] = s; return self end,
                close = function() if hl.__fail_on == "io.close" then return nil end; hl.__files[path] = table.concat(buf); return true end }
