@@ -139,6 +139,22 @@ TestCase {
         verify(lastSync().indexOf("local ARMED = {}") >= 0)
         compare(boxOf(2).armed, false)
     }
+    // Quality-review fix round 2 (item 5, 2026-09-14): the `Connections { target: config }`
+    // block's onLockBorderChanged/onLockBorderSizeChanged handlers must re-sync borders live —
+    // a config edit takes effect without needing another arm/disarm. Set the fixture config
+    // AFTER the overview has already synced once (init()'s open() does that), so this pins the
+    // live-resync path specifically, not the "config read on the next sync" path item 1 already
+    // covers. Property: goes red if either handler name is mistyped (QML makes a Connections
+    // handler with the wrong name a silent no-op, so no second sync would ever be dispatched).
+    function test_config_border_change_resyncs_live() {
+        var before = syncs().length
+        view.testConfig.lockBorder = "rgb(3355ff)"
+        compare(syncs().length, before + 1, "lockBorder change dispatched a new sync")
+        verify(lastSync().indexOf('color = "rgb(3355ff)"') >= 0, "new colour reached the sync, got: " + lastSync())
+        view.testConfig.lockBorderSize = 9
+        compare(syncs().length, before + 2, "lockBorderSize change dispatched a new sync")
+        verify(lastSync().indexOf('size = 9') >= 0, "new size reached the sync, got: " + lastSync())
+    }
     // Distinguishes: the scratchpad armed by its (dynamic) id instead of its name.
     function test_ctrl_l_on_the_scratchpad_writes_its_name() {
         keyClick("s", Qt.ControlModifier)              // show the row

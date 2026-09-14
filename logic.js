@@ -869,10 +869,10 @@ function validLockSelector(sel) { return typeof sel === "string" && LOCK_SELECTO
 // restart alone could never deliver a behaviour change to a running compositor, only a
 // `configreloaded` (which drops `_G` entirely) would.
 // 3 (share-time reminder border, 2026-09-14 addendum): the callback body changed from calling
-// `L.publish()` to calling `L.apply()` (publish, then toggle every border rule's enabled state
-// against the current sharing/exclusion state) — a running compositor whose callback still only
-// publishes would never toggle a border added after it started, so the body change itself must
-// force the stale callback out, the same as the `kind` filter did at version 2.
+// `L.publish()` to calling `L.apply()` (reconcile every border rule's enabled state against the
+// current sharing/exclusion state, THEN publish) — a running compositor whose callback still
+// only publishes would never toggle a border added after it started, so the body change itself
+// must force the stale callback out, the same as the `kind` filter did at version 2.
 var LOCK_OBSERVER_VERSION = 3
 
 // Install the compositor-side lock state: one table in _G, and the share observer that
@@ -957,17 +957,24 @@ function lockInstallLua() {
         // against the current sharing count and its exclusion rule's own state; every border
         // rule is created DISABLED by lockSyncLua and only ever toggled here. Each toggle is
         // guarded on its own (never letting one bad rule handle abort the rest); a handle whose
-        // set_enabled throws is dropped from L.borders so the next sync recreates it instead of
-        // retrying a dead handle. L.apply() runs the border reconcile BEFORE L.publish() — a
-        // publish failure (raised out of L.apply()) must not leave the border rules untouched;
-        // reconciling first means it always runs regardless of the publish outcome. lockSyncLua
-        // calls L.reconcileBorders() directly, never L.apply(): publishing the share-state file
-        // is the observer/install's job, not a rule sync's — see lockSyncLua below.
+        // set_enabled throws while ENABLING is dropped from L.borders so the next sync recreates
+        // it instead of retrying a dead handle. A failed DISABLE keeps the handle instead (rules
+        // cannot be destroyed in this Hyprland Lua API, only disabled): dropping it there would
+        // leave the rule stuck ENABLED and unreachable, and the next sync would create a second,
+        // disabled rule under the same name that never undoes the first — a stale red frame with
+        // no share running until a config reload. This mirrors lockSyncLua's own exclusion-rule
+        // disable loop below, which never drops a handle on a failed set_enabled(false) either.
+        // L.apply() runs the border reconcile BEFORE L.publish() — a publish failure (raised out
+        // of L.apply()) must not leave the border rules untouched; reconciling first means it
+        // always runs regardless of the publish outcome. lockSyncLua calls L.reconcileBorders()
+        // directly, never L.apply(): publishing the share-state file is the observer/install's
+        // job, not a rule sync's — see lockSyncLua below.
         '    function L.reconcileBorders()\n' +
         '      for sel, b in pairs(L.borders or {}) do\n' +
         '        local r = L.rules[sel]\n' +
-        '        local tok = pcall(function() b:set_enabled(L.sharing > 0 and r ~= nil and r:is_enabled()) end)\n' +
-        '        if not tok then L.borders[sel] = nil end\n' +
+        '        local want = L.sharing > 0 and r ~= nil and r:is_enabled()\n' +
+        '        local tok = pcall(function() b:set_enabled(want) end)\n' +
+        '        if not tok and want then L.borders[sel] = nil end\n' +
         '      end\n' +
         '    end\n' +
         '    function L.apply()\n' +
@@ -1071,7 +1078,10 @@ function lockSyncLua(armed, border) {
         '      end)\n' +
         '    end\n' +
         '    ok, err = #failed == 0, table.concat(failed, "; ")\n' +
-        '    L.reconcileBorders()\n' +
+        // pcall'd so an error inside L.reconcileBorders() (e.g. an _G.omyview_lock left by an
+        // older build without the function at all) cannot kill the chunk before reportLua runs;
+        // ok/err above already describes rule reconciliation and must not be touched by this.
+        '    pcall(function() L.reconcileBorders() end)\n' +
         '  end\n' +
         '  ' + reportLua('lock sync') + '\n' +
         'end'

@@ -193,9 +193,9 @@ Optional user settings live in `~/.config/omarchy/omyview.json` (watched; edits 
 - `lockBorder` — colour of the share-time reminder border on an armed workspace's windows
   (default `"rgb(ff4444)"`); only the `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are accepted,
   anything else falls back to the default.
-- `lockBorderSize` — width of that border, `0`–`20` (default `6`); `0` disables the cue. The rim
-  is a local reminder only — a viewer's capture always shows a plain black box with, at most, a
-  thin rim around it, never your windows.
+- `lockBorderSize` — width of that border, `0`–`20` (default `6`); `0` omits the width override —
+  the rim uses your Hyprland border size. The rim is a local reminder only — a viewer's capture
+  always shows a plain black box with, at most, a thin rim around it, never your windows.
 
 ### Blurred scrim (optional, Hyprland side)
 

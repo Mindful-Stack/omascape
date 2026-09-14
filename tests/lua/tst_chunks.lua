@@ -392,21 +392,25 @@ case("lock sync still disables stale rules when an enable throws", function()
 end)
 -- Distinguishes: a dead handle left in L.rules after a failed re-enable (a later re-arm would
 -- keep retrying the same broken rule instead of creating a fresh one). `hl.__fail_on =
--- "rule.set_enabled"` is global (not scoped to one rule), so it also breaks the border's own
--- set_enabled inside the same sync's L.reconcileBorders() call — dropping ITS handle too (the
--- point of item 4/minor 6-8: a failed border toggle must drop L.borders[sel]), hence two fresh
--- rules (exclusion + border) on the next sync, not one.
+-- "rule.set_enabled"` is global (not scoped to one rule), so it also reaches the border's own
+-- set_enabled inside the same sync's L.reconcileBorders() call — but by then the exclusion
+-- handle was already dropped, so L.reconcileBorders() sees no exclusion rule and asks the
+-- border to DISABLE (it is already disabled, not sharing), which also throws. Per item 1
+-- (2026-09-14), a failed DISABLE keeps the border's handle instead of dropping it — only the
+-- exclusion's handle (a failed ENABLE) is dropped and rebuilt fresh on the next sync.
 case("lock sync drops a dead handle after a failed re-enable, so re-arm creates a fresh rule", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   run("LOCK_SYNC_3", hl)
+  local borderBefore = Mock.ruleNamed(hl, "omyview-lock-border-3")
   hl.__fail_on = "rule.set_enabled"
   run("LOCK_SYNC_3", hl)
   eq(#hl.__notifications, 1, "reported")
   hl.__fail_on = nil
   run("LOCK_SYNC_3", hl)
-  eq(#hl.__window_rules, 4, "dead handles dropped (exclusion AND border), a fresh rule of each created")
+  eq(#hl.__window_rules, 3, "the exclusion's dead handle is dropped and rebuilt; the border's kept handle is reused")
   eq(lastRuleNamed(hl, "omyview-lock-3"):is_enabled(), true, "the fresh exclusion rule is enabled")
-  eq(lastRuleNamed(hl, "omyview-lock-border-3"):is_enabled(), false, "the fresh border rule starts disabled (not sharing)")
+  eq(lastRuleNamed(hl, "omyview-lock-border-3"), borderBefore, "the border rule was never dropped, only retried")
+  eq(borderBefore:is_enabled(), false, "the retried border rule stays disabled (not sharing)")
 end)
 
 -- Share-time reminder border (docs/specs/2026-09-12-lock-design.md, addendum, 2026-09-14).
@@ -510,6 +514,31 @@ case("a border rule's failed enable drops its handle; the exclusion rule is unaf
   local fresh = lastRuleNamed(hl, "omyview-lock-border-3")
   eq(fresh ~= before, true, "a fresh border rule handle was created")
   eq(fresh:is_enabled(), true, "the fresh handle is enabled (still sharing)")
+end)
+-- Quality-review fix round 2 (item 1, 2026-09-14): a failed border DISABLE (share end, when the
+-- compositor's set_enabled throws) must NOT drop the handle from L.borders the way a failed
+-- ENABLE does. Rules cannot be destroyed in this Hyprland Lua API, so dropping on a failed
+-- disable would leave the rule stuck ENABLED and unreachable -- the next sync would create a
+-- second, disabled rule under the same name, which never undoes the first (a permanently red
+-- frame with no share running, until a config reload). Mirrors lockSyncLua's own exclusion-rule
+-- disable loop, which never drops a handle on a failed set_enabled(false) either.
+case("a border rule's failed DISABLE keeps its handle so the next share end can retry it; no duplicate rule is created", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  local before = Mock.ruleNamed(hl, "omyview-lock-border-3")
+  eq(before:is_enabled(), true, "enabled while sharing")
+  hl.__fail_on = "rule.set_enabled"
+  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")   -- share end: L.apply() tries to disable, fails
+  eq(hl.__env._G.omyview_lock.borders["3"], before, "handle kept on a failed disable, not dropped")
+  eq(before:is_enabled(), true, "still enabled -- the failed disable never took")
+  hl.__fail_on = nil
+  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")   -- a second share end retries the same handle
+  eq(before:is_enabled(), false, "the retried disable on the kept handle succeeds")
+  run("LOCK_SYNC_3", hl)
+  eq(lastRuleNamed(hl, "omyview-lock-border-3"), before, "no duplicate rule was created under the name")
+  local count = 0
+  for _, r in ipairs(hl.__window_rules) do if r.spec.name == "omyview-lock-border-3" then count = count + 1 end end
+  eq(count, 1, "still exactly one border rule for this selector")
 end)
 
 -- Distinguishes: sync before install silently doing nothing.

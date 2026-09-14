@@ -167,21 +167,26 @@ function L.publish()                                          -- defined uncondi
   local ok, err = os.rename(tmp, dst)
   if not ok then os.remove(tmp); error("rename share-state: " .. tostring(err)) end
 end
--- Share-time reminder border (addendum, revised 2026-09-14 quality-review pass): L.reconcileBorders()
--- toggles every border rule's enabled state; each toggle is its own pcall (one bad rule handle
--- never blocks the others), and a handle whose set_enabled throws is dropped from L.borders so
--- the next sync recreates it instead of retrying a dead handle (mirrors the exclusion rule's own
--- dead-handle handling in lockSyncLua below). L.apply() -- the single place that both reconciles
--- borders AND republishes share-state -- runs the border reconcile BEFORE L.publish(): a publish
--- failure raises out of L.apply(), and reconciling first means that failure can never leave the
--- border rules untouched. Both functions are defined here, before the subVer check and the
--- observer subscription below (which calls L.apply()), so a fresh subscription's callback always
--- closes over fully-defined functions.
+-- Share-time reminder border (addendum, revised 2026-09-14 quality-review pass, round 2):
+-- L.reconcileBorders() toggles every border rule's enabled state; each toggle is its own pcall
+-- (one bad rule handle never blocks the others). A handle whose set_enabled throws while
+-- ENABLING is dropped from L.borders so the next sync recreates it instead of retrying a dead
+-- handle (mirrors the exclusion rule's own dead-handle handling in lockSyncLua below). A failed
+-- DISABLE keeps the handle instead: rules cannot be destroyed in this Hyprland Lua API, only
+-- disabled, so dropping it there would leave the rule stuck ENABLED and unreachable, and the
+-- next sync would create a second, disabled rule under the same name that never undoes the
+-- first -- exactly like the exclusion handles' own disable-direction safety below. L.apply() --
+-- the single place that both reconciles borders AND republishes share-state -- runs the border
+-- reconcile BEFORE L.publish(): a publish failure raises out of L.apply(), and reconciling first
+-- means that failure can never leave the border rules untouched. Both functions are defined
+-- here, before the subVer check and the observer subscription below (which calls L.apply()), so
+-- a fresh subscription's callback always closes over fully-defined functions.
 function L.reconcileBorders()
   for sel, b in pairs(L.borders or {}) do
     local r = L.rules[sel]
-    local ok = pcall(function() b:set_enabled(L.sharing > 0 and r ~= nil and r:is_enabled()) end)
-    if not ok then L.borders[sel] = nil end
+    local want = L.sharing > 0 and r ~= nil and r:is_enabled()
+    local ok = pcall(function() b:set_enabled(want) end)
+    if not ok and want then L.borders[sel] = nil end   -- keep the handle when the retry is a disable
   end
 end
 function L.apply()
@@ -306,8 +311,10 @@ local ok, err = #failed == 0, table.concat(failed, "; ")
 -- so republishing share-state here would be redundant, and folding a publish failure into this
 -- chunk's own ok/err would report "lock sync failed" for a stale runtime directory even though
 -- every rule was reconciled correctly. Publishing is the observer/install's job (see L.apply()
--- above); this chunk's report describes rule reconciliation only.
-L.reconcileBorders()
+-- above); this chunk's report describes rule reconciliation only. pcall'd so an error inside
+-- L.reconcileBorders() (e.g. an _G.omyview_lock left by an older build without the function at
+-- all) cannot kill the chunk before reportLua runs -- ok/err above is untouched by this.
+pcall(function() L.reconcileBorders() end)
 -- reportLua('lock sync')   -- one report naming every selector that failed
 ```
 Every create/enable/disable is guarded on its own, so one failure never prevents the other
@@ -433,9 +440,12 @@ by your audience" cue, because a workspace armed for one meeting is easy to forg
   publish did not) and via `L.apply()` (`L.reconcileBorders()` then `L.publish()`, in that order
   so a publish failure can never leave a border rule unreconciled) by the share observer and
   install (observer version bumped, since its body changed to call `L.apply()`). A border rule
-  whose `set_enabled` throws is dropped from `L.borders`, exactly like a dead exclusion handle:
-  the next sync recreates it. Disarming disables both rules; re-arming during a share enables
-  both on the same sync.
+  whose `set_enabled` throws is dropped from `L.borders` only on a failed ENABLE, exactly like a
+  dead exclusion handle: the next sync recreates it. A failed DISABLE keeps the handle instead
+  (rules cannot be destroyed in this Hyprland Lua API, only disabled — dropping it there would
+  leave the rule stuck enabled and unreachable) so the next reconcile can retry it, exactly like
+  the exclusion handles' own disable-direction safety. Disarming disables both rules; re-arming
+  during a share enables both on the same sync.
 - **What a viewer sees.** Probed 2026-09-14: the capture shows the black exclusion box with a
   thin rim of the border colour around it. Locally the windows carry a wide coloured frame.
   Accepted: the rim gives the audience nothing, and no new surface is added to the capture.
