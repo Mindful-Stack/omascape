@@ -47,7 +47,8 @@ removed `walker`.
   you don't want seen. While a share is running, any monitor showing an armed workspace gets a
   thin coloured frame around its edges as a local reminder (`lockBorder`/`lockBorderSize` below) —
   that frame is for you only: it is blanked in every capture, so a viewer just sees the plain
-  black box, never your windows and never the frame. It follows whatever that monitor is showing,
+  black box and never your windows (on a fractionally scaled monitor a one-pixel hairline of the
+  frame colour can survive at its inner edge — it shows that a frame is there, nothing behind it). It follows whatever that monitor is showing,
   the scratchpad included, and it is click-through and reserves no space. The frame (and the
   placeholder in the overview) can lag a few seconds behind the end of a share: the compositor
   signals sharing per captured frame, so omyview waits out a short grace period before believing a

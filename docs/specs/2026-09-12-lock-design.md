@@ -526,8 +526,19 @@ Two facts killed the border approach:
   default 6; **0 hides the frame**). `OmyviewConfig`'s watched `FileView` applies an edit live and
   the frame binds to both directly, so no `lockSync()` round trip through the compositor is
   involved any more; the round-2 `onLockBorderChanged`/`onLockBorderSizeChanged` handlers are gone.
-- **What a viewer sees.** A plain black screen on an armed workspace: the exclusion box, with the
-  frame strips blacked out by the layer rule. Nothing new is added to the capture.
+- **What a viewer sees.** Effectively a black screen on an armed workspace: the exclusion box with
+  the frame strips blacked out by the layer rule. Live-measured 2026-09-14 (eDP-1, 2560x1600 at
+  scale 1.25, `lockBorderSize: 6`, OBS capturing): whole-monitor mean brightness **0.00238**, and
+  the strips' own bands read 0.0527 (top), 0.0525 (bottom), 0.00086 (left), 0.00109 (right) —
+  because the blanking rect covers whole device pixels and 6 logical px at scale 1.25 is 7.5 of
+  them: a **one-device-pixel hairline** of the frame colour survives at each strip's inner edge
+  (row 7 across the width, row 1599, and short segments of columns 7 / 2552 within the bar's
+  band). It is the same class of leak round 3 accepted for the window rims, and it discloses
+  nothing: the audience learns the frame exists, never what is behind it. A frame thickness whose
+  device size is a whole number (e.g. 4 or 8 at scale 1.25) should avoid it; not probed, because
+  the user took the machine back mid-check. Note that the bar (and any other unblanked layer) is
+  visible in the capture as always — only windows on the armed workspace and the frame's own
+  surfaces are blacked.
 - **Presentation only.** The reminder shares the observer's race and its `kind == 1` filter; a
   missed event costs the cue, never protection. Since round 3 it also lags the *end* of a share by
   up to `LOCK_SHARE_GRACE_MS` (3 s) — same reasoning: the cue may linger, never under-report.
