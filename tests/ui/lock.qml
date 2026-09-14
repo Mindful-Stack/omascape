@@ -404,18 +404,45 @@ TestCase {
     // so `rgba(3355ff80)` passed through unchanged would render as an opaque near-black).
     // The side strips run the full height and the top/bottom ones are inset by that width, so
     // every corner is painted exactly once — a doubled corner would read darker on a translucent
-    // colour.
+    // colour. The PAINTED rectangle is what `lockBorderSize` promises; the surface around it is
+    // one logical pixel bigger (see the outset test below).
     function test_frame_thickness_and_colour_follow_the_config() {
         view.testConfig.lockBorder = "rgba(3355ff80)"
         view.testConfig.lockBorderSize = 4
         ctrlL(); view.testLocks.setSharing(true)
-        compare(strip("lockFrameTop").height, 4)
-        compare(strip("lockFrameBottom").height, 4)
-        compare(strip("lockFrameLeft").width, 4)
-        compare(strip("lockFrameRight").width, 4)
+        compare(fillOf("lockFrameTop").height, 4)
+        compare(fillOf("lockFrameBottom").height, 4)
+        compare(fillOf("lockFrameLeft").width, 4)
+        compare(fillOf("lockFrameRight").width, 4)
         compare(strip("lockFrameLeft").height, screenObj.height, "the side strips span the screen")
         compare(strip("lockFrameTop").width, screenObj.width - 8, "inset by the side strips")
         compare(fillOf("lockFrameTop").color, Qt.color("#803355ff"), "alpha moved to the front")
+    }
+    // The `no_screen_share` blanking box that hides a strip from every capture covers WHOLE DEVICE
+    // pixels, so a surface whose logical size equals the paint leaks on a fractionally scaled
+    // monitor: 6 logical px at scale 1.25 is 7.5 device px — 7 rows blanked, 8 painted, which is
+    // the one-device-pixel hairline round 4's live capture measured (top band mean 0.0527). Each
+    // strip's SURFACE is therefore one logical px thicker than its PAINT, with the extra pixel on
+    // the inner side, so the blanked box spans floor((t+1)·s) ≥ ceil(t·s) device px from the edge
+    // at any scale s ≥ 1 and the paint is strictly inside it however the rounding falls.
+    // Distinguishes: the outset regressing (surface == paint: the hairline is back), the paint
+    // growing with the surface (a thicker frame than configured), and an outset put on the OUTER
+    // side, which would push the paint one pixel off the screen edge instead of covering it.
+    function test_each_strip_surface_outsets_its_paint_by_one_logical_pixel() {
+        view.testConfig.lockBorderSize = 4
+        ctrlL(); view.testLocks.setSharing(true)
+        compare(strip("lockFrameTop").height, 5, "top surface: paint + one px")
+        compare(fillOf("lockFrameTop").height, 4, "top paint")
+        compare(fillOf("lockFrameTop").y, 0, "the paint hugs the screen edge; the outset is inside it")
+        compare(strip("lockFrameBottom").height, 5, "bottom surface")
+        compare(fillOf("lockFrameBottom").height, 4, "bottom paint")
+        compare(fillOf("lockFrameBottom").y, 1, "mirrored: the paint hugs the bottom edge")
+        compare(strip("lockFrameLeft").width, 5, "left surface")
+        compare(fillOf("lockFrameLeft").width, 4, "left paint")
+        compare(fillOf("lockFrameLeft").x, 0, "the paint hugs the left edge")
+        compare(strip("lockFrameRight").width, 5, "right surface")
+        compare(fillOf("lockFrameRight").width, 4, "right paint")
+        compare(fillOf("lockFrameRight").x, 1, "mirrored: the paint hugs the right edge")
     }
     // Distinguishes: a size of 0 drawing hairline strips (or full-screen ones) instead of
     // disabling the cue, which is what the documented `lockBorderSize: 0` promises.

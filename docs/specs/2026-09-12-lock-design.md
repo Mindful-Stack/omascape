@@ -482,6 +482,17 @@ Two facts killed the border approach:
   empty `Region`, the same trick the overview uses while closed. Existence is `visible:`, never
   create/destroy — mapping a layer surface per share edge is the churn the hysteresis exists to
   avoid.
+- **The one-pixel outset (round 4b).** Each strip's SURFACE is one logical pixel thicker than its
+  PAINT — `implicitHeight: thickness + 1` with a child `Rectangle` of `height: thickness` anchored
+  to the outward edge (mirrored for the other three) — because the blanking box below covers whole
+  DEVICE pixels. Without it, 6 logical px at scale 1.25 is 7.5 device px: the blanking truncates to
+  7 rows while the paint covers 8, which is the hairline round 4 measured (see "What a viewer
+  sees"). With it, at any scale s ≥ 1 the blanked box spans at least `floor((t+1)·s) ≥ ceil(t·s)`
+  device px from the edge while the paint covers at most `ceil(t·s)`, so the paint is strictly
+  inside the blanked box however the rounding falls. The `margins` stay at `thickness`, so the
+  corners are still painted exactly once. The thickness itself is deliberately NOT snapped to whole
+  device pixels: `implicitWidth`/`implicitHeight` are logical ints, and rounding would silently
+  change the size the user configured.
 - **Blanking.** `lockInstallLua()` creates one named LAYER rule,
   `hl.layer_rule({ name = "omyview-lockframe", match = { namespace = "omyview-lockframe" },
   no_screen_share = true })`, kept as `L.frameRule`. A `no_screen_share` layer renders as an

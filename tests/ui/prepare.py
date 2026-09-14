@@ -100,9 +100,12 @@ tile = tile[:start] + '    Rectangle { anchors.fill: parent; color: tile.bg }\n\
 # Share-time reminder frame: the same treatment as Overview.qml's own PanelWindow — layer-shell
 # properties dropped, the window itself an Item. The anchors are what the compositor resolves into
 # a size, so the fixture resolves them itself, from the screen the strip was given: the side strips
-# span the full height, the top/bottom ones are inset by the side strips' width. Each replacement
-# is keyed to the exact anchor set, so changing which edges a strip is anchored to fails here
-# rather than silently producing a zero-sized strip the geometry test would then "pass" on.
+# span the full height, the top/bottom ones are inset by the side strips' width. The strip's own
+# thickness is NOT resolved here — the `implicit*` line is carried through verbatim and Qt applies
+# it to the Item, so the suite measures the real number. Each replacement is keyed to the exact
+# anchor set AND to that `implicit*` line (the one-logical-pixel outset over the painted rectangle,
+# see LockFrame.qml), so changing which edges a strip is anchored to — or dropping the outset —
+# fails here rather than silently producing a strip the geometry test would then "pass" on.
 frame = (source / 'LockFrame.qml').read_text()
 frame = re.sub(r'^import Quickshell.*\n', '', frame, flags=re.M)
 frame = frame.replace('Scope {', 'Item {').replace('PanelWindow {', 'Item {')
@@ -111,12 +114,16 @@ frame = re.sub(r'^\s*(screen: frame\.frameScreen|WlrLayershell\..*|exclusionMode
 for edge in ('top', 'bottom'):
     frame = replaced(frame, '''        anchors { %s: true; left: true; right: true }
         margins { left: frame.thickness; right: frame.thickness }
+        implicitHeight: frame.thickness + 1
 ''' % edge, '''        width: Math.max(0, (frame.frameScreen ? frame.frameScreen.width : 0) - 2 * frame.thickness)
-''', 'LockFrame %s strip anchors' % edge)
+        implicitHeight: frame.thickness + 1
+''', 'LockFrame %s strip anchors + outset' % edge)
 for edge in ('left', 'right'):
-    frame = replaced(frame, '        anchors { top: true; bottom: true; %s: true }\n' % edge,
-                     '        height: frame.frameScreen ? frame.frameScreen.height : 0\n',
-                     'LockFrame %s strip anchors' % edge)
+    frame = replaced(frame, '''        anchors { top: true; bottom: true; %s: true }
+        implicitWidth: frame.thickness + 1
+''' % edge, '''        height: frame.frameScreen ? frame.frameScreen.height : 0
+        implicitWidth: frame.thickness + 1
+''', 'LockFrame %s strip anchors + outset' % edge)
 (dest / 'LockFrame.qml').write_text(frame)
 (dest / 'FindBar.qml').write_text((source / 'FindBar.qml').read_text())   # no shell imports: verbatim
 # Shell-only helpers: the config loader needs Quickshell.Io, the shadow a GPU shader.

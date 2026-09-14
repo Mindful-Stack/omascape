@@ -22,6 +22,18 @@ import "logic.js" as Logic
 // The left and right strips run the full height and the top/bottom ones are inset by that width,
 // so every corner is painted exactly once (a doubled corner would read darker on a translucent
 // colour).
+//
+// Each strip's SURFACE is one logical pixel thicker than its PAINT, with the extra pixel on the
+// inner side (the paint hugs the screen edge). The blanking box a `no_screen_share` layer draws
+// covers whole DEVICE pixels, so a surface sized exactly like the paint leaks on a fractionally
+// scaled monitor: at scale 1.25 a thickness of 6 is 7.5 device px, the blanking truncates to 7 and
+// the paint covers 8 — the one-device-pixel hairline round 4's capture measured (top band mean
+// 0.0527). With the outset, at any scale s ≥ 1 the blanked box spans at least floor((t+1)·s) ≥
+// ceil(t·s) device px from the edge while the paint covers at most ceil(t·s), so the paint is
+// strictly inside the blanked box however the rounding falls. The thickness itself is NOT snapped
+// to whole device pixels: `implicitHeight`/`implicitWidth` are logical ints, which cannot express
+// e.g. 6.4, and rounding it would silently change the size the user configured.
+
 Scope {
     id: frame
     objectName: "lockFrame"
@@ -54,8 +66,12 @@ Scope {
         Region { id: emptyTop }
         anchors { top: true; left: true; right: true }
         margins { left: frame.thickness; right: frame.thickness }
-        implicitHeight: frame.thickness
-        Rectangle { objectName: "lockFrameFill"; anchors.fill: parent; color: frame.frameColor }
+        implicitHeight: frame.thickness + 1
+        Rectangle {
+            objectName: "lockFrameFill"; color: frame.frameColor
+            anchors { top: parent.top; left: parent.left; right: parent.right }
+            height: frame.thickness
+        }
     }
     PanelWindow {
         objectName: "lockFrameBottom"
@@ -70,8 +86,12 @@ Scope {
         Region { id: emptyBottom }
         anchors { bottom: true; left: true; right: true }
         margins { left: frame.thickness; right: frame.thickness }
-        implicitHeight: frame.thickness
-        Rectangle { objectName: "lockFrameFill"; anchors.fill: parent; color: frame.frameColor }
+        implicitHeight: frame.thickness + 1
+        Rectangle {
+            objectName: "lockFrameFill"; color: frame.frameColor
+            anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+            height: frame.thickness
+        }
     }
     PanelWindow {
         objectName: "lockFrameLeft"
@@ -85,8 +105,12 @@ Scope {
         mask: emptyLeft
         Region { id: emptyLeft }
         anchors { top: true; bottom: true; left: true }
-        implicitWidth: frame.thickness
-        Rectangle { objectName: "lockFrameFill"; anchors.fill: parent; color: frame.frameColor }
+        implicitWidth: frame.thickness + 1
+        Rectangle {
+            objectName: "lockFrameFill"; color: frame.frameColor
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+            width: frame.thickness
+        }
     }
     PanelWindow {
         objectName: "lockFrameRight"
@@ -100,7 +124,11 @@ Scope {
         mask: emptyRight
         Region { id: emptyRight }
         anchors { top: true; bottom: true; right: true }
-        implicitWidth: frame.thickness
-        Rectangle { objectName: "lockFrameFill"; anchors.fill: parent; color: frame.frameColor }
+        implicitWidth: frame.thickness + 1
+        Rectangle {
+            objectName: "lockFrameFill"; color: frame.frameColor
+            anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
+            width: frame.thickness
+        }
     }
 }
