@@ -234,10 +234,6 @@ one.
   overview itself is open, with no real share happening. Monitor (`0`) and region (`2`) captures
   both count as real shares — a window share cannot capture the overview or any other window, so
   only a window capture is safe to assume is the overview's own thumbnail traffic.
-- The observer ignores `kind ~= 0` (see Verified facts): the overview's own thumbnails fire
-  `screenshare.state` with `kind = 1` (toplevel export) for every visible tile, which would
-  otherwise flip armed boxes to the placeholder every time the overview itself is open, with no
-  real share happening. Only `kind = 0` (a whole-output capture — `grim`, a screen share) counts.
 
 **`lockSyncLua(armed)`** — `armed` is the full array of selectors (`"3"`, `"special:scratchpad"`):
 ```lua
