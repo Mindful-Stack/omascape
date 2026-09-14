@@ -820,7 +820,9 @@ function scratchpadShowLua() {
 }
 
 // Tile click in the scratchpad row: focus raises the special workspace, but a floating
-// scratchpad window stays under whichever sibling was last on top — bring it to the top too.
+// scratchpad window stays under whichever sibling was last on top — raise it explicitly, by
+// address (`alter_zorder` targets a window; `bring_to_top` acts on the active window, which the
+// focus above may not have made active yet while the special workspace is still coming up).
 function scratchpadFocusLua(addr) {
     return (
         'function()\n' +
@@ -828,7 +830,7 @@ function scratchpadFocusLua(addr) {
         '  ' + dispatchGuardLua() + '\n' +
         '  local ok, err = pcall(function()\n' +
         '    run(hl.dsp.focus({ window = sel }))\n' +
-        '    run(hl.dsp.window.bring_to_top())\n' +
+        '    run(hl.dsp.window.alter_zorder({ mode = "top", window = sel }))\n' +
         '  end)\n' +
         '  ' + reportLua('focus scratchpad window') + '\n' +
         'end'

@@ -198,19 +198,20 @@ case("scratchpad focus: focuses then brings the window to the top", function()
   local hl = Mock.new({ windows = { ["0xabc"] = { address = "0xabc", floating = true, fullscreen = 0,
                                                   workspace = { id = -98, name = "special:scratchpad" } } } })
   run("SCRATCHPAD_FOCUS", hl)
-  seq(hl, { "focus", "window.bring_to_top" })
+  seq(hl, { "focus", "window.alter_zorder" })
+  eq(hl.__log[2].args.window, "address:0xabc", "raised BY ADDRESS, not via the active window")
   eq(hl.__active_window and hl.__active_window.address, "0xabc", "window is active")
   eq(hl.__top and hl.__top.address, "0xabc", "window is raised above its siblings")
   eq(#hl.__notifications, 0, "no error reported")
 end)
-case("scratchpad focus: focus throws → one notification, bring_to_top never runs", function()
+case("scratchpad focus: focus throws → one notification, the raise never runs", function()
   local hl = Mock.new({ windows = { ["0xabc"] = { address = "0xabc", floating = true, fullscreen = 0,
                                                   workspace = { id = -98, name = "special:scratchpad" } } } })
   hl.__fail_on = "focus"
   run("SCRATCHPAD_FOCUS", hl)
   eq(#hl.__notifications, 1, "one notification")
   assert(hl.__notifications[1].text:find("focus scratchpad window failed", 1, true))
-  eq(hl.__seen["window.bring_to_top"], nil, "bring_to_top never ran")
+  eq(hl.__seen["window.alter_zorder"], nil, "the raise never ran")
 end)
 
 if failures > 0 then io.stderr:write(failures .. " Lua chunk test(s) failed\n"); os.exit(1) end

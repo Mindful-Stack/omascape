@@ -59,7 +59,7 @@ key for the scratchpad, tiled insertion into the scratchpad.
 | arrows                          | reach it spatially (it is the bottom row); with a query, only if a window in it matches |
 | Enter on the scratchpad box     | dispatch the guarded show chunk (below), close                         |
 | click on the empty box          | same as Enter                                                          |
-| click on a tile in the row      | focus that window AND bring it to the top (`scratchpadFocusLua`): focus alone raises the scratchpad but leaves a floating window under its last-raised sibling |
+| click on a tile in the row      | focus that window AND raise it by address with `alter_zorder({ mode = "top", window })` (`scratchpadFocusLua`): focus alone raises the scratchpad but leaves a floating window under its last-raised sibling, and `bring_to_top` acts on the active window, which the focus may not have made active yet |
 | drop a window on the box        | `hl.dsp.window.move({ workspace = "special:scratchpad", follow = false })`, plus the floating position chunk for floating windows |
 | drag a tile out of the row      | existing paths (floating move / tiled insert) to the numeric target    |
 | Esc / SUPER+P                   | unchanged                                                              |
