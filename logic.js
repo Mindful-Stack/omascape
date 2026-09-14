@@ -1037,15 +1037,24 @@ function lockInstallLua() {
         '          if L.sharing > 0 then\n' +
         '            if L.grace then pcall(function() L.grace:set_enabled(false) end); L.grace = nil end\n' +
         '            if not L.effective then L.effective = true; L.apply() end\n' +
-        '          else\n' +
+        // `elseif L.effective`: an off edge while already idle has nothing to turn off, so it
+        // arms nothing (a pending grace always implies L.effective == true). If hl.timer is
+        // missing or throws, degrade to the immediate off rather than leave L.effective stuck
+        // true — stuck, every later ON edge would be a no-op and every OFF edge would throw
+        // again, so the rim would stay on every armed workspace until a config reload.
+        '          elseif L.effective then\n' +
         '            if L.grace then pcall(function() L.grace:set_enabled(false) end) end\n' +
-        '            L.grace = hl.timer(function()\n' +
-        '              L.grace = nil\n' +
-        '              local gok, gerr = pcall(function()\n' +
-        '                if L.sharing == 0 and L.effective then L.effective = false; L.apply() end\n' +
-        '              end)\n' +
-        '              if not gok then print("omyview: share grace timer failed: " .. tostring(gerr)) end\n' +
-        '            end, { timeout = ' + LOCK_SHARE_GRACE_MS + ', type = "oneshot" })\n' +
+        '            local tok, t = pcall(function()\n' +
+        '              return hl.timer(function()\n' +
+        '                L.grace = nil\n' +
+        '                local gok, gerr = pcall(function()\n' +
+        '                  if L.sharing == 0 and L.effective then L.effective = false; L.apply() end\n' +
+        '                end)\n' +
+        '                if not gok then print("omyview: share grace timer failed: " .. tostring(gerr)) end\n' +
+        '              end, { timeout = ' + LOCK_SHARE_GRACE_MS + ', type = "oneshot" })\n' +
+        '            end)\n' +
+        '            L.grace = tok and t or nil\n' +
+        '            if not L.grace then L.effective = false; L.apply() end\n' +
         '          end\n' +
         '        end)\n' +
         '        if not sok then print("omyview: share observer failed: " .. tostring(serr)) end\n' +

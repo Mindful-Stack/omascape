@@ -612,6 +612,35 @@ case("a share end only takes effect once the whole grace window has passed", fun
   eq(hl.__env._G.omyview_lock.effective, false)
   eq(Mock.pendingTimers(hl), 0, "the grace timer fired and is spent")
 end)
+-- Distinguishes: an observer that leaves L.effective stuck true when hl.timer is missing or
+-- throws on the off edge — every later ON edge would then be a no-op and every OFF edge would
+-- throw again, so the rim would stay on every armed workspace until a config reload. Without a
+-- timer the observer must degrade to the immediate off.
+case("a share end still turns the cue off when the grace timer cannot be created", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
+  local border = Mock.ruleNamed(hl, "omyview-lock-border-3")
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  hl.__fail_on = "timer"
+  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
+  hl.__fail_on = nil
+  eq(#hl.__printed, 0, "a missing timer is a degraded path, not an error")
+  eq(border:is_enabled(), false, "off at once when no grace timer could be armed")
+  eq(state(hl), "0")
+  eq(hl.__env._G.omyview_lock.effective, false)
+  eq(Mock.pendingTimers(hl), 0)
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  eq(border:is_enabled(), true, "the next share start still turns it on (effective was not stranded)")
+  eq(state(hl), "1")
+end)
+-- Distinguishes: an off edge from an already-idle state arming a pointless timer (a pending
+-- grace must always imply L.effective == true).
+case("an off edge while already idle arms no grace timer", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
+  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
+  eq(Mock.pendingTimers(hl), 0, "nothing to turn off, nothing armed")
+  eq(#hl.__timers, 0, "no timer was even created")
+  eq(state(hl), "0")
+end)
 -- Distinguishes: a grace timer that still fires after the share resumed — the rim would drop out
 -- mid-share, which is exactly the wrong direction for a privacy reminder.
 case("a share resuming inside the grace cancels the pending off", function()

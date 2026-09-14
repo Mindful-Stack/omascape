@@ -215,15 +215,19 @@ if not (L.sub and L.sub:is_active()) then
       if L.sharing > 0 then                                    -- ON edge: immediate, and cancels a pending off
         if L.grace then pcall(function() L.grace:set_enabled(false) end); L.grace = nil end
         if not L.effective then L.effective = true; L.apply() end
-      else                                                     -- OFF edge: only arm the grace timer
+      elseif L.effective then                                  -- OFF edge: only arm the grace timer
         if L.grace then pcall(function() L.grace:set_enabled(false) end) end
-        L.grace = hl.timer(function()                          -- a FRESH oneshot per off-edge; see below
-          L.grace = nil
-          local gok, gerr = pcall(function()
-            if L.sharing == 0 and L.effective then L.effective = false; L.apply() end
-          end)
-          if not gok then print("omyview: share grace timer failed: " .. tostring(gerr)) end
-        end, { timeout = LOCK_SHARE_GRACE_MS, type = "oneshot" })
+        local tok, t = pcall(function()
+          return hl.timer(function()                           -- a FRESH oneshot per off-edge; see below
+            L.grace = nil
+            local gok, gerr = pcall(function()
+              if L.sharing == 0 and L.effective then L.effective = false; L.apply() end
+            end)
+            if not gok then print("omyview: share grace timer failed: " .. tostring(gerr)) end
+          end, { timeout = LOCK_SHARE_GRACE_MS, type = "oneshot" })
+        end)
+        L.grace = tok and t or nil
+        if not L.grace then L.effective = false; L.apply() end -- no timer at all: degrade to the immediate off
       end
     end)
     if not ok then print("omyview: share observer failed: " .. tostring(err)) end

@@ -103,6 +103,7 @@ function M.new(opts)
   -- while pending. Nothing fires on its own: a test drives the clock with M.elapse.
   hl.__timers = {}
   function hl.timer(cb, opts)
+    if hl.__fail_on == "timer" then error("injected timer failure") end
     opts = opts or {}
     local t = { cb = cb, timeout = opts.timeout, type = opts.type or "oneshot",
                 enabled = true, fired = false, remaining = opts.timeout }
