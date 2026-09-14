@@ -931,17 +931,22 @@ function lockColorToQml(hypr) {
 // restart alone could never deliver a behaviour change to a running compositor, only a
 // `configreloaded` (which drops `_G` entirely) would.
 // 3 (share-time reminder border, 2026-09-14 addendum): the callback body changed from calling
-// `L.publish()` to calling `L.apply()` (reconcile every border rule's enabled state against the
-// current sharing/exclusion state, THEN publish) — a running compositor whose callback still
-// only publishes would never toggle a border added after it started, so the body change itself
-// must force the stale callback out, the same as the `kind` filter did at version 2.
+// `L.publish()` to calling `L.apply()` (reconcile every window-border rule's enabled state, THEN
+// publish) — a running compositor whose callback still only publishes would never toggle a border
+// added after it started, so the body change itself had to force the stale callback out, the same
+// as the `kind` filter did at version 2.
 // 4 (share-state hysteresis, 2026-09-14 round 3): the callback body changed again — it no longer
-// applies every edge. It keeps `L.sharing` as the raw counter but drives the borders and the
-// state file from `L.effective`, a debounced view of it: a true edge applies at once and cancels
-// any pending grace timer, a false edge only arms a `LOCK_SHARE_GRACE_MS` oneshot that turns the
-// cue off if no true arrived meanwhile. A compositor still running the v3 callback would keep
-// flapping the border rules twice a second (see LOCK_SHARE_GRACE_MS below), so the body change
-// must force the stale callback out.
+// applies every edge. It keeps `L.sharing` as the raw counter but drives the cue and the state
+// file from `L.effective`, a debounced view of it: a true edge applies at once and cancels any
+// pending grace timer, a false edge only arms a `LOCK_SHARE_GRACE_MS` oneshot that turns the cue
+// off if no true arrived meanwhile. A compositor still running the v3 callback would keep
+// flapping twice a second (see LOCK_SHARE_GRACE_MS below), so the body change had to force the
+// stale callback out.
+// NOT bumped for round 4 (the window-border rules replaced by the shell's own layer-shell frame):
+// the callback body's TEXT is unchanged — it still calls `L.apply()`, which every install
+// redefines on the shared `L` table before the version check runs, so a compositor running the v4
+// callback picks up the new (publish-only) `L.apply()` the moment the new shell installs. Only a
+// change to the callback's own body needs a bump.
 var LOCK_OBSERVER_VERSION = 4
 
 // Grace period before a share that stopped signalling is treated as over. Hyprland's
@@ -949,21 +954,25 @@ var LOCK_OBSERVER_VERSION = 4
 // and `screenshare.state(false, …)` from a 500 ms timer that fires whenever no frame arrived for
 // half a second — so a consumer that pulls frames irregularly (OBS on a mostly static screen)
 // makes the compositor emit false/true pairs for the whole recording: measured 20 events in 30 s
-// on 2026-09-14, every false run under ~1 s. Applying each edge toggled `border_size` (a border
-// size change relayouts the workspace → windows visibly "resizing") and rewrote the state file
-// twice a second. 3000 ms leaves headroom over the longest measured gap for a fully static
-// screen. The trade-off is one-sided: too short means flicker, too long means the rim lingers a
-// few seconds after the share really ended — cosmetic only, because the exclusion rules are
-// always on and privacy never depends on this signal.
+// on 2026-09-14, every false run under ~1 s. Applying each edge rewrote the state file twice a
+// second, which the shell's FileView dutifully reloaded — flickering the reminder frame and the
+// overview's placeholder with it (in round 3 it also toggled `border_size`, relayouting every
+// window on the workspace). 3000 ms leaves headroom over the longest measured gap for a fully
+// static screen. The trade-off is one-sided: too short means flicker, too long means the frame
+// lingers a few seconds after the share really ended — cosmetic only, because the exclusion rules
+// are always on and privacy never depends on this signal.
 var LOCK_SHARE_GRACE_MS = 3000
 
-// Install the compositor-side lock state: one table in _G, and the share observer that
-// publishes 1/0 to $XDG_RUNTIME_DIR/omyview/share-state. No layer rule for the overview's own
-// namespace: a `no_screen_share` layer renders as an opaque black rect over the whole layer box
-// while mapped (ScreenshareFrame.cpp), so it would blank the entire shared screen whenever the
-// overview is open — and toplevel export of an armed window is denied by Hyprland regardless
-// (see lockSyncLua's per-workspace window rules), so the overview cannot leak armed pixels
-// without it. Idempotent: re-running keeps the rules, the subscription and the share counter.
+// Install the compositor-side lock state: one table in _G, the share observer that publishes 1/0
+// to $XDG_RUNTIME_DIR/omyview/share-state, and the `no_screen_share` LAYER rule that blanks the
+// reminder frame's own strips in every capture (see the frame-rule block below). No such rule for
+// the overview's own namespace: a `no_screen_share` layer renders as an opaque black rect over
+// that surface's whole box while mapped (ScreenshareFrame.cpp), which for the overview would mean
+// a black rect over the whole screen whenever it is open — and toplevel export of an armed window
+// is denied by Hyprland regardless (see lockSyncLua's per-workspace window rules), so the
+// overview cannot leak armed pixels without it. The frame's strips are thin edge surfaces, so the
+// same blanking is exactly what is wanted there.
+// Idempotent: re-running keeps the rules, the subscription and the share counter.
 // Dispatched at shell start, on configreloaded (a reload drops every global) and at open().
 // The share observer is created FIRST, unconditionally inside the outer pcall, before anything
 // touches the filesystem: a broken $XDG_RUNTIME_DIR (or a write/rename failure) must degrade
@@ -998,16 +1007,9 @@ function lockInstallLua() {
         'function()\n' +
         '  local ok, err = pcall(function()\n' +
         '    local L = _G.omyview_lock\n' +
-        '    if not L then L = { rules = {}, sharing = 0, effective = false, grace = nil, sub = nil, subVer = nil, dir = nil, borders = {}, borderCfg = nil }; _G.omyview_lock = L end\n' +
-        // Mirrors how the exclusion table (`L.rules`) is always present: an observer re-install
-        // after a shell restart can land on an `_G.omyview_lock` created by an OLDER omyview
-        // build that predates the border addendum (so `L.borders` was never set at all, and the
-        // `if not L` branch above is skipped because L already exists) -- this keeps that
-        // observer's border handles (an empty table the first time, whatever it already holds
-        // otherwise) instead of leaving `L.borders` nil until the next sync happens to set it.
-        '    L.borders = L.borders or {}\n' +
+        '    if not L then L = { rules = {}, sharing = 0, effective = false, grace = nil, sub = nil, subVer = nil, dir = nil, frameRule = nil }; _G.omyview_lock = L end\n' +
         // `L.sharing` is the raw balanced counter; `L.effective` is the debounced view of it that
-        // the border rules and the state file follow (see LOCK_SHARE_GRACE_MS). Seeded from the
+        // the state file follows (see LOCK_SHARE_GRACE_MS). Seeded from the
         // counter — and only when unset — so an install landing on an `_G.omyview_lock` from a
         // pre-hysteresis build starts out agreeing with whatever is actually running, and a later
         // re-install never resets a live `false` grace decision back to `true`.
@@ -1038,43 +1040,15 @@ function lockInstallLua() {
         '      local rok, rerr = os.rename(tmp, dst)\n' +
         '      if not rok then os.remove(tmp); error("rename share-state: " .. tostring(rerr)) end\n' +
         '    end\n' +
-        // L.reconcileBorders()/L.apply() are defined here — before the subVer check and the
-        // observer subscription below, which calls L.apply() — so a fresh subscription's
-        // callback always closes over fully-defined functions (never stale/partial ones from an
-        // earlier install). L.reconcileBorders() toggles every border rule's enabled state
-        // against the current sharing count and its exclusion rule's own state; every border
-        // rule is created DISABLED by lockSyncLua and only ever toggled here. Each toggle is
-        // guarded on its own (never letting one bad rule handle abort the rest); a handle whose
-        // set_enabled throws while ENABLING is dropped from L.borders so the next sync recreates
-        // it instead of retrying a dead handle. A failed DISABLE keeps the handle instead (rules
-        // cannot be destroyed in this Hyprland Lua API, only disabled): dropping it there would
-        // leave the rule stuck ENABLED and unreachable, and the next sync would create a second,
-        // disabled rule under the same name that never undoes the first — a stale red frame with
-        // no share running until a config reload. This mirrors lockSyncLua's own exclusion-rule
-        // disable loop below, which never drops a handle on a failed set_enabled(false) either.
-        // L.apply() runs the border reconcile BEFORE L.publish() — a publish failure (raised out
-        // of L.apply()) must not leave the border rules untouched; reconciling first means it
-        // always runs regardless of the publish outcome. lockSyncLua calls L.reconcileBorders()
-        // directly, never L.apply(): publishing the share-state file is the observer/install's
-        // job, not a rule sync's — see lockSyncLua below.
-        // The reconcile is idempotent: a rule already in the wanted state is left alone. Every
-        // set_enabled on a border rule costs a workspace relayout (border_size changes the tile
-        // geometry), and this runs on every sync — arm/disarm, config change, every overview
-        // open — so re-setting an already-correct rule is pure flicker. The is_enabled() read is
-        // pcall'd too: a handle that throws on the read is "unknown", and unknown means set it.
-        '    function L.reconcileBorders()\n' +
-        '      for sel, b in pairs(L.borders or {}) do\n' +
-        '        local r = L.rules[sel]\n' +
-        '        local want = L.effective and r ~= nil and r:is_enabled()\n' +
-        '        local iok, cur = pcall(function() return b:is_enabled() end)\n' +
-        '        if (not iok) or cur ~= want then\n' +
-        '          local tok = pcall(function() b:set_enabled(want) end)\n' +
-        '          if not tok and want then L.borders[sel] = nil end\n' +
-        '        end\n' +
-        '      end\n' +
-        '    end\n' +
+        // L.apply() is defined here — before the subVer check and the observer subscription
+        // below, which calls it — so a fresh subscription's callback always closes over a
+        // fully-defined function (never a stale/partial one from an earlier install). Since round
+        // 4 the compositor side has nothing to reconcile on a share edge (the cue is the shell's
+        // own layer-shell frame, driven by the published state file), so applying IS publishing.
+        // It stays a named function rather than being inlined: the observer callback's body text
+        // is what LOCK_OBSERVER_VERSION guards, and keeping the indirection means a future change
+        // on this side does not force every running compositor's subscription to be replaced.
         '    function L.apply()\n' +
-        '      L.reconcileBorders()\n' +
         '      L.publish()\n' +
         '    end\n' +
         '    if L.subVer ~= ' + LOCK_OBSERVER_VERSION + ' then\n' +
@@ -1122,10 +1096,33 @@ function lockInstallLua() {
         '        if not sok then print("omyview: share observer failed: " .. tostring(serr)) end\n' +
         '      end)\n' +
         '    end\n' +
+        // Share-time reminder frame (addendum, round 4): the strips omyview maps at the monitor
+        // edges are its own layer surfaces, and this rule is what keeps them out of every capture
+        // — a `no_screen_share` LAYER renders as an opaque black rect over that surface's own box
+        // while mapped (ScreenshareFrame.cpp), so the frame's four thin strips go black in the
+        // recording and the red cue stays purely local. Live-probed 2026-09-14 on the bar's
+        // namespace: only that surface's 26 px strip went black (mean 0), the rest of the frame
+        // was untouched — per-surface blanking, not a whole-screen blank.
+        // Created once and kept on `L` (this Hyprland Lua API can only disable a rule, never
+        // remove it, and install runs on every overview open), but re-created after a
+        // `configreloaded` like every other rule, since that drops `_G` entirely. A surviving
+        // rule that is somehow disabled is re-enabled rather than duplicated: a second rule under
+        // the same name would not undo the first. Its own pcall, so a failure here cannot take
+        // down the exclusion rules or the share observer — which are the actual protection — and
+        // the error is re-raised below into the install's existing report path.
+        '    local fok, ferr = pcall(function()\n' +
+        '      if L.frameRule then\n' +
+        '        local iok, cur = pcall(function() return L.frameRule:is_enabled() end)\n' +
+        '        if (not iok) or cur == false then L.frameRule:set_enabled(true) end\n' +
+        '      else\n' +
+        '        L.frameRule = hl.layer_rule({ name = "omyview-lockframe", match = { namespace = "omyview-lockframe" }, no_screen_share = true })\n' +
+        '      end\n' +
+        '    end)\n' +
         '    local pok, perr = pcall(function()\n' +
         '      L.ensureDir()\n' +
         '      L.apply()\n' +
         '    end)\n' +
+        '    if not fok then error(ferr, 0) end\n' +
         '    if not pok then error(perr, 0) end\n' +
         '  end)\n' +
         '  ' + reportLua('lock install') + '\n' +
@@ -1139,39 +1136,18 @@ function lockInstallLua() {
 // reported once, naming every selector that failed. A failed re-enable drops the dead handle
 // from L.rules (rather than leaving it there forever, unusable): the next sync that arms the
 // same selector sees no handle and creates a fresh rule instead of retrying a broken one.
-// `border` ({ color, size }) is the share-time reminder border (addendum, 2026-09-14):
-// validated again here with LOCK_BORDER_RE (the value is interpolated into the chunk) and its
-// size coerced to an integer 0..20, exactly like parseConfig — this builder must not trust that
-// every caller already went through parseConfig. A second, disabled, named rule per armed
-// selector (`omyview-lock-border-<sel>`) carries the border; it is only ever ENABLED by
-// `L.reconcileBorders()` (called directly at the end of this chunk, and via `L.apply()` by the
-// share observer and install), never here — this function only creates/keeps the rule disabled
-// and, on a colour/size change, disables and drops every existing border rule so they are
-// rebuilt against the new config on demand. This chunk calls `L.reconcileBorders()`, NOT
-// `L.apply()`: `L.apply()` also republishes the share-state file, but a sync never changes
-// `L.sharing` (only the observer does), so republishing here would be redundant and — being a
-// filesystem operation — could fail for reasons that have nothing to do with rule reconciliation.
-// Folding that failure into this chunk's `ok, err` would make "lock sync failed" notifications
-// fire for a stale runtime directory even though every rule was reconciled correctly; skipping
-// the publish keeps this chunk's report about rule reconciliation only, per the addendum.
-function lockSyncLua(armed, border) {
+// This chunk never publishes the share-state file: a sync never changes `L.sharing` (only the
+// observer does), so republishing here would be redundant and — being a filesystem operation —
+// could fail for reasons that have nothing to do with rule reconciliation. Folding that failure
+// into this chunk's `ok, err` would make "lock sync failed" notifications fire for a stale
+// runtime directory even though every rule was reconciled correctly; this chunk's report
+// describes rule reconciliation only.
+function lockSyncLua(armed) {
     var sels = []
     for (var i = 0; i < (armed || []).length; i++) if (validLockSelector(armed[i])) sels.push('"' + armed[i] + '"')
-    var b = border || {}
-    var color = (typeof b.color === "string" && LOCK_BORDER_RE.test(b.color)) ? b.color : "rgb(ff4444)"
-    var sizeNum = Number(b.size)
-    var size = isFinite(sizeNum) ? Math.max(0, Math.min(20, Math.floor(sizeNum))) : 6
     return (
         'function()\n' +
         '  local ARMED = {' + sels.join(', ') + '}\n' +
-        // `pair` is the same colour twice. Hyprland's parseBorderColorRule (WindowRule.cpp) sets
-        // only the ACTIVE border colour from a single value and fills `inactive` only when the
-        // string holds exactly two colour tokens and no `deg`; WindowRuleApplicator.cpp then
-        // overrides the inactive colour only if `inactive` is present. A single value therefore
-        // rims just the focused window — live-confirmed 2026-09-14, and the opposite of the
-        // round-1 probe note. `color` stays the single configured value: it is what the user
-        // configures, and what `L.borderCfg` compares (doubling is a rendering detail).
-        '  local BORDER = { color = "' + color + '", pair = "' + color + ' ' + color + '", size = ' + size + ' }\n' +
         '  local L = _G.omyview_lock\n' +
         '  local ok, err = L ~= nil, "lock not installed"\n' +
         '  if L then\n' +
@@ -1191,33 +1167,7 @@ function lockSyncLua(armed, border) {
         '      end)\n' +
         '    end\n' +
         '    for sel, r in pairs(L.rules) do if not want[sel] then step(sel, function() r:set_enabled(false) end) end end\n' +
-        '    L.borders = L.borders or {}\n' +
-        '    local cfgKey = BORDER.color .. "/" .. BORDER.size\n' +
-        // A dropped rule cannot be destroyed in this Hyprland Lua API (0.56.2) -- only disabled.
-        // A colour/size change therefore disables every existing border rule and drops it from
-        // L.borders (not from the compositor's rule table, which has no removal call); the loop
-        // below re-creates one under the SAME name (`omyview-lock-border-<sel>`) per still-armed
-        // selector. The stale, disabled, unreferenced rule handle is simply abandoned -- inert
-        // and harmless, the same trade-off lockSyncLua already makes for a dead exclusion handle.
-        '    if L.borderCfg ~= cfgKey then\n' +
-        '      for _, br in pairs(L.borders) do pcall(function() br:set_enabled(false) end) end\n' +
-        '      L.borders = {}\n' +
-        '      L.borderCfg = cfgKey\n' +
-        '    end\n' +
-        '    for sel in pairs(want) do\n' +
-        '      step(sel, function()\n' +
-        '        if not L.borders[sel] then\n' +
-        '          local spec = { name = "omyview-lock-border-" .. sel, match = { workspace = sel }, border_color = BORDER.pair, enabled = false }\n' +
-        '          if BORDER.size > 0 then spec.border_size = BORDER.size end\n' +
-        '          L.borders[sel] = hl.window_rule(spec)\n' +
-        '        end\n' +
-        '      end)\n' +
-        '    end\n' +
         '    ok, err = #failed == 0, table.concat(failed, "; ")\n' +
-        // pcall'd so an error inside L.reconcileBorders() (e.g. an _G.omyview_lock left by an
-        // older build without the function at all) cannot kill the chunk before reportLua runs;
-        // ok/err above already describes rule reconciliation and must not be touched by this.
-        '    pcall(function() L.reconcileBorders() end)\n' +
         '  end\n' +
         '  ' + reportLua('lock sync') + '\n' +
         'end'

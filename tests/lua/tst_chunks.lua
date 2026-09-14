@@ -231,9 +231,8 @@ local function state(hl) return hl.__files[hl.__os.getenv("XDG_RUNTIME_DIR") .. 
 local function statePath(hl) return hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state" end
 -- Mock.ruleNamed returns the FIRST rule matching `name` in hl.__window_rules (a flat log that
 -- keeps every rule ever created, including dead handles a failed re-enable dropped from
--- L.rules/L.borders). A border config change intentionally creates a SECOND rule with the same
--- name as the one it just disabled and dropped — this returns the LAST match instead, i.e. the
--- one still referenced by the compositor's tables.
+-- L.rules). A dropped handle is recreated under the SAME name, so this returns the LAST match
+-- instead, i.e. the one still referenced by the compositor's table.
 local function lastRuleNamed(hl, name)
   local found = nil
   for _, r in ipairs(hl.__window_rules) do if r.spec.name == name then found = r end end
@@ -335,6 +334,48 @@ case("lock install: os.execute returning nil does not fail the install (mkdir's 
   eq(#hl.__notifications, 0, "no failure reported")
   eq(state(hl), "0", "published despite os.execute returning nil")
 end)
+-- Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum, 2026-09-14, round 4).
+-- The frame is omyview's own layer-shell surfaces; the layer rule is what blanks them in every
+-- capture, so a viewer sees a plain black screen instead of a red frame around one. Distinguishes:
+-- no rule at all (the frame would be IN the recording), a rule on the wrong namespace, or one
+-- without no_screen_share.
+case("lock install creates the lockframe layer rule with no_screen_share", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  local r = Mock.layerRuleNamed(hl, "omyview-lockframe")
+  eq(r ~= nil, true, "layer rule created")
+  eq(r.spec.match.namespace, "omyview-lockframe", "matches the strips' namespace")
+  eq(r.spec.no_screen_share, true)
+  eq(r:is_enabled(), true, "created enabled")
+  eq(#hl.__notifications, 0)
+end)
+-- Distinguishes: an install that recreates the rule every time (the overview installs on every
+-- open; the compositor's rule table has no removal call, so each one would leak a handle) and one
+-- that leaves a surviving-but-disabled rule disabled (the frame would then be visible to viewers
+-- with no way back short of a config reload).
+case("a second install reuses the lockframe layer rule and re-enables a disabled one", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  local first = Mock.layerRuleNamed(hl, "omyview-lockframe")
+  run("LOCK_INSTALL", hl)
+  eq(#hl.__layer_rules, 1, "no duplicate layer rule")
+  first:set_enabled(false)
+  run("LOCK_INSTALL", hl)
+  eq(#hl.__layer_rules, 1, "still no duplicate")
+  eq(first:is_enabled(), true, "a surviving disabled rule is re-enabled")
+end)
+-- Distinguishes: a layer-rule failure taking the whole install down with it (the exclusion rules
+-- and the share observer are the actual protection and must survive) or being swallowed silently.
+case("a failing layer rule is reported but leaves the observer and the publish intact", function()
+  local hl = Mock.new({})
+  hl.__fail_on = "layer_rule"
+  run("LOCK_INSTALL", hl)
+  eq(#hl.__notifications, 1, "reported through the install's own error path")
+  eq(#hl.__subs, 1, "the share observer still exists")
+  eq(state(hl), "0", "and the state file was still published")
+  hl.__fail_on = nil
+  run("LOCK_INSTALL", hl)
+  eq(Mock.layerRuleNamed(hl, "omyview-lockframe") ~= nil, true, "the next install retries it")
+  eq(#hl.__notifications, 1, "the clean retry reports nothing new")
+end)
 -- Distinguishes: a counter reset by re-install, or an install that publishes stale state.
 case("lock install preserves the share counter", function()
   local hl = Mock.new({})
@@ -346,7 +387,7 @@ end)
 case("lock sync creates one enabled named rule per selector", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   run("LOCK_SYNC_3_SCRATCH", hl)
-  eq(#hl.__window_rules, 4, "one exclusion rule and one (disabled) border rule per selector")
+  eq(#hl.__window_rules, 2, "exactly one rule per selector, nothing else")
   local r3 = Mock.ruleNamed(hl, "omyview-lock-3"); eq(r3 ~= nil, true, "named rule for 3")
   eq(r3:is_enabled(), true); eq(r3.spec.match.workspace, "3"); eq(r3.spec.no_screen_share, true)
   eq(Mock.ruleNamed(hl, "omyview-lock-special:scratchpad"):is_enabled(), true)
@@ -359,7 +400,7 @@ case("lock sync disables removed selectors and reuses the handle on re-arm", fun
   run("LOCK_SYNC_3", hl); run("LOCK_SYNC_NONE", hl)
   eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), false, "disabled")
   run("LOCK_SYNC_3", hl)
-  eq(#hl.__window_rules, 2, "same handle re-enabled, no second rule (plus the earlier border rule)")
+  eq(#hl.__window_rules, 1, "same handle re-enabled, no second rule")
   eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true)
 end)
 -- Distinguishes: the share observer touching rules (they must stay as the sync left them) or
@@ -403,92 +444,27 @@ case("lock sync still disables stale rules when an enable throws", function()
   eq(#hl.__notifications, 1, "the clean retry reports nothing new")
 end)
 -- Distinguishes: a dead handle left in L.rules after a failed re-enable (a later re-arm would
--- keep retrying the same broken rule instead of creating a fresh one). `hl.__fail_on =
--- "rule.set_enabled"` is global (not scoped to one rule), so it would also reach the border's
--- own set_enabled inside the same sync's L.reconcileBorders() call — but the border is already
--- disabled and, with no share running, wants to stay disabled, and the round-3 reconcile only
--- calls set_enabled when the rule's state differs from what it wants. So the border handle is
--- never touched here at all: only the exclusion's handle (a failed ENABLE) is dropped and
--- rebuilt fresh on the next sync.
+-- keep retrying the same broken rule instead of creating a fresh one).
 case("lock sync drops a dead handle after a failed re-enable, so re-arm creates a fresh rule", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   run("LOCK_SYNC_3", hl)
-  local borderBefore = Mock.ruleNamed(hl, "omyview-lock-border-3")
+  local dead = Mock.ruleNamed(hl, "omyview-lock-3")
   hl.__fail_on = "rule.set_enabled"
   run("LOCK_SYNC_3", hl)
   eq(#hl.__notifications, 1, "reported")
   hl.__fail_on = nil
   run("LOCK_SYNC_3", hl)
-  eq(#hl.__window_rules, 3, "the exclusion's dead handle is dropped and rebuilt; the border's kept handle is reused")
-  eq(lastRuleNamed(hl, "omyview-lock-3"):is_enabled(), true, "the fresh exclusion rule is enabled")
-  eq(lastRuleNamed(hl, "omyview-lock-border-3"), borderBefore, "the border rule was never dropped, only retried")
-  eq(borderBefore:is_enabled(), false, "the retried border rule stays disabled (not sharing)")
+  eq(#hl.__window_rules, 2, "the dead handle is dropped and a fresh rule created under the same name")
+  local fresh = lastRuleNamed(hl, "omyview-lock-3")
+  eq(fresh ~= dead, true, "a distinct rule object")
+  eq(fresh:is_enabled(), true, "the fresh exclusion rule is enabled")
 end)
 
--- Share-time reminder border (docs/specs/2026-09-12-lock-design.md, addendum, 2026-09-14).
--- Distinguishes: a border rule created enabled (it must start disabled — only L.apply() ever
--- toggles it), unnamed, matched on something other than the workspace, or missing the
--- configured colour/size -- and (round 3) a SINGLE colour value, which Hyprland's
--- parseBorderColorRule reads as the ACTIVE border only, leaving every unfocused window on the
--- armed workspace un-rimmed. The doubled form ("<c> <c>") is what sets active AND inactive.
-case("lock sync creates a disabled border rule with the configured colour, doubled for inactive windows, and size, outside a share", function()
-  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
-  run("LOCK_SYNC_3", hl)
-  local border = Mock.ruleNamed(hl, "omyview-lock-border-3")
-  eq(border ~= nil, true, "border rule created")
-  eq(border:is_enabled(), false, "disabled outside a share")
-  eq(border.spec.match.workspace, "3")
-  eq(border.spec.border_color, "rgb(ff4444) rgb(ff4444)", "active AND inactive, not just the focused window")
-  eq(border.spec.border_size, 6)
-end)
--- Distinguishes: the border rule not following a share starting/ending, or following it for a
--- selector that is not armed. The end is only effective once the grace window has elapsed
--- (round 3) -- that debounce has its own cases below.
-case("a share start enables the border rule for an armed selector; a share end disables it", function()
-  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
-  local border = Mock.ruleNamed(hl, "omyview-lock-border-3")
-  eq(border:is_enabled(), false)
-  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  eq(border:is_enabled(), true, "enabled: armed and a share is active")
-  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
-  Mock.elapse(hl, GRACE)
-  eq(border:is_enabled(), false, "disabled once the share ends")
-end)
--- Distinguishes: disarming during a share leaving the border enabled (it must follow the
--- exclusion rule, not the share state alone), or re-arming not restoring it.
-case("disarming during a share disables both rules; re-arming enables both", function()
-  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
-  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  local excl, border = Mock.ruleNamed(hl, "omyview-lock-3"), Mock.ruleNamed(hl, "omyview-lock-border-3")
-  eq(excl:is_enabled(), true); eq(border:is_enabled(), true)
-  run("LOCK_SYNC_NONE", hl)
-  eq(excl:is_enabled(), false, "exclusion disarmed"); eq(border:is_enabled(), false, "border follows it")
-  run("LOCK_SYNC_3", hl)
-  eq(excl:is_enabled(), true, "re-armed"); eq(border:is_enabled(), true, "border re-enabled: still sharing")
-end)
--- Distinguishes: a colour/size change reusing the stale rule (never picking up the new value)
--- instead of disabling and dropping it so a fresh one is built; and a size of 0 leaving a stray
--- `border_size` field in the spec instead of omitting it outright.
-case("a config change disables the old border rule and creates a new one with the new colour, omitting border_size at 0", function()
-  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
-  local old = Mock.ruleNamed(hl, "omyview-lock-border-3")
-  local n0 = #hl.__window_rules
-  run("LOCK_SYNC_3_BLUE", hl)
-  eq(old:is_enabled(), false, "old colour rule disabled")
-  eq(#hl.__window_rules, n0 + 1, "a fresh border rule was created")
-  local fresh = lastRuleNamed(hl, "omyview-lock-border-3")
-  eq(fresh ~= old, true, "a distinct rule object")
-  eq(fresh.spec.border_color, "rgb(3355ff) rgb(3355ff)", "the new colour, doubled (active + inactive)")
-  eq(fresh.spec.border_size, nil, "size 0 omits border_size entirely")
-  eq(fresh:is_enabled(), false, "created disabled (not sharing)")
-  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  eq(fresh:is_enabled(), true, "enabled now that a share is active")
-end)
--- Distinguishes: a running compositor whose OLD callback only calls L.publish() (pre-border)
--- surviving a shell restart unreplaced — it would never pick up border toggling. LOCK_OBSERVER_VERSION
--- was bumped to 3 for exactly this; a stale subVer of 2 (the pre-addendum version) must be
+-- Distinguishes: a running compositor whose OLD callback (the pre-addendum one, which only ever
+-- called L.publish() and ignored the `kind` filter changes above it) surviving a shell restart
+-- unreplaced. LOCK_OBSERVER_VERSION was bumped to 3 for exactly this; a stale subVer of 2 must be
 -- replaced just like any other mismatch.
-case("install over a stale subVer = 2 (pre-border) subscription replaces it under the current LOCK_OBSERVER_VERSION", function()
+case("install over a stale subVer = 2 subscription replaces it under the current LOCK_OBSERVER_VERSION", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   local oldSub = hl.__subs[1]
   hl.__env._G.omyview_lock.subVer = 2
@@ -500,137 +476,75 @@ case("install over a stale subVer = 2 (pre-border) subscription replaces it unde
 end)
 
 -- Quality-review fix (item 3, 2026-09-14): lockSyncLua must not fold a failing L.publish() into
--- its own ok/err report -- publishing the share-state file is the observer/install's job
--- (L.reconcileBorders(), not L.apply(), is what a sync calls), so a broken runtime dir must never
--- turn "every rule reconciled fine" into a reported "lock sync failed". Distinguishes: a
--- regression that reintroduces L.apply() (and so L.publish()) into the sync chunk's own ok/err.
+-- its own ok/err report -- publishing the share-state file is the observer/install's job, so a
+-- broken runtime dir must never turn "every rule reconciled fine" into a reported "lock sync
+-- failed". Distinguishes: a regression that puts L.apply() (and so L.publish()) into the sync
+-- chunk's own ok/err.
 case("a failing publish does not fail the sync report, and rules are still reconciled", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   hl.__fail_on = "io.open"          -- would break L.ensureDir()/L.publish() if the sync called them
   run("LOCK_SYNC_3", hl)
   eq(#hl.__notifications, 0, "publish is not this chunk's job; no error reported")
   eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true, "exclusion rule still enabled")
-  eq(Mock.ruleNamed(hl, "omyview-lock-border-3") ~= nil, true, "border rule still created")
 end)
--- Quality-review fix (item 4 / minor 6-8, 2026-09-14): a border rule whose set_enabled throws
--- (inside L.reconcileBorders(), reached here via the share observer's L.apply()) must drop its
--- handle from L.borders so the next sync recreates it, exactly like a dead exclusion-rule handle
--- already does -- and that failure must never touch the exclusion rule, which L.reconcileBorders()
--- never calls set_enabled on.
--- Round 3: a second share start no longer re-affirms anything (the cue is already on, so the
--- observer does nothing at all), and a reconcile skips a rule that is already in the wanted
--- state — so the failing ENABLE is reached the way it happens in practice: a share ends, the
--- grace expires and the cue drops, then a new share starts.
-case("a border rule's failed enable drops its handle; the exclusion rule is unaffected; the next sync recreates and re-enables it", function()
-  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
-  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  local before = Mock.ruleNamed(hl, "omyview-lock-border-3")
-  eq(before:is_enabled(), true, "enabled while sharing")
-  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1"); Mock.elapse(hl, GRACE)
-  eq(before:is_enabled(), false, "the cue dropped when the grace expired")
-  hl.__fail_on = "rule.set_enabled"
-  Mock.fire(hl, "screenshare.state", true, 0, "HDMI-A-1")   -- a new share: L.apply() enables the border, and fails
-  hl.__fail_on = nil
-  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true, "exclusion rule untouched by the border's failure")
-  run("LOCK_SYNC_3", hl)
-  local fresh = lastRuleNamed(hl, "omyview-lock-border-3")
-  eq(fresh ~= before, true, "a fresh border rule handle was created")
-  eq(fresh:is_enabled(), true, "the fresh handle is enabled (still sharing)")
-end)
--- Quality-review fix round 2 (item 1, 2026-09-14): a failed border DISABLE (share end, when the
--- compositor's set_enabled throws) must NOT drop the handle from L.borders the way a failed
--- ENABLE does. Rules cannot be destroyed in this Hyprland Lua API, so dropping on a failed
--- disable would leave the rule stuck ENABLED and unreachable -- the next sync would create a
--- second, disabled rule under the same name, which never undoes the first (a permanently red
--- frame with no share running, until a config reload). Mirrors lockSyncLua's own exclusion-rule
--- disable loop, which never drops a handle on a failed set_enabled(false) either.
--- Round 3: the disable now happens inside the grace timer's callback, and the retry comes from
--- the next reconcile of any kind — here the next sync (another share end would not do it: with
--- `L.effective` already false, a further `false` edge changes nothing).
-case("a border rule's failed DISABLE keeps its handle so the next reconcile can retry it; no duplicate rule is created", function()
-  local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
-  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  local before = Mock.ruleNamed(hl, "omyview-lock-border-3")
-  eq(before:is_enabled(), true, "enabled while sharing")
-  hl.__fail_on = "rule.set_enabled"
-  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
-  Mock.elapse(hl, GRACE)                                 -- the grace expires: L.apply() tries to disable, fails
-  eq(hl.__env._G.omyview_lock.borders["3"], before, "handle kept on a failed disable, not dropped")
-  eq(before:is_enabled(), true, "still enabled -- the failed disable never took")
-  hl.__fail_on = nil
-  run("LOCK_SYNC_3", hl)                                 -- the next reconcile retries the same handle
-  eq(before:is_enabled(), false, "the retried disable on the kept handle succeeds")
-  run("LOCK_SYNC_3", hl)
-  eq(lastRuleNamed(hl, "omyview-lock-border-3"), before, "no duplicate rule was created under the name")
-  local count = 0
-  for _, r in ipairs(hl.__window_rules) do if r.spec.name == "omyview-lock-border-3" then count = count + 1 end end
-  eq(count, 1, "still exactly one border rule for this selector")
-end)
-
 -- Share-state hysteresis (round 3, 2026-09-14). Hyprland emits screenshare.state(true) per
 -- COPIED frame and (false) from a 500 ms frame-idle timer, so a consumer pulling frames
 -- irregularly (OBS on a static screen) flaps the signal for the whole recording. The observer
--- keeps `L.sharing` as the raw counter but drives the border rules and the state file from
--- `L.effective`, which only goes false after LOCK_SHARE_GRACE_MS with no new start.
--- Distinguishes: an observer that applies every edge — the live "windows constantly resizing"
--- flicker (a border_size change relayouts the workspace) plus a state-file rewrite twice a second.
-case("a flapping share signal inside the grace window toggles no rule and rewrites no state", function()
+-- keeps `L.sharing` as the raw counter but drives the state file from `L.effective`, which only
+-- goes false after LOCK_SHARE_GRACE_MS with no new start. Since round 4 the state file IS the
+-- whole cue: the shell's FileView reloads on every write and the reminder frame (and the
+-- overview's placeholder) follow it, so a rewrite twice a second is a visible flicker.
+-- Distinguishes: an observer that applies every edge. `hl.__renames` counts committed publishes,
+-- which the file's content alone could never show (every rewrite would write the same "1").
+case("a flapping share signal inside the grace window rewrites no state", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
-  local border = Mock.ruleNamed(hl, "omyview-lock-border-3")
+  local writes = hl.__renames
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  eq(border:is_enabled(), true, "the ON edge applies immediately, no delay")
+  eq(state(hl), "1", "the ON edge applies immediately, no delay")
+  eq(hl.__renames, writes + 1, "exactly one publish so far")
+  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
+  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  eq(hl.__renames, writes + 1, "four flapping edges committed no further publish")
   eq(state(hl), "1")
-  eq(border.__set_calls, 1, "exactly one toggle so far: the sync left the disabled rule alone")
-  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
-  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
-  Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  eq(border.__set_calls, 1, "four flapping edges asked the compositor for no further toggle")
-  eq(state(hl), "1", "and rewrote no state (the shell's FileView never reloads)")
   eq(hl.__env._G.omyview_lock.effective, true, "still effectively sharing")
   eq(hl.__env._G.omyview_lock.sharing, 1, "the raw counter still tracks every edge")
   assert(Mock.pendingTimers(hl) <= 1, "at most one grace timer pending, got " .. Mock.pendingTimers(hl))
   Mock.elapse(hl, GRACE)
-  eq(border.__set_calls, 1, "the last false's timer was cancelled by the true that followed it")
-  eq(border:is_enabled(), true); eq(state(hl), "1")
+  eq(hl.__renames, writes + 1, "the last false's timer was cancelled by the true that followed it")
+  eq(state(hl), "1")
 end)
 -- Distinguishes: an immediate off (the flicker's other half), or a grace shorter than
 -- LOCK_SHARE_GRACE_MS.
 case("a share end only takes effect once the whole grace window has passed", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
-  local border = Mock.ruleNamed(hl, "omyview-lock-border-3")
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
   Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
-  eq(border:is_enabled(), true, "still on the moment the share stops signalling")
-  eq(state(hl), "1")
+  eq(state(hl), "1", "still on the moment the share stops signalling")
   Mock.elapse(hl, GRACE - 1)
-  eq(border:is_enabled(), true, "still on one millisecond before the grace expires")
-  eq(state(hl), "1")
+  eq(state(hl), "1", "still on one millisecond before the grace expires")
   Mock.elapse(hl, 1)
-  eq(border:is_enabled(), false, "off once the grace expires")
-  eq(state(hl), "0")
+  eq(state(hl), "0", "off once the grace expires")
   eq(hl.__env._G.omyview_lock.effective, false)
   eq(Mock.pendingTimers(hl), 0, "the grace timer fired and is spent")
 end)
 -- Distinguishes: an observer that leaves L.effective stuck true when hl.timer is missing or
 -- throws on the off edge — every later ON edge would then be a no-op and every OFF edge would
--- throw again, so the rim would stay on every armed workspace until a config reload. Without a
+-- throw again, so the frame would stay on every armed workspace until a config reload. Without a
 -- timer the observer must degrade to the immediate off.
 case("a share end still turns the cue off when the grace timer cannot be created", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
-  local border = Mock.ruleNamed(hl, "omyview-lock-border-3")
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
   hl.__fail_on = "timer"
   Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
   hl.__fail_on = nil
   eq(#hl.__printed, 0, "a missing timer is a degraded path, not an error")
-  eq(border:is_enabled(), false, "off at once when no grace timer could be armed")
-  eq(state(hl), "0")
+  eq(state(hl), "0", "off at once when no grace timer could be armed")
   eq(hl.__env._G.omyview_lock.effective, false)
   eq(Mock.pendingTimers(hl), 0)
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  eq(border:is_enabled(), true, "the next share start still turns it on (effective was not stranded)")
-  eq(state(hl), "1")
+  eq(state(hl), "1", "the next share start still turns it on (effective was not stranded)")
 end)
 -- Distinguishes: an off edge from an already-idle state arming a pointless timer (a pending
 -- grace must always imply L.effective == true).
@@ -641,38 +555,35 @@ case("an off edge while already idle arms no grace timer", function()
   eq(#hl.__timers, 0, "no timer was even created")
   eq(state(hl), "0")
 end)
--- Distinguishes: a grace timer that still fires after the share resumed — the rim would drop out
--- mid-share, which is exactly the wrong direction for a privacy reminder.
+-- Distinguishes: a grace timer that still fires after the share resumed — the frame would drop
+-- out mid-share, which is exactly the wrong direction for a privacy reminder.
 case("a share resuming inside the grace cancels the pending off", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
-  local border = Mock.ruleNamed(hl, "omyview-lock-border-3")
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
+  local writes = hl.__renames
   Mock.fire(hl, "screenshare.state", false, 0, "eDP-1")
   eq(Mock.pendingTimers(hl), 1, "one grace timer armed by the off edge")
   Mock.elapse(hl, 1000)
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
   eq(hl.__timers[1]:is_enabled(), false, "the pending off was cancelled")
-  eq(border.__set_calls, 1, "no toggle since the very first enable")
+  eq(hl.__renames, writes, "no publish since the one the share start committed")
   eq(state(hl), "1")
   Mock.elapse(hl, 5000)                       -- well past the cancelled timer's original deadline
-  eq(border:is_enabled(), true, "still on: the cancelled timer can never fire")
-  eq(state(hl), "1")
+  eq(state(hl), "1", "still on: the cancelled timer can never fire")
 end)
--- Distinguishes: a reconcile that re-sets a rule already in the wanted state. Harmless on paper,
--- but every set_enabled on a border rule is a relayout of the workspace, and lockSyncLua runs a
--- reconcile on every arm/disarm and every config change.
-case("a sync while sharing does not re-set an already-correct border rule", function()
+-- Distinguishes: a sync republishing the state file. It cannot have changed (only the observer
+-- moves L.sharing/L.effective), and every write makes the shell reload and re-evaluate the frame.
+case("a sync while sharing publishes nothing", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl); run("LOCK_SYNC_3", hl)
-  local border = Mock.ruleNamed(hl, "omyview-lock-border-3")
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  local before = border.__set_calls
-  run("LOCK_SYNC_3", hl)                      -- same config, same armed set: nothing to change
-  eq(border.__set_calls, before, "the already-enabled border rule was left alone")
-  eq(border:is_enabled(), true, "and is still enabled")
+  local writes = hl.__renames
+  run("LOCK_SYNC_3", hl); run("LOCK_SYNC_NONE", hl)
+  eq(hl.__renames, writes, "a sync never touches the state file")
+  eq(state(hl), "1", "and the published value still stands")
 end)
 -- Distinguishes: a running compositor whose v3 callback (applies every edge, no grace) survives
--- a shell restart — it would keep flapping the rules twice a second. LOCK_OBSERVER_VERSION was
--- bumped to 4 for exactly this; mirrors the subVer = 2 case above.
+-- a shell restart — it would keep rewriting the state file twice a second. LOCK_OBSERVER_VERSION
+-- was bumped to 4 for exactly this; mirrors the subVer = 2 case above.
 case("install over a stale subVer = 3 (pre-hysteresis) subscription replaces it under the current LOCK_OBSERVER_VERSION", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   local oldSub = hl.__subs[1]

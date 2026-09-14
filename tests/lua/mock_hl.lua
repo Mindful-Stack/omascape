@@ -10,7 +10,8 @@
 -- `hl.__fail_on` also drives the lock chunks' failure points, one string naming the single
 -- operation to break on the NEXT call to it (persists until changed; combine with `hl.__fail_sel`
 -- to target one selector): "window_rule" (hl.window_rule throws; scope with __fail_sel to one
--- workspace selector), "rule.set_enabled" (any rule's set_enabled throws), "mkdir" (the fake
+-- workspace selector), "layer_rule" (hl.layer_rule throws — the share-time reminder frame's
+-- namespace rule), "rule.set_enabled" (any rule's set_enabled throws), "mkdir" (the fake
 -- `os.execute` runs but does NOT mark the runtime dir as existing — see `hl.__dir_exists`
 -- below), "io.open" (returns nil for any path), "io.write" (the open file's write returns nil),
 -- "io.close" (the open file's close returns nil, so nothing commits to hl.__files), "rename"
@@ -93,7 +94,10 @@ function M.new(opts)
     if hl.__fail_on == "window_rule" and (hl.__fail_sel == nil or hl.__fail_sel == spec.match.workspace) then error("injected window_rule failure") end
     local r = ruleObject(spec); hl.__window_rules[#hl.__window_rules + 1] = r; return r
   end
-  function hl.layer_rule(spec) local r = ruleObject(spec); hl.__layer_rules[#hl.__layer_rules + 1] = r; return r end
+  function hl.layer_rule(spec)
+    if hl.__fail_on == "layer_rule" then error("injected layer_rule failure") end
+    local r = ruleObject(spec); hl.__layer_rules[#hl.__layer_rules + 1] = r; return r
+  end
   -- Timers: `hl.timer(cb, { timeout = <ms>, type = "oneshot" })` starts immediately and fires
   -- once. Probed live on 0.56.2 and modelled exactly here: `set_enabled(false)` before it fires
   -- CANCELS it (re-enabling before the deadline makes it fire once at the ORIGINAL deadline —
@@ -124,7 +128,7 @@ function M.new(opts)
   -- Fake os/io: an in-memory filesystem so the observer's publish can be asserted without disk.
   -- Both fall through to the real os/io library (via __index) for anything not faked here, so
   -- a chunk calling e.g. os.time still works even though this mock never anticipated it.
-  hl.__files, hl.__mkdirs, hl.__opens = {}, {}, 0
+  hl.__files, hl.__mkdirs, hl.__opens, hl.__renames = {}, {}, 0, 0
   hl.__dir_exists = false          -- set true by a real "mkdir" execute; a test can clear it to
                                     -- simulate the runtime dir vanishing after a successful install
   hl.__os = setmetatable({
@@ -138,7 +142,11 @@ function M.new(opts)
       if hl.__fail_on ~= "mkdir" and cmd:match("^mkdir") then hl.__dir_exists = true end
       return nil
     end,
-    rename = function(a, b) if hl.__fail_on == "rename" then return nil, "injected rename failure" end; hl.__files[b] = hl.__files[a]; hl.__files[a] = nil; return true end,
+    -- `hl.__renames` counts every SUCCESSFUL rename, i.e. every share-state publish that actually
+    -- committed: the hysteresis cases assert that a flapping share signal rewrites the state file
+    -- no further times, which the file's CONTENT alone (it would be rewritten with the same "1")
+    -- could never show.
+    rename = function(a, b) if hl.__fail_on == "rename" then return nil, "injected rename failure" end; hl.__files[b] = hl.__files[a]; hl.__files[a] = nil; hl.__renames = hl.__renames + 1; return true end,
     remove = function(path) hl.__files[path] = nil; return true end,
   }, { __index = os })
   hl.__io = setmetatable({
@@ -240,6 +248,12 @@ function M.pendingTimers(hl)
 end
 function M.ruleNamed(hl, name)
   for _, r in ipairs(hl.__window_rules) do if r.spec.name == name then return r end end
+  return nil
+end
+-- Same, over the LAYER rules (the share-time reminder frame's `no_screen_share` rule on the
+-- omyview-lockframe namespace, created by the install chunk).
+function M.layerRuleNamed(hl, name)
+  for _, r in ipairs(hl.__layer_rules) do if r.spec.name == name then return r end end
   return nil
 end
 
