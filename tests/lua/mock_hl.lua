@@ -21,7 +21,10 @@
 -- like the real compositor's Lua (it reaps the child itself, so the exit status never reaches
 -- Lua) — `hl.__mkdirs` still records every call so "mkdir attempted" assertions work; a chunk
 -- must verify the directory some other way (a probe file), never by trusting this return
--- value. `hl.__dir_exists` models whether the runtime directory is actually there on "disk":
+-- value. `hl.__opens` counts every `io.open` call (any path, any outcome) — useful to pin a
+-- probe-first `L.ensureDir()`: one open when the directory is already there, three (failed
+-- probe, then a successful re-probe, then the actual file open) when it had to be created.
+-- `hl.__dir_exists` models whether the runtime directory is actually there on "disk":
 -- it starts false, an `os.execute` whose command starts with "mkdir" sets it true (unless
 -- `hl.__fail_on == "mkdir"`, modelling a failed create), and `io.open` for any path under the
 -- runtime dir returns nil while it is false. A test can clear it back to false mid-case to
@@ -94,7 +97,7 @@ function M.new(opts)
   -- Fake os/io: an in-memory filesystem so the observer's publish can be asserted without disk.
   -- Both fall through to the real os/io library (via __index) for anything not faked here, so
   -- a chunk calling e.g. os.time still works even though this mock never anticipated it.
-  hl.__files, hl.__mkdirs = {}, {}
+  hl.__files, hl.__mkdirs, hl.__opens = {}, {}, 0
   hl.__dir_exists = false          -- set true by a real "mkdir" execute; a test can clear it to
                                     -- simulate the runtime dir vanishing after a successful install
   hl.__os = setmetatable({
@@ -113,6 +116,7 @@ function M.new(opts)
   }, { __index = os })
   hl.__io = setmetatable({
     open = function(path, mode)
+      hl.__opens = hl.__opens + 1
       if hl.__fail_on == "io.open" then return nil end
       -- Any open under the runtime dir (the install chunk's probe file, or later its
       -- share-state files) fails while the directory isn't there.

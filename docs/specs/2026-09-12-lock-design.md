@@ -41,16 +41,23 @@ the first frame after a *Hyprland config reload* (see Edge cases).
   2026-09-13): the compositor reaps the child itself, so Lua never sees an exit status —
   `os.execute` returns `nil` even when `mkdir -p` succeeded and the directory exists. The
   install chunk does not gate on it; it verifies the directory by opening (and immediately
-  removing) a probe file instead.
+  removing) a probe file instead. **A bare `mkdir -p` costs ~2.5ms of compositor main-thread
+  time** (measured 2026-09-14) — expensive to pay on every install (every overview open), so
+  the probe runs FIRST and `mkdir -p` only runs when the probe shows the directory is actually
+  missing.
 - `hl.on("screenshare.state", cb)` fires with `(active: boolean, type: number, name: string)`
   (upstream documents Active, Type, Name; the second argument is not a session id). A screenshot
   fires `true` then `false`. Subscriptions have `:remove()` and `:is_active()`. The event is
   Lua-only; Quickshell cannot observe shares directly. **`type` distinguishes what is being
-  captured** (live-probed 2026-09-14): `0` is a whole-output capture (`grim`, a monitor/screen
-  share — `name` is the output, e.g. `eDP-1`); `1` is a toplevel (single-window) export — and
-  opening the overview itself fires exactly this, once per visible thumbnail, with `name` the
-  window's title. The observer counts only `type == 0`: otherwise every overview open would
-  bump the counter and flip armed boxes to the placeholder for no real share at all.
+  captured** (live-probed 2026-09-14; Hyprland's four share types): `0` monitor (a whole-output
+  capture — `grim`, a screen share; `name` is the output, e.g. `eDP-1`), `1` window (a toplevel
+  export — opening the overview itself fires exactly this, once per visible thumbnail, with
+  `name` the window's title), `2` region (a rectangular crop of the screen — rendered through
+  the same output-capture path as a monitor share), `3` none. The observer ignores only
+  `type == 1`: a window share cannot capture the overview itself or any other window, so only
+  the overview's own thumbnails produce this type; monitor and region shares both count as real
+  shares, or every overview open would bump the counter and flip armed boxes to the placeholder
+  for no real share at all.
 - `hl.layer_rule({ match = { namespace = "omyview" }, no_screen_share = true })` is the layer form.
 - **A `no_screen_share` layer rule is NOT used on the overview's own layer**, despite the API
   existing for it: verified from source (`ScreenshareFrame.cpp`) that Hyprland renders such a
@@ -129,31 +136,43 @@ while the subscription created above it is left standing:
 ```lua
 local L = _G.omyview_lock
 if not L then
-  L = { rules = {}, sharing = 0, sub = nil, dir = nil }
+  L = { rules = {}, sharing = 0, sub = nil, subVer = nil, dir = nil }
   _G.omyview_lock = L
 end
-function L.ensureDir()                                         -- mkdir + verify; called on EVERY install, see below
+function L.ensureDir()                                         -- probe first; called on EVERY install, see below
   local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end
   local dir = base .. "/omyview"
-  os.execute("mkdir -p '" .. dir .. "'")                       -- return value ignored: see below
-  local probe = io.open(dir .. "/.omyview-probe", "w")         -- verify the directory directly
-  if not probe then error("runtime dir unavailable: " .. dir) end
+  local probe = io.open(dir .. "/.omyview-probe", "w")         -- verify the directory directly, first
+  if not probe then
+    os.execute("mkdir -p '" .. dir .. "'")                     -- only on a failed probe: see below
+    probe = io.open(dir .. "/.omyview-probe", "w")
+    if not probe then error("runtime dir unavailable: " .. dir) end
+  end
   probe:close(); os.remove(dir .. "/.omyview-probe")
   L.dir = dir
 end
 function L.publish()                                          -- defined unconditionally; reads L.dir at call time
   local tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"
   local f = io.open(tmp, "w")
-  if not f then L.ensureDir(); f = io.open(tmp, "w") end       -- the dir may have vanished since install; retry once
+  if not f then                                                -- the dir may have vanished since install; retry once
+    L.ensureDir()
+    tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"   -- recomputed from L.dir post-recovery
+    f = io.open(tmp, "w")
+  end
   if not f then error("cannot write share-state") end
   local w = f:write(L.sharing > 0 and "1" or "0"); local c = f:close()
   if not w or not c then os.remove(tmp); error("write share-state failed") end
   local ok, err = os.rename(tmp, dst)
   if not ok then os.remove(tmp); error("rename share-state: " .. tostring(err)) end
 end
+if L.subVer ~= LOCK_OBSERVER_VERSION then                      -- see LOCK_OBSERVER_VERSION below
+  if L.sub then pcall(function() L.sub:remove() end) end
+  L.sub = nil
+  L.subVer = LOCK_OBSERVER_VERSION
+end
 if not (L.sub and L.sub:is_active()) then
   L.sub = hl.on("screenshare.state", function(active, kind)
-    if kind ~= 0 then return end                               -- 1 = toplevel export (the overview's own thumbnails)
+    if kind == 1 then return end                               -- 1 = window export (the overview's own thumbnails)
     local ok, err = pcall(function()
       L.sharing = math.max(0, L.sharing + (active and 1 or -1)); L.publish()
     end)
@@ -168,20 +187,34 @@ if not pok then error(perr, 0) end                             -- re-raised so t
 ```
 `os.execute`'s return value is ignored, not checked: on this Hyprland build it is always `nil`,
 even when `mkdir -p` succeeded and the directory exists (the compositor reaps the child itself,
-so Lua never sees an exit status — found by the Task 6 live check). Gating `L.dir` on that
-return value made every install fail, so `L.publish()` never ran and the share-state file never
-existed. The directory is verified directly instead: opening (and immediately removing) a probe
-file inside it.
+so Lua never sees an exit status — found by the Task 6 live check). The directory is verified
+directly instead: opening (and immediately removing) a probe file inside it. `L.ensureDir()`
+probes FIRST and only calls `os.execute("mkdir -p …")` if that probe fails: a bare `mkdir -p`
+measured ~2.5ms of compositor main-thread time, and `L.ensureDir()` runs on every install
+(review of the original always-mkdir version, 2026-09-14) — the common case (directory already
+there) now costs one file open, not a shell-out.
 
 `L.ensureDir()` runs on **every** install, not only when `L.dir` is nil, and `L.publish()`
-retries it once on its own if `io.open` fails. `_G.omyview_lock` is compositor Lua state, and it
-survives a shell restart — but the runtime directory does not: it can be removed by a cleaner,
-or is simply gone after a restart. Without re-verifying, a stale `L.dir` from a previous session
-would point at nothing, and `L.publish()` — called from every install *and* every share event —
-would fail with "cannot write share-state" forever, since nothing ever re-checked. Confirmed
-live: `L.dir` was set to `/run/user/1000/omyview` while the directory did not exist, after the
-user's first manual restart. Re-verifying is cheap (one `mkdir`, one file open), so paying the
-cost on every install is not a tradeoff worth avoiding.
+retries it once on its own (recomputing `tmp`/`dst` from the possibly-changed `L.dir` before the
+retry) if `io.open` fails. `_G.omyview_lock` is compositor Lua state, and it survives a shell
+restart — but the runtime directory does not: it can be removed by a cleaner, or is simply gone
+after a restart. Without re-verifying, a stale `L.dir` from a previous session would point at
+nothing, and `L.publish()` — called from every install *and* every share event — would fail with
+"cannot write share-state" forever, since nothing ever re-checked. Confirmed live: `L.dir` was
+set to `/run/user/1000/omyview` while the directory did not exist, after the user's first manual
+restart.
+
+**`LOCK_OBSERVER_VERSION`** (a `logic.js` constant, currently `2`) guards the subscription
+itself, not just the directory: the observer's callback is a closure created once and owned by
+the subscription object, and `_G.omyview_lock` — including that subscription — survives a shell
+restart untouched. `L.sub:is_active()` alone would stay `true` forever, so the install's own
+idempotence check (`if not (L.sub and L.sub:is_active())`) would never see a reason to replace a
+stale callback: a shell restart could deliver a new `logic.js` (and thus a changed callback body,
+such as the `kind` filter below) without a `configreloaded` — the only event that drops `_G` —
+ever happening, leaving the OLD behaviour running against the NEW shell indefinitely. Every
+change to the callback body must bump `LOCK_OBSERVER_VERSION`; a mismatch on install removes the
+existing subscription (even though it is still active) before the block below creates a fresh
+one.
 - `sharing` counts starts minus ends, clamped at 0. It only drives the placeholder; a stuck
   count shows the placeholder longer than needed, never exposes anything. An idempotent
   re-install preserves it; only a fresh Lua state (Hyprland start or reload) starts at 0. A
@@ -195,6 +228,12 @@ cost on every install is not a tradeoff worth avoiding.
   unaffected by its failure — a broken runtime directory (or a write/rename failure) only means
   the share-state file goes stale or missing; the per-workspace rules the sync chunk maintains
   are never affected by it.
+- The observer ignores `kind == 1` (window/toplevel export — see Verified facts for all four
+  values): the overview's own thumbnails fire `screenshare.state` with `kind = 1` for every
+  visible tile, which would otherwise flip armed boxes to the placeholder every time the
+  overview itself is open, with no real share happening. Monitor (`0`) and region (`2`) captures
+  both count as real shares — a window share cannot capture the overview or any other window, so
+  only a window capture is safe to assume is the overview's own thumbnail traffic.
 - The observer ignores `kind ~= 0` (see Verified facts): the overview's own thumbnails fire
   `screenshare.state` with `kind = 1` (toplevel export) for every visible tile, which would
   otherwise flip armed boxes to the placeholder every time the overview itself is open, with no

@@ -843,6 +843,15 @@ function scratchpadFocusLua(addr) {
 var LOCK_SELECTOR_RE = /^([1-9]\d*|special:[A-Za-z0-9_-]+)$/
 function validLockSelector(sel) { return typeof sel === "string" && LOCK_SELECTOR_RE.test(sel) }
 
+// Bump on ANY change to the observer callback's body (including which `kind` values it
+// ignores). `_G.omyview_lock` is compositor Lua state that survives a shell restart, and the
+// callback lives in a closure owned by the old subscription — `L.sub:is_active()` stays true
+// across a restart, so without a version check the install's own idempotence guard
+// (`if not (L.sub and L.sub:is_active())`) would keep the STALE callback forever; a shell
+// restart alone could never deliver a behaviour change to a running compositor, only a
+// `configreloaded` (which drops `_G` entirely) would.
+var LOCK_OBSERVER_VERSION = 2
+
 // Install the compositor-side lock state: one table in _G, and the share observer that
 // publishes 1/0 to $XDG_RUNTIME_DIR/omyview/share-state. No layer rule for the overview's own
 // namespace: a `no_screen_share` layer renders as an opaque black rect over the whole layer box
@@ -853,55 +862,72 @@ function validLockSelector(sel) { return typeof sel === "string" && LOCK_SELECTO
 // Dispatched at shell start, on configreloaded (a reload drops every global) and at open().
 // The share observer is created FIRST, unconditionally inside the outer pcall, before anything
 // touches the filesystem: a broken $XDG_RUNTIME_DIR (or a write/rename failure) must degrade
-// only share detection, never the lock itself. `L.publish` and `L.ensureDir` are defined
-// unconditionally too — the observer's callback closes over them. The
-// verify-dir-and-publish step runs in its OWN inner pcall; on failure it is re-raised
-// (`error(perr, 0)`) so the outer pcall's own `ok, err` — which reportLua reads — carries the
-// filesystem failure while the subscription it already created is left standing on `L`,
-// unaffected by the raised error.
-// `L.ensureDir()` (mkdir + a probe-file check — see below) runs on EVERY install, not only when
-// `L.dir` is nil: `_G.omyview_lock` is compositor Lua state that survives a shell restart, so a
-// previous install's `L.dir` can point at a runtime directory that no longer exists (removed by
-// a cleaner, or just gone — live-confirmed after the user's first manual restart: `L.dir` stayed
-// set to a directory that had vanished, and every publish failed with "cannot write
-// share-state" forever, since nothing ever re-checked). Cheap (one mkdir, one file open), so
-// re-verifying on every install costs nothing. `L.publish()` also calls `L.ensureDir()` and
-// retries its own `io.open` once if the directory turns out to be gone at share-event time,
-// so a share observed between installs recovers immediately instead of failing until the next
-// `configreloaded` or `open()`.
+// only share detection, never the lock itself. Before that, `L.subVer` is checked against
+// `LOCK_OBSERVER_VERSION`: a mismatch (nil on an old install, or an older version number) drops
+// the existing subscription — even though it is still `is_active()` — so the block below always
+// creates a fresh one carrying the current callback (see LOCK_OBSERVER_VERSION above).
+// `L.publish` and `L.ensureDir` are defined unconditionally too — the observer's callback closes
+// over them. The verify-dir-and-publish step runs in its OWN inner pcall; on failure it is
+// re-raised (`error(perr, 0)`) so the outer pcall's own `ok, err` — which reportLua reads —
+// carries the filesystem failure while the subscription it already created is left standing on
+// `L`, unaffected by the raised error.
+// `L.ensureDir()` runs on EVERY install, not only when `L.dir` is nil: `_G.omyview_lock` is
+// compositor Lua state that survives a shell restart, so a previous install's `L.dir` can point
+// at a runtime directory that no longer exists (removed by a cleaner, or just gone —
+// live-confirmed after the user's first manual restart: `L.dir` stayed set to a directory that
+// had vanished, and every publish failed with "cannot write share-state" forever, since nothing
+// ever re-checked). It probes FIRST (a single `io.open`) and only runs `mkdir -p` — measured at
+// ~2.5ms of compositor main-thread time — when the probe fails, so the common case (directory
+// already there) costs one file open, not a shell-out, even though it runs on every install
+// (including every overview open). `L.publish()` also calls `L.ensureDir()` and retries its own
+// `io.open` once if the directory turns out to be gone at share-event time, so a share observed
+// between installs recovers immediately instead of failing until the next `configreloaded` or
+// `open()`.
 // `os.execute`'s return value cannot be trusted here (live-verified on this Hyprland build):
 // the compositor reaps the child itself, so Lua never sees an exit status — `os.execute`
-// returns nil even when `mkdir -p` succeeded and the directory exists. It is called and its
-// result ignored; the directory is verified directly instead: open (and immediately remove) a
-// probe file in it.
+// returns nil even when `mkdir -p` succeeded and the directory exists. It is called (only when
+// the probe already failed) and its result ignored; the directory is verified directly instead:
+// open (and immediately remove) a probe file in it.
 function lockInstallLua() {
     return (
         'function()\n' +
         '  local ok, err = pcall(function()\n' +
         '    local L = _G.omyview_lock\n' +
-        '    if not L then L = { rules = {}, sharing = 0, sub = nil, dir = nil }; _G.omyview_lock = L end\n' +
+        '    if not L then L = { rules = {}, sharing = 0, sub = nil, subVer = nil, dir = nil }; _G.omyview_lock = L end\n' +
         '    function L.ensureDir()\n' +
         '      local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end\n' +
         '      local dir = base .. "/omyview"\n' +
-        '      os.execute("mkdir -p \'" .. dir .. "\'")\n' +
         '      local probe = io.open(dir .. "/.omyview-probe", "w")\n' +
-        '      if not probe then error("runtime dir unavailable: " .. dir) end\n' +
+        '      if not probe then\n' +
+        '        os.execute("mkdir -p \'" .. dir .. "\'")\n' +
+        '        probe = io.open(dir .. "/.omyview-probe", "w")\n' +
+        '        if not probe then error("runtime dir unavailable: " .. dir) end\n' +
+        '      end\n' +
         '      probe:close(); os.remove(dir .. "/.omyview-probe")\n' +
         '      L.dir = dir\n' +
         '    end\n' +
         '    function L.publish()\n' +
         '      local tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"\n' +
         '      local f = io.open(tmp, "w")\n' +
-        '      if not f then L.ensureDir(); f = io.open(tmp, "w") end\n' +
+        '      if not f then\n' +
+        '        L.ensureDir()\n' +
+        '        tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"\n' +
+        '        f = io.open(tmp, "w")\n' +
+        '      end\n' +
         '      if not f then error("cannot write share-state") end\n' +
         '      local w = f:write(L.sharing > 0 and "1" or "0"); local c = f:close()\n' +
         '      if not w or not c then os.remove(tmp); error("write share-state failed") end\n' +
         '      local rok, rerr = os.rename(tmp, dst)\n' +
         '      if not rok then os.remove(tmp); error("rename share-state: " .. tostring(rerr)) end\n' +
         '    end\n' +
+        '    if L.subVer ~= ' + LOCK_OBSERVER_VERSION + ' then\n' +
+        '      if L.sub then pcall(function() L.sub:remove() end) end\n' +
+        '      L.sub = nil\n' +
+        '      L.subVer = ' + LOCK_OBSERVER_VERSION + '\n' +
+        '    end\n' +
         '    if not (L.sub and L.sub:is_active()) then\n' +
         '      L.sub = hl.on("screenshare.state", function(active, kind)\n' +
-        '        if kind ~= 0 then return end\n' +
+        '        if kind == 1 then return end\n' +
         '        local sok, serr = pcall(function() L.sharing = math.max(0, L.sharing + (active and 1 or -1)); L.publish() end)\n' +
         '        if not sok then print("omyview: share observer failed: " .. tostring(serr)) end\n' +
         '      end)\n' +

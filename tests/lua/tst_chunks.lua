@@ -224,15 +224,31 @@ end)
 local function state(hl) return hl.__files[hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state"] end
 local function statePath(hl) return hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state" end
 -- Distinguishes: a non-idempotent install (two subscriptions) or one that never publishes. The
--- runtime dir is re-verified on every install by design (see lockInstallLua's L.ensureDir) —
--- cheap, and what lets a stale L.dir recover after the directory vanishes — so mkdir is
--- attempted every time, not only on the first install.
+-- runtime dir is re-verified on every install by design (see lockInstallLua's L.ensureDir), but
+-- probe-first — a bare mkdir costs ~2.5ms of compositor main-thread time, paid on every overview
+-- open, so it only runs when the probe shows the directory is actually missing.
 case("lock install is idempotent and publishes 0", function()
   local hl = Mock.new({})
   run("LOCK_INSTALL", hl); run("LOCK_INSTALL", hl)
   eq(#hl.__subs, 1, "one subscription")
-  eq(state(hl), "0", "published 0"); eq(#hl.__mkdirs, 2, "mkdir re-verified on every install")
+  eq(state(hl), "0", "published 0")
+  eq(#hl.__mkdirs, 1, "mkdir attempted only when the directory was missing (once, on the first install)")
+  eq(hl.__opens, 5, "probe-first: 3 opens to create it (failed probe, mkdir, re-probe) + publish, 2 more on the idempotent re-run (probe + publish)")
   eq(#hl.__notifications, 0)
+end)
+-- Distinguishes: a running compositor whose old subscription's callback closes over stale
+-- behaviour surviving a shell restart. `_G.omyview_lock` is compositor Lua state, so
+-- `L.sub:is_active()` stays true across a restart — a version mismatch is the only thing that
+-- can tell a fresh install to replace it with a subscription carrying the current callback.
+case("lock install replaces a stale-version observer subscription with a fresh one", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  local oldSub = hl.__subs[1]
+  hl.__env._G.omyview_lock.subVer = nil          -- simulate a subscription installed by an older version
+  run("LOCK_INSTALL", hl)
+  eq(oldSub:is_active(), false, "the stale subscription was removed")
+  local active = 0
+  for _, s in ipairs(hl.__subs) do if s:is_active() then active = active + 1 end end
+  eq(active, 1, "exactly one active subscription")
 end)
 -- Distinguishes: an install that trusts a stale L.dir left over from a previous session — the
 -- compositor's Lua state (and L) outlives the shell, but the runtime directory does not (a
@@ -262,16 +278,26 @@ case("share observer recovers from a vanished runtime dir without waiting for a 
   eq(#hl.__notifications, 0, "recovered silently")
 end)
 -- Distinguishes: a counter that reacts to the overview's own thumbnail captures (type 1,
--- toplevel export) instead of only whole-output shares (type 0) — every overview open would
+-- toplevel/window export) instead of ignoring only those — every overview open would
 -- otherwise flip armed boxes to the placeholder for no real share at all.
-case("share observer ignores toplevel (window) capture events, only output captures count", function()
+case("share observer ignores window capture events (type 1), a window share cannot capture the overview", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   Mock.fire(hl, "screenshare.state", true, 1, "Some window")
-  eq(state(hl), "0", "a toplevel capture (the overview's own thumbnails) does not count as a share")
+  eq(state(hl), "0", "a window capture (the overview's own thumbnails) does not count as a share")
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
-  eq(state(hl), "1", "an output capture still counts")
+  eq(state(hl), "1", "a monitor capture still counts")
   Mock.fire(hl, "screenshare.state", false, 1, "Some window")
-  eq(state(hl), "1", "a toplevel end must not decrement the counter either")
+  eq(state(hl), "1", "a window-capture end must not decrement the counter either")
+end)
+-- Distinguishes: a filter that only recognises type 0 (monitor) from one that treats every
+-- non-window type as a real share — a region share (type 2) renders through the same output
+-- capture path as a monitor share and must count the same way.
+case("share observer counts region captures (type 2) like monitor captures", function()
+  local hl = Mock.new({}); run("LOCK_INSTALL", hl)
+  Mock.fire(hl, "screenshare.state", true, 2, "region")
+  eq(state(hl), "1", "a region capture counts as a share")
+  Mock.fire(hl, "screenshare.state", false, 2, "region")
+  eq(state(hl), "0", "and its end decrements the counter")
 end)
 -- Distinguishes: an install that only publishes on the very first run (a fresh mock's
 -- share-state pre-seeded, as a stale file from a previous session would be) from one that always
