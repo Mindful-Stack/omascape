@@ -285,6 +285,26 @@ TestCase {
         view.testLocks.setSharing(true)
         compare(view.matches.length, 1); compare(view.selectedMatchAddress, "0xC"); compare(view.selectedId, 2)
     }
+    // Distinguishes: a placeholder box that stops being a jump target (Enter or a click on the
+    // well must still switch to the workspace — the lock hides content, never navigation).
+    function test_placeholder_box_still_jumps_on_enter_and_click() {
+        ctrlL()                                        // arm ws 1 (selected)
+        view.testLocks.setSharing(true)
+        compare(boxOf(1).placeholder, true)
+        var before = cmds().length
+        keyClick(Qt.Key_Return)
+        compare(cmds().length, before + 1)
+        verify(cmds()[before].indexOf('workspace = "1"') >= 0, "Enter jumps, got: " + cmds()[before])
+        compare(view.opened, false)
+        view.open(); wait(400)
+        view.testLocks.setSharing(true)
+        var b = boxOf(1), p = view.testCanvas.mapToItem(tc, b.x + b.w / 2, b.y + b.h / 2)
+        before = cmds().length
+        mouseClick(tc, p.x, p.y, Qt.LeftButton)
+        compare(cmds().length, before + 1)
+        verify(cmds()[before].indexOf('workspace = "1"') >= 0, "click jumps, got: " + cmds()[before])
+        compare(view.opened, false)
+    }
     function tileOf(addr) {
         var ch = view.testCanvas.children
         for (var i = 0; i < ch.length; i++) if (ch[i].model && ch[i].model.address === addr) return ch[i]
