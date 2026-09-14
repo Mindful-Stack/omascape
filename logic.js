@@ -681,12 +681,11 @@ function hyprAnimationsEnabled(json) {
     return true
 }
 
-// Share-time reminder border colour (docs/specs/2026-09-12-lock-design.md, addendum): only the
-// `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are accepted, on both sides — here in parseConfig,
-// and again in lockSyncLua right before the value is interpolated into a Lua chunk (defense in
-// depth: a config value could reach the builder through a path that never went through
-// parseConfig, e.g. a future caller, and the value is untrusted text landing inside a Lua string
-// literal).
+// Share-time reminder frame colour (docs/specs/2026-09-12-lock-design.md, addendum): only the
+// `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are accepted — Hyprland's own colour syntax, kept
+// for continuity with the rest of the user's Hyprland config even though the frame is now drawn
+// by the shell. `lockColorToQml` converts an accepted value to QML's `#aarrggbb` order and
+// rejects everything else, so an unvalidated string can never reach a colour property.
 var LOCK_BORDER_RE = /^rgba?\([0-9a-fA-F]{6}([0-9a-fA-F]{2})?\)$/
 
 // ~/.config/omarchy/omyview.json → a fully-defaulted settings object. Every key has a default;
@@ -860,6 +859,69 @@ function scratchpadFocusLua(addr) {
 // arm workspace 7 with no badge to show it — numeric selectors must be a canonical decimal.
 var LOCK_SELECTOR_RE = /^([1-9]\d*|special:[A-Za-z0-9_-]+)$/
 function validLockSelector(sel) { return typeof sel === "string" && LOCK_SELECTOR_RE.test(sel) }
+
+// ---- Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum) --------------
+// The cue is four thin layer-shell strips omyview draws at the monitor edges, blanked in every
+// capture by a `no_screen_share` layer rule on their namespace. These four functions are the
+// whole decision: which workspace a monitor is showing, whether that earns a frame, which raw
+// events invalidate the monitor snapshot, and how the configured colour becomes a QML one.
+
+// The selector for the workspace a monitor currently SHOWS, from its `lastIpcObject`: the special
+// workspace when one is open, else the active workspace. Hyprland reports
+// `specialWorkspace: { id: 0, name: "" }` when none is open (the same "nothing" the
+// `activespecialv2>>,,<mon>` payload announces), so the NAME — not the object's presence — is
+// what decides. The result is a locks-file selector ("3" / "special:scratchpad"), never the
+// dynamic special id. A malformed or missing snapshot yields null and never throws: this runs in
+// a binding that re-evaluates on every monitor event, including ones that land before the first
+// refresh.
+function lockFrameShownSelector(mon) {
+    if (!mon || typeof mon !== "object") return null
+    var sp = mon.specialWorkspace
+    if (sp && typeof sp === "object" && typeof sp.name === "string" && sp.name.length) return sp.name
+    var aw = mon.activeWorkspace
+    if (aw && typeof aw === "object" && typeof aw.id === "number" && isFinite(aw.id)) return String(aw.id)
+    return null
+}
+
+// Is a monitor's frame visible? Only while a share is actually running (`locks.sharing`, the
+// debounced compositor signal) AND the workspace that monitor is showing is armed. `armed` is the
+// array `applyLocksTo` maintains — null while the locks file is still unresolved, which means no
+// frame (never guess protection that may not be installed yet).
+function lockFrameVisible(sharing, armed, mon) {
+    if (sharing !== true || !armed || !armed.length) return false
+    var sel = lockFrameShownSelector(mon)
+    return sel !== null && armed.indexOf(sel) >= 0
+}
+
+// Raw Hyprland events after which a monitor's `lastIpcObject` may be stale, so the shell must ask
+// for a fresh one (`Hyprland.refreshMonitors()`). Payloads verified in 0.56.2 source:
+//   workspacev2>>id,name                — the focused monitor changed workspace
+//   focusedmonv2>>monname,wsid          — focus moved to another monitor
+//   activespecialv2>>id,name,monname    — a special workspace opened/closed there ("" id+name = closed)
+//   moveworkspacev2>>id,name,monname    — a workspace moved to another monitor
+//   monitoraddedv2 / monitorremovedv2   — the set of monitors changed
+//   configreloaded                      — every Lua global (our layer rule included) is gone
+// Deliberately NOT the whole event stream: a refresh is an IPC round trip, and window titles,
+// focus changes and open/close events cannot move a workspace between monitors.
+function lockFrameRefreshEvent(name) {
+    return name === "workspacev2" || name === "focusedmonv2" || name === "activespecialv2" ||
+           name === "moveworkspacev2" || name === "monitoraddedv2" || name === "monitorremovedv2" ||
+           name === "configreloaded"
+}
+
+// The configured colour (Hyprland's `rgb(rrggbb)` / `rgba(rrggbbaa)`, validated by
+// LOCK_BORDER_RE) as a QML colour string. The alpha moves from the END to the FRONT: Qt reads
+// `#rrggbbaa` as `#aarrggbb`, so `rgba(ff444480)` left as-is would render as a nearly opaque
+// near-black instead of a translucent red. Anything else — including an already-QML `#rrggbb` —
+// falls back to the default red rather than producing an invalid colour, which QML would resolve
+// to black.
+function lockColorToQml(hypr) {
+    var s = String(hypr === undefined || hypr === null ? "" : hypr)
+    if (!LOCK_BORDER_RE.test(s)) return "#ff4444"
+    var hex = s.slice(s.indexOf("(") + 1, s.length - 1)
+    if (hex.length === 8) return "#" + hex.slice(6, 8) + hex.slice(0, 6)
+    return "#" + hex
+}
 
 // Bump on ANY change to the observer callback's body (including which `kind` values it
 // ignores). `_G.omyview_lock` is compositor Lua state that survives a shell restart, and the

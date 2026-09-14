@@ -987,4 +987,85 @@ TestCase {
         compare(Logic.toggleSelector([], "bad selector"), null, "refuses an invalid selector")
     }
 
+    // ---- Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum) ----------
+    // The frame is drawn on the workspace SHOWN on a monitor, which is its special workspace when
+    // one is open and its active workspace otherwise. Distinguishes: a selector taken from the
+    // active workspace even while a special workspace covers it (the frame would then follow the
+    // workspace underneath the scratchpad), and a special workspace read by its dynamic id rather
+    // than the name the locks file stores.
+    function test_lockFrameShownSelector_prefers_the_open_special_workspace() {
+        compare(Logic.lockFrameShownSelector(
+            { activeWorkspace: { id: 3, name: "3" }, specialWorkspace: { id: -98, name: "special:scratchpad" } }),
+            "special:scratchpad")
+        compare(Logic.lockFrameShownSelector(
+            { activeWorkspace: { id: 3, name: "3" }, specialWorkspace: { id: 0, name: "" } }), "3")
+    }
+    // Hyprland reports `specialWorkspace: { id: 0, name: "" }` when no special workspace is open
+    // (verified on 0.56.2), which is also what the `activespecialv2>>,,eDP-1` payload announces:
+    // the empty name must fall back to the active workspace, not become a selector of its own.
+    // Distinguishes: a truthiness test on `specialWorkspace` alone (the object is always present).
+    function test_lockFrameShownSelector_falls_back_when_the_special_closed() {
+        compare(Logic.lockFrameShownSelector(
+            { activeWorkspace: { id: 7, name: "7" }, specialWorkspace: { id: 0, name: "" } }), "7")
+        compare(Logic.lockFrameShownSelector({ activeWorkspace: { id: 7, name: "7" } }), "7",
+                "no specialWorkspace key at all")
+    }
+    // Distinguishes: a malformed/absent snapshot throwing (the binding runs on every monitor
+    // event, including ones that arrive before the first refresh has landed) instead of
+    // resolving to "no workspace shown".
+    function test_lockFrameShownSelector_malformed_is_null_and_never_throws() {
+        compare(Logic.lockFrameShownSelector(null), null)
+        compare(Logic.lockFrameShownSelector(undefined), null)
+        compare(Logic.lockFrameShownSelector({}), null)
+        compare(Logic.lockFrameShownSelector({ activeWorkspace: null }), null)
+        compare(Logic.lockFrameShownSelector({ activeWorkspace: { name: "3" } }), null, "no id")
+        compare(Logic.lockFrameShownSelector("eDP-1"), null)
+    }
+    // Distinguishes: a frame shown whenever the workspace is armed (it must also need a live
+    // share), shown for a share alone (every monitor would be framed), or shown for an armed
+    // workspace that is not the one on this monitor.
+    function test_lockFrameVisible() {
+        var mon3 = { activeWorkspace: { id: 3, name: "3" }, specialWorkspace: { id: 0, name: "" } }
+        var mon4 = { activeWorkspace: { id: 4, name: "4" }, specialWorkspace: { id: 0, name: "" } }
+        var scratch = { activeWorkspace: { id: 3, name: "3" },
+                        specialWorkspace: { id: -98, name: "special:scratchpad" } }
+        compare(Logic.lockFrameVisible(true, ["3"], mon3), true)
+        compare(Logic.lockFrameVisible(false, ["3"], mon3), false, "no share, no frame")
+        compare(Logic.lockFrameVisible(true, ["3"], mon4), false, "another monitor's workspace is armed")
+        compare(Logic.lockFrameVisible(true, [], mon3), false)
+        compare(Logic.lockFrameVisible(true, null, mon3), false, "armed still unresolved")
+        compare(Logic.lockFrameVisible(true, ["3"], null), false, "no monitor snapshot")
+        // The scratchpad covers ws 3: armed ws 3 alone must NOT frame it, and arming the
+        // scratchpad must.
+        compare(Logic.lockFrameVisible(true, ["3"], scratch), false)
+        compare(Logic.lockFrameVisible(true, ["special:scratchpad"], scratch), true)
+    }
+    // `HyprlandMonitor.lastIpcObject` is a snapshot, so the frame is only correct if these exact
+    // events trigger a `Hyprland.refreshMonitors()`. Distinguishes: a handler that refreshes on
+    // every raw event (an IPC round trip per window title change) or one that misses the v2
+    // payload names Hyprland 0.56.2 actually emits.
+    function test_lockFrameRefreshEvent() {
+        var want = ["workspacev2", "focusedmonv2", "activespecialv2", "moveworkspacev2",
+                    "monitoraddedv2", "monitorremovedv2", "configreloaded"]
+        for (var i = 0; i < want.length; i++)
+            compare(Logic.lockFrameRefreshEvent(want[i]), true, want[i] + " must refresh monitors")
+        var no = ["workspace", "activespecial", "monitoradded", "focusedmon", "openwindow",
+                  "windowtitlev2", "activewindowv2", "", undefined, null]
+        for (var j = 0; j < no.length; j++)
+            compare(Logic.lockFrameRefreshEvent(no[j]), false, String(no[j]) + " must not refresh")
+    }
+    // The config colour is Hyprland's `rgb(rrggbb)` / `rgba(rrggbbaa)`; QML wants `#rrggbb` /
+    // `#aarrggbb`. Distinguishes: an alpha left at the END (`#rrggbbaa` is read by Qt as
+    // #aarrggbb, so `rgba(ff444480)` would render as a nearly-black 0xff-alpha colour) and a
+    // rejected value producing an invalid colour string instead of the default.
+    function test_lockColorToQml() {
+        compare(Logic.lockColorToQml("rgb(ff4444)"), "#ff4444")
+        compare(Logic.lockColorToQml("rgba(ff444480)"), "#80ff4444", "alpha moves to the front")
+        compare(Logic.lockColorToQml("rgb(3355FF)"), "#3355FF")
+        compare(Logic.lockColorToQml("red"), "#ff4444")
+        compare(Logic.lockColorToQml("rgb(zz)"), "#ff4444")
+        compare(Logic.lockColorToQml(""), "#ff4444")
+        compare(Logic.lockColorToQml(undefined), "#ff4444")
+        compare(Logic.lockColorToQml("#ff4444"), "#ff4444", "already-QML input is not accepted, but degrades to the default")
+    }
 }
