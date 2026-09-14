@@ -359,7 +359,7 @@ TestCase {
         compare(view.compositor.commands.length, 1)
         var cmd = view.compositor.commands[0]
         verify(cmd.indexOf('address:0xS') >= 0)
-        verify(cmd.indexOf('bring_to_top') >= 0, "raised above its siblings, got: " + cmd)
+        verify(cmd.indexOf('alter_zorder({ mode = "top", window = sel })') >= 0, "raised above its siblings by address, got: " + cmd)
         compare(view.opened, false)
     }
     // Distinguishes: a normal tile click going through the scratchpad-raise path.

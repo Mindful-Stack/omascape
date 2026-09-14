@@ -134,7 +134,7 @@ function M.new(opts)
     focus = d("focus"),
     cursor = { move = d("cursor.move") },
     window = { float = d("window.float"), move = d("window.move"), fullscreen = d("window.fullscreen"),
-               bring_to_top = d("window.bring_to_top") },
+               bring_to_top = d("window.bring_to_top"), alter_zorder = d("window.alter_zorder") },
     workspace = { toggle_special = d("workspace.toggle_special") },
   }
   function hl.dispatch(desc)
@@ -162,6 +162,9 @@ function M.new(opts)
     elseif desc.name == "window.bring_to_top" then
       -- No window arg (it acts on whatever is currently focused): record it, never a no-op.
       hl.__top = hl.__active_window
+    elseif desc.name == "window.alter_zorder" then
+      -- Targets a window by selector; mode "top" raises it. Recorded, never a no-op.
+      if a.mode == "top" then hl.__top = w end
     elseif desc.name == "cursor.move" then
       hl.__cursor = { x = a.x, y = a.y }
     elseif desc.name == "workspace.toggle_special" then
