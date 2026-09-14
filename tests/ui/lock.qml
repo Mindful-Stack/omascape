@@ -131,7 +131,10 @@ TestCase {
         ctrlL()
         compare(view.testLocks.writes.length, 1); compare(JSON.parse(view.testLocks.writes[0]).armed, ["2"])
         compare(syncs().length, before + 1); verify(lastSync().indexOf('"2"') >= 0)
-        verify(lastSync().indexOf('color = "rgb(3355ff)"') >= 0, "border colour reached the sync, got: " + lastSync())
+        // The doubled form (round 3): a single colour value sets only Hyprland's ACTIVE border
+        // colour, so an unfocused window on the armed workspace would carry no rim. Asserting
+        // the pair here is what makes a regression to the single form go red.
+        verify(lastSync().indexOf('"rgb(3355ff) rgb(3355ff)"') >= 0, "border colour reached the sync, doubled for active + inactive, got: " + lastSync())
         verify(lastSync().indexOf('size = 3') >= 0, "border size reached the sync, got: " + lastSync())
         compare(boxOf(2).armed, true)
         ctrlL()
@@ -150,7 +153,7 @@ TestCase {
         var before = syncs().length
         view.testConfig.lockBorder = "rgb(3355ff)"
         compare(syncs().length, before + 1, "lockBorder change dispatched a new sync")
-        verify(lastSync().indexOf('color = "rgb(3355ff)"') >= 0, "new colour reached the sync, got: " + lastSync())
+        verify(lastSync().indexOf('"rgb(3355ff) rgb(3355ff)"') >= 0, "new colour reached the sync, doubled, got: " + lastSync())
         view.testConfig.lockBorderSize = 9
         compare(syncs().length, before + 2, "lockBorderSize change dispatched a new sync")
         verify(lastSync().indexOf('size = 9') >= 0, "new size reached the sync, got: " + lastSync())

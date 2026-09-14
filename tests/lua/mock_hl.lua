@@ -75,9 +75,17 @@ function M.new(opts)
 
   -- Rules: named handles with enable state, so tests can assert "one handle per selector".
   hl.__window_rules, hl.__layer_rules, hl.__subs = {}, {}, {}
+  -- `__set_calls` counts every set_enabled CALL on this rule, including one that throws: the
+  -- observer's grace timer (below) is only worth anything if the flapping edges produce no calls
+  -- at all, so "how many times was the compositor asked to toggle this rule" is the property the
+  -- tests assert, not just the rule's end state.
   local function ruleObject(spec)
-    local r = { spec = spec, enabled = spec.enabled ~= false }
-    function r:set_enabled(v) if hl.__fail_on == "rule.set_enabled" then error("injected set_enabled failure") end; self.enabled = v end
+    local r = { spec = spec, enabled = spec.enabled ~= false, __set_calls = 0 }
+    function r:set_enabled(v)
+      self.__set_calls = self.__set_calls + 1
+      if hl.__fail_on == "rule.set_enabled" then error("injected set_enabled failure") end
+      self.enabled = v
+    end
     function r:is_enabled() return self.enabled end
     return r
   end
@@ -86,6 +94,24 @@ function M.new(opts)
     local r = ruleObject(spec); hl.__window_rules[#hl.__window_rules + 1] = r; return r
   end
   function hl.layer_rule(spec) local r = ruleObject(spec); hl.__layer_rules[#hl.__layer_rules + 1] = r; return r end
+  -- Timers: `hl.timer(cb, { timeout = <ms>, type = "oneshot" })` starts immediately and fires
+  -- once. Probed live on 0.56.2 and modelled exactly here: `set_enabled(false)` before it fires
+  -- CANCELS it (re-enabling before the deadline makes it fire once at the ORIGINAL deadline —
+  -- the clock never stops, which is why M.elapse advances disabled timers too), and a timer that
+  -- has ALREADY fired can never be re-armed: `set_enabled(true)`/`set_timeout` after firing do
+  -- nothing, so the observer must create a fresh timer per off-edge. `is_enabled()` is true only
+  -- while pending. Nothing fires on its own: a test drives the clock with M.elapse.
+  hl.__timers = {}
+  function hl.timer(cb, opts)
+    opts = opts or {}
+    local t = { cb = cb, timeout = opts.timeout, type = opts.type or "oneshot",
+                enabled = true, fired = false, remaining = opts.timeout }
+    function t:set_enabled(v) if self.fired then return end; self.enabled = v end
+    function t:is_enabled() return self.enabled and not self.fired end
+    function t:set_timeout(ms) if self.fired then return end; self.timeout = ms; self.remaining = ms end
+    hl.__timers[#hl.__timers + 1] = t
+    return t
+  end
   -- Events: hl.on stores callbacks; M.fire(hl, name, ...) delivers.
   function hl.on(name, cb)
     local sub = { name = name, cb = cb, active = true }
@@ -186,6 +212,30 @@ end
 
 function M.fire(hl, name, ...)
   for _, s in ipairs(hl.__subs) do if s.name == name and s.active then s.cb(...) end end
+end
+-- Advance the fake clock by `ms`. Every unfired timer loses that much of its remaining time
+-- (including a disabled one: cancelling does not stop the clock, so re-enabling it cannot push
+-- the deadline out); a oneshot that is still enabled and has run out fires exactly once and is
+-- marked fired+disabled, so it can never fire again. The timer list is snapshotted first: a
+-- callback that creates a NEW timer must not have it firing within the same elapse.
+function M.elapse(hl, ms)
+  local snapshot = {}
+  for i, t in ipairs(hl.__timers or {}) do snapshot[i] = t end
+  for _, t in ipairs(snapshot) do
+    if not t.fired then
+      t.remaining = (t.remaining or 0) - ms
+      if t.enabled and t.type == "oneshot" and t.remaining <= 0 then
+        t.fired = true; t.enabled = false
+        t.cb()
+      end
+    end
+  end
+end
+-- Timers still waiting to fire (enabled and unfired).
+function M.pendingTimers(hl)
+  local n = 0
+  for _, t in ipairs(hl.__timers or {}) do if t.enabled and not t.fired then n = n + 1 end end
+  return n
 end
 function M.ruleNamed(hl, name)
   for _, r in ipairs(hl.__window_rules) do if r.spec.name == name then return r end end
