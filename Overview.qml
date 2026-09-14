@@ -107,7 +107,7 @@ Item {
     }
     function lockSync() {
         if (locks.armed === null) return
-        Hyprland.dispatch(Logic.lockSyncLua(locks.armed, { color: config.lockBorder, size: config.lockBorderSize }))
+        Hyprland.dispatch(Logic.lockSyncLua(locks.armed))
     }
     function lockToggleSelected() {
         if (!Logic.hasWs(selectedId)) return
@@ -883,19 +883,39 @@ Item {
         target: Hyprland
         function onRawEvent(event) {
             if (event && event.name === "configreloaded") { root.lockInstall(); root.lockSync() }
+            // Share-time reminder frame (addendum): each monitor's `lastIpcObject` is a snapshot,
+            // and the frame is a binding on it. These are the events after which the workspace a
+            // monitor SHOWS may have changed (Logic.lockFrameRefreshEvent) — deliberately not the
+            // whole stream, since a refresh is an IPC round trip. Runs whether or not the overview
+            // is open: the frame is a desktop cue, not part of the picker.
+            if (event && Logic.lockFrameRefreshEvent(event.name)
+                    && typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
             if (root.opened) root.scheduleRebuild()
         }
     }
     // The watched config file changing the padded workspace count while open: the compositor
-    // data is not stale, so a plain rebuild re-lays the wells at once.
+    // data is not stale, so a plain rebuild re-lays the wells at once. `lockBorder`/
+    // `lockBorderSize` need no handler at all now — the frame binds to them directly.
     Connections {
         target: config
         function onWorkspacesChanged() { if (root.opened) root.rebuild() }
-        // Share-time reminder border (addendum): a config edit re-syncs borders live.
-        // lockSync() already returns early when `locks.armed === null`, so this is a no-op
-        // before the locks file has resolved.
-        function onLockBorderChanged() { root.lockSync() }
-        function onLockBorderSizeChanged() { root.lockSync() }
+    }
+
+    // Share-time reminder frame: one per screen, four strips each (LockFrame.qml). Lives outside
+    // the overview's own PanelWindow — it is on screen while a share runs, whether or not the
+    // picker is open — and is therefore gated on the manifest's keepLoaded, like every other
+    // always-on part of this component.
+    Variants {
+        model: Quickshell.screens
+        LockFrame {
+            required property var modelData
+            frameScreen: modelData
+            monitor: Hyprland.monitorFor(modelData)
+            sharing: locks.sharing
+            armed: locks.armed
+            frameColor: Logic.lockColorToQml(config.lockBorder)
+            thickness: config.lockBorderSize
+        }
     }
 
     PanelWindow {

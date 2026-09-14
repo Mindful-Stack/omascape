@@ -8,8 +8,30 @@ TestCase {
     width: 1200; height: 800; visible: true
     property var view
     property var mon
+    property var screenObj
     readonly property int scratchHyprId: -73
     Component { id: overview; Overview {} }
+    // The monitor is a QtObject, not a plain JS object, so `lastIpcObject` is a real QML property:
+    // the share-time reminder frame binds to that snapshot, and a test replacing it (what
+    // `Hyprland.refreshMonitors()` does for real) must re-evaluate the binding.
+    Component {
+        id: monitorStub
+        QtObject {
+            property string name: "TEST"
+            property int x: 0
+            property int y: 1440
+            property int width: 1920
+            property int height: 1080
+            property real scale: 1
+            property var lastIpcObject: null
+        }
+    }
+    // Stands in for a Quickshell ShellScreen. Deliberately NOT the monitor's pixel size, so a
+    // strip sized from the wrong object is visible in the numbers.
+    Component {
+        id: screenStub
+        QtObject { property string name: "TEST"; property int width: 1600; property int height: 900 }
+    }
 
     function client(addr, cls, title, x, floating) {
         return { address: addr, at: [x, 1500], size: [500, 400], floating: !!floating,
@@ -19,9 +41,17 @@ TestCase {
         return { id: id, name: name === undefined ? String(id) : name, monitor: mon,
                  toplevels: { values: clients.map(function (c) { return { lastIpcObject: c } }) } }
     }
+    // A monitor IPC snapshot in Hyprland's own shape: `specialWorkspace` is always present and
+    // reports `{ id: 0, name: "" }` when none is open (verified on 0.56.2).
+    function ipc(activeId, specialName) {
+        return { reserved: [0, 26, 0, 0], transform: 0,
+                 activeWorkspace: { id: activeId, name: String(activeId) },
+                 specialWorkspace: { id: specialName ? -98 : 0, name: specialName || "" } }
+    }
     function seed(v) {
-        mon = { name: "TEST", x: 0, y: 1440, width: 1920, height: 1080,
-                scale: 1, lastIpcObject: { reserved: [0, 26, 0, 0], transform: 0 } }
+        mon = createTemporaryObject(monitorStub, tc)
+        mon.lastIpcObject = ipc(1, "")
+        screenObj = createTemporaryObject(screenStub, tc)
         v.compositor.monitors = { values: [mon] }
         v.compositor.focusedMonitor = mon
         v.compositor.focusedWorkspace = { id: 1 }
@@ -29,6 +59,7 @@ TestCase {
             wsRow(1, [client("0xA", "chromium", "Chromium", 100, false)]),
             wsRow(2, [client("0xB", "Slack", "Slack", 100, true)]),
             wsRow(scratchHyprId, [client("0xS", "Bitwarden", "Bitwarden", 900, true)], "special:scratchpad") ] }
+        v.testScreens = [screenObj]
     }
     function init() {
         view = createTemporaryObject(overview, tc)
@@ -124,39 +155,15 @@ TestCase {
     function test_ctrl_l_arms_and_disarms_the_selected_box() {
         keyClick(Qt.Key_Right)                         // ws 2
         compare(view.selectedId, 2)
-        // Share-time reminder border (addendum): non-default values, set before the action, so
-        // this test goes red if Overview.qml stops reading config and hard-codes the defaults.
-        view.testConfig.lockBorder = "rgb(3355ff)"; view.testConfig.lockBorderSize = 3
         var before = syncs().length
         ctrlL()
         compare(view.testLocks.writes.length, 1); compare(JSON.parse(view.testLocks.writes[0]).armed, ["2"])
         compare(syncs().length, before + 1); verify(lastSync().indexOf('"2"') >= 0)
-        // The doubled form (round 3): a single colour value sets only Hyprland's ACTIVE border
-        // colour, so an unfocused window on the armed workspace would carry no rim. Asserting
-        // the pair here is what makes a regression to the single form go red.
-        verify(lastSync().indexOf('"rgb(3355ff) rgb(3355ff)"') >= 0, "border colour reached the sync, doubled for active + inactive, got: " + lastSync())
-        verify(lastSync().indexOf('size = 3') >= 0, "border size reached the sync, got: " + lastSync())
         compare(boxOf(2).armed, true)
         ctrlL()
         compare(JSON.parse(view.testLocks.writes[1]).armed, [])
         verify(lastSync().indexOf("local ARMED = {}") >= 0)
         compare(boxOf(2).armed, false)
-    }
-    // Quality-review fix round 2 (item 5, 2026-09-14): the `Connections { target: config }`
-    // block's onLockBorderChanged/onLockBorderSizeChanged handlers must re-sync borders live —
-    // a config edit takes effect without needing another arm/disarm. Set the fixture config
-    // AFTER the overview has already synced once (init()'s open() does that), so this pins the
-    // live-resync path specifically, not the "config read on the next sync" path item 1 already
-    // covers. Property: goes red if either handler name is mistyped (QML makes a Connections
-    // handler with the wrong name a silent no-op, so no second sync would ever be dispatched).
-    function test_config_border_change_resyncs_live() {
-        var before = syncs().length
-        view.testConfig.lockBorder = "rgb(3355ff)"
-        compare(syncs().length, before + 1, "lockBorder change dispatched a new sync")
-        verify(lastSync().indexOf('"rgb(3355ff) rgb(3355ff)"') >= 0, "new colour reached the sync, doubled, got: " + lastSync())
-        view.testConfig.lockBorderSize = 9
-        compare(syncs().length, before + 2, "lockBorderSize change dispatched a new sync")
-        verify(lastSync().indexOf('size = 9') >= 0, "new size reached the sync, got: " + lastSync())
     }
     // Distinguishes: the scratchpad armed by its (dynamic) id instead of its name.
     function test_ctrl_l_on_the_scratchpad_writes_its_name() {
@@ -329,6 +336,108 @@ TestCase {
         verify(cmds()[before].indexOf('workspace = "1"') >= 0, "click jumps, got: " + cmds()[before])
         compare(view.opened, false)
     }
+    // ---- Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum) ----------
+    // One LockFrame per screen, four strips each. The fixture instantiates them exactly like the
+    // shell does (`Variants`/`Repeater` over the screen list), so a missing instance shows up here
+    // as "no lockFrame instance" rather than a silently absent cue.
+    function strip(name) {
+        var ch = view.children, frames = 0, found = null
+        for (var i = 0; i < ch.length; i++) {
+            if (ch[i].objectName !== "lockFrame") continue
+            frames++
+            var sc = ch[i].children
+            for (var j = 0; j < sc.length; j++) if (sc[j].objectName === name) found = sc[j]
+        }
+        compare(frames, 1, "exactly one lockFrame instance for the one screen")
+        verify(found !== null, "no strip named " + name)
+        return found
+    }
+    function fillOf(name) {
+        var ch = strip(name).children
+        for (var i = 0; i < ch.length; i++) if (ch[i].objectName === "lockFrameFill") return ch[i]
+        fail("no fill rectangle in " + name)
+    }
+    // Distinguishes: a frame that follows the armed flag alone (it would sit on screen whenever a
+    // workspace is armed, share or no share), and one that never appears at all.
+    function test_frame_only_while_sharing_an_armed_workspace() {
+        compare(strip("lockFrameTop").visible, false, "nothing armed, nothing shared")
+        ctrlL()                                        // arms ws 1, the workspace this monitor shows
+        compare(strip("lockFrameTop").visible, false, "armed, but no share is running")
+        view.testLocks.setSharing(true)
+        compare(strip("lockFrameTop").visible, true)
+        compare(strip("lockFrameBottom").visible, true)
+        compare(strip("lockFrameLeft").visible, true)
+        compare(strip("lockFrameRight").visible, true)
+        view.testLocks.setSharing(false)
+        compare(strip("lockFrameTop").visible, false, "gone when the share ends")
+    }
+    // Distinguishes: a frame keyed to "some workspace is armed" rather than to the workspace this
+    // monitor is actually showing. The positive control moves the monitor onto the armed one.
+    function test_frame_hidden_for_an_unarmed_workspace_on_the_same_monitor() {
+        keyClick(Qt.Key_Right)                         // select ws 2
+        compare(view.selectedId, 2)
+        ctrlL()                                        // arm ws 2; the monitor still shows ws 1
+        view.testLocks.setSharing(true)
+        compare(strip("lockFrameTop").visible, false, "ws 2 armed, ws 1 shown")
+        mon.lastIpcObject = ipc(2, "")                 // the monitor switches to ws 2
+        compare(strip("lockFrameTop").visible, true)
+    }
+    // Distinguishes: a frame read off the monitor's ACTIVE workspace while a special workspace
+    // covers it (it would follow the workspace hidden underneath the scratchpad), and a
+    // special-closed payload (`activespecialv2>>,,TEST`) that leaves the frame up.
+    function test_frame_follows_an_open_special_workspace() {
+        keyClick("s", Qt.ControlModifier)              // show the scratchpad row
+        keyClick(Qt.Key_Down)
+        compare(view.selectedId, -2)
+        ctrlL()                                        // arm special:scratchpad
+        view.testLocks.setSharing(true)
+        compare(strip("lockFrameTop").visible, false, "armed, but the scratchpad is not up")
+        mon.lastIpcObject = ipc(1, "special:scratchpad")
+        view.compositor.rawEvent({ name: "activespecialv2", data: "-98,special:scratchpad,TEST" })
+        compare(strip("lockFrameTop").visible, true, "up on this monitor: framed")
+        mon.lastIpcObject = ipc(1, "")                 // closed again; ws 1 underneath is unarmed
+        view.compositor.rawEvent({ name: "activespecialv2", data: ",,TEST" })
+        compare(strip("lockFrameTop").visible, false)
+    }
+    // Distinguishes: strips that hard-code the default thickness/colour instead of reading the
+    // config, and an alpha left at the end of the hex string (Qt reads `#rrggbbaa` as `#aarrggbb`,
+    // so `rgba(3355ff80)` passed through unchanged would render as an opaque near-black).
+    // The side strips run the full height and the top/bottom ones are inset by that width, so
+    // every corner is painted exactly once — a doubled corner would read darker on a translucent
+    // colour.
+    function test_frame_thickness_and_colour_follow_the_config() {
+        view.testConfig.lockBorder = "rgba(3355ff80)"
+        view.testConfig.lockBorderSize = 4
+        ctrlL(); view.testLocks.setSharing(true)
+        compare(strip("lockFrameTop").height, 4)
+        compare(strip("lockFrameBottom").height, 4)
+        compare(strip("lockFrameLeft").width, 4)
+        compare(strip("lockFrameRight").width, 4)
+        compare(strip("lockFrameLeft").height, screenObj.height, "the side strips span the screen")
+        compare(strip("lockFrameTop").width, screenObj.width - 8, "inset by the side strips")
+        compare(fillOf("lockFrameTop").color, Qt.color("#803355ff"), "alpha moved to the front")
+    }
+    // Distinguishes: a size of 0 drawing hairline strips (or full-screen ones) instead of
+    // disabling the cue, which is what the documented `lockBorderSize: 0` promises.
+    function test_frame_size_zero_hides_it() {
+        ctrlL(); view.testLocks.setSharing(true)
+        compare(strip("lockFrameTop").visible, true)
+        view.testConfig.lockBorderSize = 0
+        compare(strip("lockFrameTop").visible, false)
+        compare(strip("lockFrameLeft").visible, false)
+    }
+    // `lastIpcObject` is a snapshot, so the frame is only right if the events that can move a
+    // workspace between monitors ask for a fresh one. Distinguishes: no refresh at all (the frame
+    // would lag a workspace switch until something else happened to refresh) and a refresh on
+    // every raw event (an IPC round trip per window title change).
+    function test_monitor_snapshot_refreshes_only_on_the_events_that_can_change_it() {
+        var before = view.compositor.monitorRefreshes
+        view.compositor.rawEvent({ name: "workspacev2", data: "2,2" })
+        compare(view.compositor.monitorRefreshes, before + 1, "a workspace change refreshes once")
+        view.compositor.rawEvent({ name: "windowtitlev2", data: "0xA,Some title" })
+        compare(view.compositor.monitorRefreshes, before + 1, "an unrelated event does not")
+    }
+
     function tileOf(addr) {
         var ch = view.testCanvas.children
         for (var i = 0; i < ch.length; i++) if (ch[i].model && ch[i].model.address === addr) return ch[i]
