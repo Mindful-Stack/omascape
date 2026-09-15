@@ -2,29 +2,35 @@
 
 Date: 2026-09-15 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on find, the scratchpad row and the workspace lock (`main` at `26c6c11`).
-Status: **approved design, pre-implementation.** Branch `actions`.
+Status: **approved design, pre-implementation** (revised after a codex review, 2026-09-15).
+Branch `actions`.
 
 ## Goal
 
 Act on what the overview shows without leaving it: close a window, float or fullscreen it, lock a
 workspace, move or swap a workspace between monitors, close everything on a workspace — by mouse
-(a right-click menu) and by keyboard (a window cursor plus Ctrl+W). The same "target" notion is
-what the later preview feature (hold Space) will zoom.
+(a right-click menu) and by keyboard (a window cursor plus Ctrl+W).
 
 ## Scope
 
 **In:** a single target rule shared by every action; a Tab-driven window cursor inside the selected
-workspace; Ctrl+W; a right-click context menu on tiles and wells; the actions Close, Float/Tile,
-Fullscreen/Exit fullscreen (window) and Lock/Unlock, Move to ‹monitor›, Swap with ‹monitor›, Close
-all windows (workspace); a two-tier hint row; tests.
+workspace; Ctrl+W; a right-click context menu on tiles, wells and workspace badges; the actions
+Close, Float/Tile, Fullscreen/Exit fullscreen (window) and Lock/Unlock, Move to ‹monitor›, Swap
+with ‹monitor›, Close all windows (workspace); a two-tier hint row; tests.
 
-**Out:** the preview itself (its own spec, next), a keyboard-opened menu (the Menu key / Shift+F10
-— decided against for now; every workspace action has a key already except Move/Swap, which are
-mouse-only until asked for), a hover close button on tiles, drag-to-trash, confirmation dialogs
-(apps prompt for unsaved work themselves), per-item disabled states (what does not apply is
-hidden), persisting the hint tier across shell restarts, pinning, grouping, renaming workspaces.
+**Out:** the preview (hold Space; its own spec, next — it will reuse the target rule, but nothing
+here is justified by it), a keyboard-opened menu (the Menu key / Shift+F10 — decided against for
+now: Close all, Move and Swap are therefore mouse-only until asked for; Lock has Ctrl+L, Close has
+Ctrl+W), a hover close button on tiles, drag-to-trash, confirmation dialogs (apps prompt for unsaved
+work themselves), per-item disabled states (what does not apply is hidden), persisting the hint tier
+across shell restarts, a rollback for a partially failed compositor operation, pinning, grouping,
+renaming workspaces.
 
-## Decisions (brainstorm 2026-09-15)
+**Build order (for the plan):** fundamentals first — target rule, cursor, Ctrl+W, hints — then the
+menu with the window actions and Lock/Close all, then Move/Swap last, so the monitor operations can
+ship (or be dropped) on their own.
+
+## Decisions (brainstorm 2026-09-15; revisions from the codex review marked ✎)
 
 - **One action surface for the mouse: a right-click menu.** Chosen over hover buttons (a close ×
   beside the fullscreen badge, a lock glyph on the number badge) because one menu covers every
@@ -37,38 +43,53 @@ hidden), persisting the hint tier across shell restarts, pinning, grouping, rena
   find. "What happens if the workspace has several windows?" — Tab picks one.
 - **Most recent input device wins.** A pointer parked over a tile must not hijack keyboard actions,
   and a stale Tab cursor must not hijack a mouse user; so the pointer only decides while it is
-  *live* (moved since the last key press).
+  *live* (moved since the last substantive key press). ✎ Modifier-only presses (Ctrl, Shift, Alt,
+  Meta on their own) never change targeting, or hover + Ctrl+W could never work: the Ctrl press
+  would go stale before the W arrived.
 - **Hints in two tiers**, toggled by `?`: the primary row stays short; the advanced keys live on a
   second line shown on demand.
-- **Swap is two moves in one chunk**, not `workspace.swap_monitors`: verified in the 0.56.2 source
-  (`LuaBindingsDispatchers.cpp`) that `swap_monitors` swaps the two monitors' *active* workspaces
-  only, while `hl.dsp.workspace.move({ monitor, workspace })` moves any workspace, hidden ones
-  included (`hlWorkspaceMove` → `dsp_moveWorkspaceToMonitor`). Two moves generalise the swap to any
-  workspace.
+- ✎ **Swap uses the native `workspace.swap_monitors`, and is offered only for a workspace that is
+  active on its monitor.** Verified in the 0.56.2 source (`WorkspacePlacementController.cpp`,
+  `swapActiveWorkspaces`): it exchanges the two monitors' active workspaces, each monitor then shows
+  what it received, and focus goes to the last focused window of the workspace that arrived on the
+  focused monitor. The first draft's "two moves" would have exchanged *ownership* of a hidden
+  workspace without any defined effect on what either monitor shows (see Move below) — a swap in
+  name only.
+- ✎ **Every action sets an explicit state, never toggles**, so a menu item rendered from a
+  snapshot cannot do the opposite of its label if the state changed meanwhile: `window.float` with
+  `action = "on"`/`"off"` (verified: `parseToggleStr` accepts `on`/`off`/`enable`/`disable`;
+  `Actions::floatWindow` returns early when the state already matches), fullscreen via the existing
+  idempotent `fullscreenBodyLua(sel, mode)`, lock via an explicit arm/disarm. Close needs no state.
 - **Every new action is one atomic guarded Lua chunk** in the existing style, except Close, which
   stays the plain `window.close` dispatch the middle click already uses.
 
 ## The target — `Logic.target(input)`
 
 The window or workspace an action applies to, resolved *at the moment of the action* by one pure
-function. Input: whether the pointer is live and its canvas position, the tiles and boxes, the
-selected find match, the cursor address and the selected workspace id. Output: `{ kind: "window",
-address }`, `{ kind: "workspace", id }`, or `null`.
+function. Input: whether the pointer is live, the candidate tile under it and the well under it
+(both resolved by the view, below), the selected find match, the cursor address and the selected
+workspace id. Output: `{ kind: "window", address }`, `{ kind: "workspace", id }`, or `null`.
 
-1. **Pointer live and inside the canvas** → the topmost tile under it (`Logic.tileAt`), else the
-   well under it (`Logic.hitWorkspace`).
+1. **Pointer live and inside the viewport** → the tile under it, else the well under it.
 2. **Otherwise the keyboard target** → the selected find match while a query is active, else the
    Tab cursor, else the selected workspace.
 
-`Logic.tileAt(tiles, x, y)` prefers a higher `layer` (floating over tiled over backdrop) and, within
-a layer, the later tile in model order (stacking). It uses the same canvas-space point drop
-targeting uses (`dragPointer()`: viewport point + scroll offset) and never relies on overlapping
-`HoverHandler`s.
+**Pointer liveness** (`pointerLive`, a root property) is decided in **panel (scene) coordinates**,
+never canvas ones: a `HoverHandler` on the Flickable viewport records `point.scenePosition`; the
+pointer is live once that position has changed since the last substantive key press, and only while
+the point is inside the viewport's clipped area. ✎ Canvas coordinates shift under a stationary
+pointer (edge/wheel scroll, a card resize, the entrance scale), so they cannot stand in for "the
+user moved the mouse"; they are derived from the scene point only at resolve time, via
+`flick.mapFromItem`. Cleared on every substantive key press (anything but a lone modifier) and when
+the point leaves the viewport. The right-click menu does not consult it — a right press *is* the
+pointer being live — and records its target explicitly when it opens.
 
-`pointerLive` is a root property: set `true` by a canvas-level `HoverHandler` whenever its point
-moves inside the canvas and cleared on every key press in the key catcher and whenever the pointer
-leaves the canvas. The right-click menu does not consult it — a right press *is* the pointer being
-live — and records its target explicitly when it opens.
+**Tile under the pointer** ✎ is resolved against what is *drawn*, not the model: the view collects
+each tile delegate's displayed rect (`x`, `y`, `width`, `height`, `scale` — so the hovered tile's
+1.03 lift and an in-flight glide count) and effective `z`, and `Logic.tileAt(candidates, x, y)`
+picks the containing rect with the highest `z`, later in model order on a tie — exactly the paint
+order the `Repeater` produces. Pure and Tier 1 tested on the candidate list; the collection is a
+thin loop in `Overview`. The well under the pointer is `Logic.hitWorkspace(boxes, …)` as today.
 
 ## The window cursor
 
@@ -79,19 +100,34 @@ non-empty query clears the cursor, and Tab with a query cycles matches as today.
 
 | Key (query empty)  | effect                                                                                  |
 |--------------------|-----------------------------------------------------------------------------------------|
-| Tab / Shift+Tab    | next / previous window of the selected workspace in reading order, wrapping; none → first / last; empty workspace → nothing |
+| Tab / Shift+Tab    | next / previous window of the selected workspace in reading order, wrapping; none → first / last; empty workspace → nothing. Windows with an outstanding close request (below) are skipped |
 | ← → ↑ ↓, digits    | as today, and clear the cursor                                                           |
-| Enter              | with a cursor: focus that window (the tile-click path, scratchpad raise included) and close; without: jump |
+| Enter              | ✎ resolves the target: a live pointer over a tile focuses that window, over a well jumps to it; otherwise the keyboard target — with a cursor, focus that window (the tile-click path, scratchpad raise included) and close; without, jump to the selected workspace |
 | Esc                | clear the cursor if set; else (as today) clear the query if set; else close              |
-| Ctrl+W             | close the target if it is a window; if that window is the cursor, move the cursor to its successor first (next in cycle order, or none), so repeated Ctrl+W clears a workspace; workspace target → nothing |
+| Ctrl+W             | close the target if it is a window (below); workspace target → nothing; ignored while a drag is in flight and on key auto-repeat |
 | Ctrl+L             | unchanged (locks the *selected workspace*, not the target — a cursor never changes what Ctrl+L does) |
 
-Reading order is `Logic.cycleWindows(tiles, wsId, current, step)`: the workspace's tiles sorted by
-`y` then `x` (canvas rects, so a fullscreen window's recovered slot counts, and floating windows
-sort by where they are). Pure, Tier 1 tested.
+Reading order is `Logic.cycleWindows(tiles, wsId, current, step, skip)`: the workspace's tiles
+sorted by `y` then `x` (canvas rects, so a fullscreen window's recovered slot counts, and floating
+windows sort by where they are), minus the addresses in `skip`. Pure, Tier 1 tested.
 
 On a rebuild the cursor survives if its window is still on the selected workspace; otherwise it
 clears (no successor rule — unlike find, nothing was typed to preserve). `open()` clears it.
+
+**Ctrl+W and outstanding closes.** ✎ A close is a *request*: the app may prompt, delay or refuse,
+and the window stays in the model until Hyprland reports it gone. So the overview keeps
+`pendingCloses` (`addr → deadline`, 1.8 s like the other pending maps), a tile role `closing` that
+dims the tile like a non-match, and:
+
+- Ctrl+W on the cursor window adds it to `pendingCloses` and moves the cursor to the next window
+  in cycle order *excluding pending ones* — the sole remaining window clears the cursor, so a
+  repeated Ctrl+W never cycles back onto A while A and B are both still reported. On a hovered or
+  find-selected window it just adds the entry (find's own successor rule runs when the window
+  vanishes).
+- An address leaves `pendingCloses` when the window disappears from the input or at the deadline
+  (refused: the tile un-dims and is cyclable again). Ctrl+W on a pending window is a no-op until
+  then.
+- Ctrl+W with a query active closes the selected match the same way.
 
 ## The menu
 
@@ -106,15 +142,26 @@ catcher stays the single focus item.
 canvas coordinates, nudged left/up so it stays fully inside the Flickable viewport. It does not
 scroll with the canvas: a wheel/edge scroll while open dismisses it.
 
-**Opening.** A right press on a tile (`dragArea` gains `Qt.RightButton`; a right press never starts
-a drag and never counts as a click) opens the window menu for that tile's address. A right press on
-a well's empty area (the box `MouseArea`) opens the workspace menu for that workspace. The menu
-records `menuTarget` when it opens; pointer moves afterwards cannot change what it acts on. A right
-press during a drag is ignored. A right press on the scrim closes the overview like a left click.
+**Opening.** A right press on a tile opens the window menu for that tile's address. A right press
+on a well's empty area (the box `MouseArea`) or ✎ **on the workspace number badge** opens the
+workspace menu for that workspace — the badge is the reliable target on a well a single tiled or
+fullscreen window fills to the 3 px inset. The badge gains a `MouseArea` accepting only
+`Qt.RightButton`, so left presses still fall through to the tile or well beneath. The menu records
+`menuTarget` when it opens; pointer moves afterwards cannot change what it acts on. A right press
+on the scrim closes the overview like a left click.
+
+✎ **Right button and the drag machinery.** `dragArea` gains `Qt.RightButton`, and the drag code is
+made left-button-only at *every* stage, not just the press: `onPressed` returns for any button but
+left (today), `onPositionChanged` already requires `pressed && dragTile === windowTile`, and
+`onReleased` submits a drop or a click **only for `Qt.LeftButton`** — today it treats every
+non-middle release as a possible drop, so a right release during a left drag would drop the window.
+A right press while a drag is in flight (`root.dragTile !== null`) opens nothing and does not
+disturb the grab. Tests cover right-only press/move/release and a right press+release *during* a
+left drag that then continues.
 
 **Items — `Logic.menuItems(target, ctx)`.** Pure, Tier 1 tested. `ctx` carries the window record
 (floating, fullscreen mode, workspace id), the box record (occupied, armed, special, synthetic,
-monitorName) and the monitor list. Hidden, never greyed:
+active, monitorName) and the monitor list. Hidden, never greyed:
 
 | target    | item                       | shown when                                                  |
 |-----------|----------------------------|-------------------------------------------------------------|
@@ -123,12 +170,22 @@ monitorName) and the monitor list. Hidden, never greyed:
 | window    | Fullscreen / Exit fullscreen | always; "Exit fullscreen" when `fullscreen > 0` (maximized included) |
 | workspace | Lock / Unlock              | always; label by `armed`                                    |
 | workspace | Move to ‹monitor›          | one per *other* monitor, glyph as the chips (laptop/screen); not on the scratchpad, not on a synthetic (uncreated) workspace, never with one monitor |
-| workspace | Swap with ‹monitor›        | same conditions as Move                                     |
+| workspace | Swap with ‹monitor›        | as Move, and ✎ only when the workspace is **active on its monitor** (`box.active`) |
 | workspace | Close all windows          | `occupied` only                                             |
 
 Order as listed. Windows on a placeholder box have no tiles, so no menu; the well's menu still
-offers Lock/Unlock (and Close all if occupied). Item ids: `close`, `float`, `fullscreen`, `lock`,
-`move:<monitor>`, `swap:<monitor>`, `closeAll`.
+offers Lock/Unlock (and Close all if occupied). Item ids: `close`, `float`, `tile`, `fullscreen`,
+`unfullscreen`, `lock`, `unlock`, `move:<monitor>`, `swap:<monitor>`, `closeAll` — the id carries
+the intended *state*, never a toggle.
+
+✎ **Data the items need that the boxes do not carry today:** `Logic.layout()` drops the workspace
+record's `synthetic` flag when it builds boxes, and nothing records whether a workspace is active on
+its monitor. Both are propagated end to end — `buildInput()` sets `active` from the monitor
+snapshot (`lastIpcObject.activeWorkspace.id`, the same field the lock frame reads, refreshed by the
+same events), `layout()` copies `synthetic` and `active` onto the box, `applyBoxes()` carries them
+as roles — and the Tier 1 layout test asserts a padded well yields `synthetic: true` and a real
+workspace whose last window closed (now a pad slot) does too, so a hand-built `menuItems` fixture
+cannot hide a missing field.
 
 **While open** (`menuOpen`, a key-catcher branch checked *before* `finding`):
 
@@ -137,143 +194,205 @@ offers Lock/Unlock (and Close all if occupied). Item ids: `close`, `float`, `ful
 | ↑ / ↓                     | move the highlight, wrapping; ↓ from none → first             |
 | Enter                     | activate the highlighted item (none → nothing)                |
 | Esc                       | dismiss                                                       |
-| any other key             | dismiss and swallow (a letter does not start a query)         |
+| ✎ lone modifier press     | nothing — consumed, the menu stays; otherwise Ctrl (dismiss) then W (close a window) would let a chord act outside the menu |
+| any other key             | dismiss and swallow — the substantive key of a chord included, and auto-repeats |
 | press inside the menu     | activate that row                                             |
-| press anywhere else       | dismiss and swallow — including on the scrim, so a stray click can never both dismiss the menu and close the overview; a full-card transparent `MouseArea` below the menu and above everything else, visible only while `menuOpen` |
+| press anywhere else on the overview's screen | dismiss and swallow — ✎ a **panel-sized** transparent `MouseArea` (all buttons) below the menu and above the scrim's own click-to-close area, visible only while `menuOpen`, so a stray click on the scrim can never both dismiss the menu and close the overview; a press on **another monitor** closes the overview as it does today (the menu goes with it — the user asked to leave) |
 | hover a row               | highlight follows the pointer (same `index`)                  |
 
-Activation dismisses first, then dispatches. The menu also dismisses when a rebuild finds its target
-gone (window closed, workspace destroyed), on `close()`, and on a scroll.
+Activation dismisses first, then dispatches. The menu also dismisses on `close()` and on a scroll.
+
+✎ **Staleness.** Every rebuild while the menu is open recomputes `menuItems` for the recorded
+`menuTarget` from fresh data: if the target is gone (window closed, workspace destroyed, its box
+became a lock placeholder for a window target) the menu dismisses; if the item list changed (a
+window floated by another actor, a monitor unplugged, a lock toggled elsewhere) the rows update in
+place, keeping the highlight on the same item id or dropping it to none. Activation is therefore
+never more than one settle tick stale, and since every id names an explicit state, a stale
+activation is at worst a no-op inside the compositor.
 
 ## Compositor side
 
 All in `logic.js`, one line each, parse- and behaviour-tested by `tests/lua-check.sh` against the
-mock `hl`, using `dispatchGuardLua`, `pcall`, `reportLua(what)` and — wherever a dispatcher can move
-focus or the cursor — `restoreFocusLua`. Address prefix handling as in `restoreFocusLua` (Lua may
-report addresses without `0x`).
+mock `hl`, using `dispatchGuardLua`, `pcall`, `reportLua(what)`. Address prefix handling as in
+`restoreFocusLua` (Lua may report addresses without `0x`). Monitor names are interpolated from
+`Hyprland.monitors` and validated (`/^[A-Za-z0-9._-]+$/`) in JavaScript before they can reach a
+chunk.
 
 - **Close** — `hl.dsp.window.close({ window = "address:…" })`, the existing plain dispatch,
   shared by Ctrl+W, middle-click and the menu.
-- **Float / Tile** — `toggleFloatLua(addr)`: `run(hl.dsp.window.float({ window = sel, action =
-  "toggle" }))` inside the guard, focus and cursor restored. Works on hidden workspaces.
+- **Float / Tile** — `setFloatLua(addr, floating)`: `run(hl.dsp.window.float({ window = sel,
+  action = floating and "on" or "off" }))`, then `restoreFocusLua`. `Actions::floatWindow` raises
+  the window when it becomes floating and re-lays out its workspace; it does not change focus
+  itself, but the layout change can (parity with the badge's un-fullscreen, which also restores).
+  Hyprland exits and re-applies fullscreen internally around a floating change, so a fullscreen
+  window ends floating *and* fullscreen; the Tier 2 check covers that case.
 - **Fullscreen / Exit** — `setFullscreenLua(addr, mode)` generalises `unfullscreenLua` (which
   becomes `setFullscreenLua(addr, 0)`) around the existing `fullscreenBodyLua`. Entering uses mode
   2. The badge's optimistic `pendingFullscreen` already records a target `mode`, so both
   directions use it: the badge hides now for an exit, and for an entry nothing is optimistic (no
   badge to hide; the slot changes when data lands).
-- **Lock / Unlock** — `lockToggleSelected()` generalised to `lockToggle(wsId)`; Ctrl+L calls it
-  with `selectedId`, the menu with its target. Same ordering as today: memory → sync → persist.
+- **Lock / Unlock** — `lockToggleSelected()` becomes `lockSet(wsId, armed)`; Ctrl+L calls it with
+  `selectedId` and the opposite of the current state, the menu with the state its item names. Same
+  ordering as today: memory → sync → persist.
 - **Move to ‹monitor›** — `workspaceMoveLua(wsId, monitorName)`: `run(hl.dsp.workspace.move({
-  monitor = "<name>", workspace = "<id>" }))`. The compositor decides what each monitor shows
-  afterwards (a moved active workspace leaves its old monitor on another workspace); the overview
-  stays on its own screen and rebuilds. Groups key on the lowest workspace id per monitor, so
-  moving ws 3 to a monitor that held 6–10 can reorder the groups; layout motion glides it.
-  Monitor names are interpolated from `Hyprland.monitors` and validated
-  (`/^[A-Za-z0-9._-]+$/`) before they can reach a chunk.
-- **Swap with ‹monitor›** — `workspaceSwapLua(wsId, monitorName)`: in Lua, read the target's own
-  monitor (`hl.get_workspace("<id>").monitor`) and the other monitor's active workspace
-  (`hl.get_active_workspace("<name>")`), move the target to the other monitor, then move the
-  other workspace back to the target's original monitor. One chunk, so nothing renders between
-  the two moves. If the other monitor has no active workspace (cannot happen on a mapped monitor,
-  guarded anyway) only the first move runs. If the target's monitor *is* the other monitor,
-  nothing happens.
+  monitor = "<name>", workspace = "<id>" }))`, then the cursor restored (below). ✎ What the
+  compositor does, from `CWorkspacePlacementController::moveWorkspaceToMonitor` (0.56.2):
+  - the workspace was **hidden** on its monitor → it arrives hidden on the destination; nothing on
+    either screen changes; no focus or cursor change.
+  - it was **active on a monitor that is not the focused one** → its old monitor switches to
+    another of its workspaces (or a new lowest free id); the moved workspace arrives *hidden*
+    on the destination.
+  - it was **active on the focused monitor** → the old monitor switches as above, the moved
+    workspace becomes the destination's active workspace, monitor focus follows it, and the
+    compositor **warps the cursor to the destination's centre** (the Lua dispatcher does not expose
+    `noWarpCursor`). The overview's surface stays on its own screen with the pointer now over the
+    other screen's catcher, which is focus-less, so keys still reach it.
+  The chunk records the cursor before the move and warps it back afterwards (`restoreCursorLua`,
+  the cursor half of `restoreFocusLua`), so the pointer never leaves the overview's screen. Window
+  focus is deliberately **not** restored: the compositor's own focus outcome stands (re-focusing
+  the previous window would drag monitor focus back to a workspace the user just moved away). The
+  overview only rebuilds; groups key on the lowest workspace id per monitor, so they may reorder,
+  and layout motion glides it.
+- **Swap with ‹monitor›** — `workspaceSwapLua(monitorA, monitorB)`:
+  `run(hl.dsp.workspace.swap_monitors({ monitor1 = "<A>", monitor2 = "<B>" }))` where A is the
+  target's own monitor (from the box) and B the chosen one, then the cursor restored as for Move.
+  Offered only for a workspace active on its monitor, so the compositor's semantics apply exactly:
+  each monitor shows the workspace it received, focus goes to the last focused window on the
+  workspace that arrived on the focused monitor. A single dispatcher, so nothing can half-fail.
 - **Close all windows** — `closeAllLua(wsId)`: Lua reads the workspace's own window list
-  (`HL.Workspace:get_windows()` per the stubs — **its return shape is the plan's first task, a live
-  probe on 0.56.2**, like the lock spec's rule-semantics probe) and dispatches one `window.close`
-  per address, each step guarded on its own so one refusal never stops the rest. Lua reads the
-  list rather than the overview passing it, so windows the overview never laid out (a `null`
-  `_tileRect`) are closed too. Special workspaces by name (`wsSelector`).
+  (`ws:get_windows()` — ✎ verified in `LuaWorkspace.cpp`: a one-based table of `HL.Window`
+  objects) and dispatches one `window.close` per address, each step guarded on its own so one
+  refusal never stops the rest, reported once naming the failures. Lua reads the list rather than
+  the overview passing it, so windows the overview never laid out (a `null` `_tileRect`) are
+  closed too. Special workspaces by name (`wsSelector`). Every closed address is added to
+  `pendingCloses` on the overview side, so the cursor and Tab behave as after Ctrl+W.
 
 Failures surface through the existing path: compositor log line + notification naming the step.
 
-## Data flow and optimistic state
+## Data flow, pending state, drags
 
-No new optimistic rows. Every action produces compositor events (`closewindow`, `changefloatingmode`,
-`fullscreen`, `moveworkspacev2`, `workspacev2`, …) that already trigger `scheduleRebuild()`, and the
-settle rebuild shows the truth within a few ticks. Specifically:
+No new optimistic *geometry*. Every action produces compositor events (`closewindow`,
+`changefloatingmode`, `fullscreen`, `moveworkspacev2`, `workspacev2`, …) that already trigger
+`scheduleRebuild()`, and the settle rebuild shows the truth within a few ticks.
 
-- **Close**: the tile vanishes on the rebuild that no longer lists the window (as with the middle
-  click today). The cursor, if it was that window, has already moved to the successor.
-- **Close all**: cursor clears when its window goes; the well shows empty on the next rebuild.
-- **Move / Swap**: boxes move between groups on the rebuild; the selection follows the workspace
-  id (existing rule); the menu is already dismissed.
-- **Float / Fullscreen**: the tile re-lays out from fresh geometry; `pendingFullscreen` as above.
+✎ **Pending moves.** `applyTiles()` skips both updates and removals for an address in
+`pendingMoves` (the drop's optimistic row is authoritative until acknowledged or 1.8 s). Without
+care, closing or floating a window right after dropping it would leave its stale tile on screen
+until the deadline. So every window action (Ctrl+W, middle-click, any window menu item) first
+**supersedes that address's pending visual state** exactly as a new grab does: delete its
+`pendingMoves` and `pendingFullscreen` entries and clear `fsPending`. Move and Swap do the same for
+every pending entry whose target or source workspace is the moved one (their coordinates are
+meaningless on another monitor).
 
-`Overview` gains: `pointerLive: bool`, `pointerCanvasX/Y: real`, `cursorAddress: string`,
-`menuOpen: bool`, `menuTarget: var`, `menuItems: var`, `menuIndex: int`, `menuX/Y: real`,
-`hintsExpanded: bool`. `open()` resets everything but `hintsExpanded`.
+**Drags.** Window actions are ignored while a drag is in flight (`root.dragTile !== null`): Ctrl+W
+does nothing, right presses open nothing. A cursor window that is dragged elsewhere is no longer on
+the selected workspace after the drop, so the cursor clears on the rebuild.
+
+`Overview` gains: `pointerLive: bool`, `pointerSceneX/Y: real`, `cursorAddress: string`,
+`pendingCloses: var`, `menuOpen: bool`, `menuTarget: var`, `menuItems: var`, `menuIndex: int`,
+`menuX/Y: real`, `hintsExpanded: bool`. `open()` resets everything but `hintsExpanded`.
 
 ## Hints — two tiers
 
 The primary row: `1–0 jump`, `↑ ↓ ← → move`, `↵ select`, `drag move window`, `type find`,
 `esc close`, `? more`. Pressing `?` with an empty query, or clicking the `? more` cap, toggles
-`hintsExpanded`, which shows a second line beneath: `tab window`, `ctrl+w close`, `right-click
-menu`, `ctrl+s scratchpad`, `ctrl+l lock` (and `space preview` once that ships). With a query
-active, `?` appends to the query as today (`appendQueryText` is unchanged; the key handler checks
-`query.length` first). The `? more` cap reads `? less` while expanded. The state lives on the
+`hintsExpanded`, which shows a second line beneath: `tab window`, `ctrl+w / mid-click close`,
+`right-click menu`, `ctrl+s scratchpad`, `ctrl+l lock` (and `space preview` once that ships). With a
+query active, `?` appends to the query as today (`appendQueryText` is unchanged; the key handler
+checks `query.length` first). The `? more` cap reads `? less` while expanded. The state lives on the
 kept-loaded component, so it persists between summons until a shell restart, and is not written to
-config. `card.hintSpace` reserves one line, or two while expanded, and the card height glides
-(`layoutMotion`). The find bar replaces both tiers while a query is active, as it replaces the one
-row today. `config.hint: false` hides both tiers.
+config.
+
+✎ **Height budget.** `card.hintSpace` keeps its rule — the larger of the find bar and the hints,
+reserved whenever either could show — with "the hints" meaning the tier(s) currently shown: one line,
+or two while expanded. The find bar replaces the hints inside that same budget, so typing never
+moves the card, expanded or not; only toggling `?` changes the budget, and that glides
+(`layoutMotion`). `config.hint: false` keeps its exception: no budget normally, the bar's height
+only while a query is active.
 
 ## Edge cases
 
-- **Pointer parked over a tile, keyboard in use**: `pointerLive` is false after the first key, so
-  Ctrl+W, Enter and (later) Space act on the keyboard target. Moving the mouse makes it live again.
+- **Pointer parked over a tile, keyboard in use**: `pointerLive` is false after the first
+  substantive key, so Ctrl+W, Enter and (later) Space act on the keyboard target. Moving the mouse
+  makes it live again. A lone Ctrl press changes nothing, so hover + Ctrl+W acts on the hovered tile.
 - **Tab cursor set, then the mouse moves over another tile**: the pointer is live, so Ctrl+W acts
   on the hovered tile; the ring stays where it was (it shows the *keyboard* target, which is still
   valid the moment the keyboard is used again).
-- **Cursor window moved by a drag** (the user drags the ringed tile elsewhere): after the drop the
-  window is no longer on the selected workspace → the cursor clears on the rebuild.
-- **Menu open, target closes underneath** (another actor): dismissed on the rebuild that drops it.
+- **Scroll under a stationary pointer** (wheel, or edge scroll after a drop): the scene point did
+  not change, so the pointer is not made live by it.
+- **Menu open, target changes underneath**: dismissed or updated on the rebuild (Staleness).
 - **Menu open, overview toggled with SUPER+P**: `close()` dismisses it.
-- **Move/Swap to a monitor unplugged between open and click**: the chunk's `run()` raises on the
-  compositor's error; reported like any other failed step. `menuItems` is recomputed from
-  `Hyprland.monitors` at open, so this window is a few hundred milliseconds at most.
+- **Move/Swap to a monitor unplugged between the rebuild and the click**: the chunk's `run()`
+  raises on the compositor's "Monitor not found"; reported like any other failed step. The window
+  is one settle tick, since items are recomputed on every rebuild.
 - **Lock from the menu on a placeholder box**: exactly Ctrl+L on it — the unresolved/malformed
   locks-file guards apply unchanged.
 - **Right press while a query is active**: allowed; the menu opens, the query stays; a menu key
   press is consumed by the menu branch first.
+- **Close refused** (the app shows a save prompt): the tile un-dims at the 1.8 s deadline and is
+  cyclable and closable again; nothing is retried automatically.
 - **Hyprland forwards SUPER chords** over the overlay (verified in v1): SUPER+W would close the
   *desktop's* focused window, not the target — unchanged, and why the overview has Ctrl+W.
 
 ## Tests
 
-- **Tier 1, `tests/tst_actions.qml`** (pure): `tileAt` — topmost by layer then order, miss →
-  null; `target` — live pointer over tile / well / nothing, stale pointer falls through to match,
-  cursor, workspace, in that order, `null` when nothing is selected; `cycleWindows` — reading
-  order (y then x), wrap both ways, none → first/last, empty workspace → `""`, current not on the
-  workspace → first; `menuItems` — each row of the table above (window floating/tiled/fullscreen/
-  maximized; workspace armed/unarmed, occupied/empty, scratchpad, synthetic, one vs two vs three
-  monitors, monitor glyph by connector name); monitor-name validation refuses anything outside
-  `[A-Za-z0-9._-]`.
-- **Tier 1, Lua suite (`tests/lua/tst_chunks.lua`)**, mock `hl` extended with `hl.dsp.window.close`,
-  `hl.dsp.window.float`, `hl.dsp.workspace.move`, `hl.get_workspace(sel).monitor`,
-  `hl.get_active_workspace(monitorSel)` and `HL.Workspace:get_windows()` — applied in
-  `hl.dispatch`, never no-ops: `toggleFloatLua` flips `floating` and restores focus + cursor; a
-  throwing float is reported; `setFullscreenLua(addr, 2)` on a tiled window ends fullscreen 2,
-  `(addr, 0)` on a maximized one ends 0, either on an already-matching window dispatches nothing;
-  `workspaceMoveLua` dispatches one move with the right monitor and workspace strings;
-  `workspaceSwapLua` dispatches exactly two moves in order (target out, other back) and one when
-  the other monitor's active workspace is nil, none when the target already sits on that
-  monitor; `closeAllLua` closes every window the workspace lists (including one the input never
-  showed) and a refused close still lets the others run, reported once; every chunk parses.
+✎ **Harness changes named up front:** `tests/ui/run.sh` enumerates suites and `tests/ui/prepare.py`
+copies components explicitly — `tests/ui/actions.qml` and `ContextMenu.qml` must be registered in
+both, and `tests/run.sh` must list `tests/tst_actions.qml`. The mock `hl` gains
+`hl.dsp.window.close`, `hl.dsp.workspace.move`, `hl.dsp.workspace.swap_monitors`,
+`hl.get_workspace(sel).monitor` and `HL.Workspace:get_windows()`, applied in `hl.dispatch`, never
+no-ops; its existing `window.float` (which only flips a boolean) is extended to **move the active
+window onto the floated window**, so "restores focus" has something to restore.
+
+- **Tier 1, `tests/tst_actions.qml`** (pure): `tileAt` — highest `z` wins, later in order on a tie,
+  displayed rect includes scale, miss → null; `target` — live pointer over tile / well / nothing,
+  stale pointer falls through to match, cursor, workspace, in that order, `null` when nothing is
+  selected; `cycleWindows` — reading order (y then x), wrap both ways, none → first/last, empty
+  workspace → `""`, current not on the workspace → first, skipped addresses never returned, all
+  skipped → `""`; `menuItems` — each row of the table above (window floating/tiled/fullscreen/
+  maximized; workspace armed/unarmed, occupied/empty, active/hidden, scratchpad, synthetic, one vs
+  two vs three monitors, monitor glyph by connector name), ids carry states not toggles;
+  monitor-name validation refuses anything outside `[A-Za-z0-9._-]`. `tst_layout.qml`: boxes carry
+  `synthetic` and `active` from the input.
+- **Tier 1, Lua suite (`tests/lua/tst_chunks.lua`)**: `setFloatLua(addr, true)` on a tiled window
+  ends floating with the active window and cursor restored (the mock moved them), `(addr, false)`
+  on a floating one ends tiled, either on an already-matching window dispatches nothing; a throwing
+  float is reported; `setFullscreenLua(addr, 2)` on a tiled window ends fullscreen 2, `(addr, 0)`
+  on a maximized one ends 0, either on an already-matching window dispatches nothing;
+  `workspaceMoveLua` dispatches one move with the right monitor and workspace strings and restores
+  the cursor but not focus; `workspaceSwapLua` dispatches exactly one `swap_monitors` with the two
+  monitors in order; `closeAllLua` closes every window the workspace lists (including one the input
+  never showed) and a refused close still lets the others run, reported once; every chunk parses.
 - **Tier 1, offscreen UI (`tests/ui/actions.qml`)**: Tab rings the first window in reading order,
   Tab again the second, Shift+Tab wraps; an arrow clears the ring; Enter with a cursor dispatches
-  `focus` for that address and closes; Ctrl+W on a cursor window dispatches `close` for it and
-  moves the ring to the next; Ctrl+W with a workspace target dispatches nothing; **parked-mouse
-  rule**: a synthetic pointer move over a tile then a key press → Ctrl+W acts on the keyboard
-  target; a pointer move after the key → Ctrl+W acts on the hovered tile; right press on a tile
-  opens the window menu with Close/Float/Fullscreen and does not start a drag; right press on a
-  well opens the workspace menu; a single-monitor seed shows no Move/Swap, a two-monitor seed
-  shows one of each naming the other monitor; ↓ ↓ Enter activates the second item and dispatches
-  the expected chunk; Esc dismisses without dispatching; a press outside dismisses and the overview
-  stays open (positive control: the same press with no menu closes it); the menu dismisses when a
-  rebuild removes its window; typing a letter with the menu open dismisses it and does not start a
-  query; middle-click still dispatches `close`; `?` toggles the second hint line and the card's
-  hint space, and `?` with a query active appends instead; `open()` clears cursor and menu but
-  keeps `hintsExpanded`.
-- **Tier 2 / live (plan's first task)**: probe `get_windows()`'s return shape and address format on
-  0.56.2; then, on the nested Hyprland rig, move a hidden workspace to the other monitor, swap a
-  non-active workspace with the other monitor's active one, and close-all on a workspace with a
-  floating and a tiled window, asserting end state through `hyprctl -j`.
+  `focus` for that address and closes; Enter with a live pointer over a tile focuses that tile's
+  window, over a well jumps to it; Ctrl+W on a cursor window dispatches `close` for it, dims it,
+  and moves the ring to the next *non-pending* window; two rapid Ctrl+W on a two-window workspace
+  dispatch one close each and clear the ring; a third does nothing; the deadline un-dims a window
+  still present; Ctrl+W with a workspace target dispatches nothing; Ctrl+W auto-repeat is ignored;
+  Ctrl+W right after a drop removes the address's `pendingMoves` entry so the next rebuild drops
+  the tile; **parked-mouse rule**: a synthetic pointer move over a tile then a key press → Ctrl+W
+  acts on the keyboard target; a pointer move after the key → Ctrl+W acts on the hovered tile; a
+  lone Ctrl press then W with the pointer parked over a tile since the last move → the hovered
+  tile; a scroll under a stationary pointer does not make it live; right press on a tile opens the
+  window menu with Close/Float/Fullscreen and does not start a drag; a right press and release
+  *during* a left drag neither drops nor opens, and the drag still completes on the left release;
+  right press on a well opens the workspace menu, and so does a right press on the number badge of
+  a well a fullscreen tile fills; a single-monitor seed shows no Move/Swap, a two-monitor seed shows
+  Move naming the other monitor and Swap only on the active workspace; ↓ ↓ Enter activates the
+  second item and dispatches the expected chunk; Esc dismisses without dispatching; a lone Ctrl
+  press keeps the menu, Ctrl+W then dismisses it and dispatches no close; a press on the scrim
+  dismisses and the overview stays open (positive control: the same press with no menu closes it);
+  a rebuild that floats the target window relabels Float → Tile with the highlight kept, and one
+  that removes it dismisses; typing a letter with the menu open dismisses it and does not start a
+  query; middle-click still dispatches `close` and clears the address's pending state; `?` toggles
+  the second hint line and the card's hint space, typing with expanded hints does not move the
+  card, and `?` with a query active appends instead; `open()` clears cursor, menu and
+  `pendingCloses` but keeps `hintsExpanded`.
+- **Tier 2 / live (plan's first task)**: on the nested Hyprland rig, assert through `hyprctl -j
+  monitors`/`workspaces`/`activewindow` and the cursor position: moving a hidden workspace to the
+  other monitor changes no active workspace and no focus; moving the focused monitor's active
+  workspace makes it active on the destination and the cursor comes back to where it was;
+  `swap_monitors` leaves each monitor showing the workspace it received; close-all on a workspace
+  with a floating and a tiled window empties it; floating a fullscreen window leaves it floating
+  and fullscreen; and the overview still receives keys after each.
