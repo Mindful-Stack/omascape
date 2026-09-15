@@ -29,6 +29,8 @@ removed `walker`.
   so every number key has a visible target (`workspaces` in the config, `0` to turn it off).
 - **Fast selection.** Number keys jump (`1`–`9`, `0` = 10), arrow keys move the highlight +
   `Enter`, click a window to focus it, middle-click to close it. `Esc` or a click outside closes.
+  The overview opens on the focused monitor, and a click anywhere on any *other* monitor closes it
+  too — that click only dismisses the overview, it does not reach the window underneath.
 - **Type to find:** any letter starts a fuzzy filter over window class and title; matches ring
   in the accent colour, the best one is selected. The arrows move between matching workspaces
   the way they normally move between workspaces, `Tab`/`Shift+Tab` cycle matches by rank,
@@ -138,7 +140,7 @@ Press **SUPER+P**. The overlay opens on your focused monitor.
 | **Enter / click the empty row** (scratchpad) | Bring the scratchpad up and close           |
 | **click a tile in the row** (scratchpad) | Focus that window, raised above its siblings   |
 | **Ctrl+L**               | Arm / disarm the selected workspace for screen sharing     |
-| **Esc / click-out**      | Close                                                     |
+| **Esc / click-out**      | Close (click-out includes a click on any other monitor)   |
 
 Digits jump to a workspace only while the query is empty; once you've typed a letter, digits
 are query characters too. Ctrl+letter chords are reserved for future actions.

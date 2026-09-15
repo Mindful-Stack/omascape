@@ -8,6 +8,7 @@ cp "$src/tests/ui/drag.qml" "$fixture/tst_drag.qml"
 cp "$src/tests/ui/find.qml" "$fixture/tst_find_ui.qml"
 cp "$src/tests/ui/scratchpad.qml" "$fixture/tst_scratchpad_ui.qml"
 cp "$src/tests/ui/lock.qml" "$fixture/tst_lock_ui.qml"
+cp "$src/tests/ui/close.qml" "$fixture/tst_close_ui.qml"
 runner=/usr/lib/qt6/bin/qmltestrunner
 command -v qmltestrunner6 >/dev/null 2>&1 && runner=qmltestrunner6
 QT_QPA_PLATFORMTHEME=generic QT_QPA_PLATFORM=offscreen "$runner" -input "$fixture" "$@"

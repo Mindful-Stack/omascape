@@ -931,6 +931,33 @@ Item {
         }
     }
 
+    // Click-catcher for the OTHER screens: the overview is a single surface on the focused screen,
+    // so a click on another monitor would otherwise land on that monitor's windows and leave the
+    // overview open. One transparent overlay per non-target screen, only while opened; it swallows
+    // the click (the same as the outside-click on the overview's own screen does) and closes.
+    Variants {
+        model: Quickshell.screens
+        PanelWindow {
+            required property var modelData
+            objectName: "omyviewCatcher"
+            // Never on the target screen: it would sit above the card and eat every click meant
+            // for it. `targetScreen` is an element of `Quickshell.screens` (focusedScreen()), the
+            // same objects this model carries, so identity is the comparison.
+            visible: root.opened && modelData !== root.targetScreen
+            screen: modelData
+            anchors { top: true; bottom: true; left: true; right: true }
+            color: "transparent"
+            WlrLayershell.namespace: "omyview-catcher"
+            WlrLayershell.layer: WlrLayer.Overlay
+            // The overview holds keyboard focus exclusively; a catcher taking any would steal the
+            // key handling the moment the pointer crossed monitors.
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+            exclusionMode: ExclusionMode.Ignore
+            // On PRESS, not click: a drag begun on another monitor must not leave the overview up.
+            MouseArea { anchors.fill: parent; onPressed: root.close() }
+        }
+    }
+
     PanelWindow {
         id: panel
         // Stays mapped through the exit fade (the pattern Omarchy's PopupCard uses); keyboard

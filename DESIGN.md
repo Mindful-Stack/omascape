@@ -85,6 +85,13 @@ jump to one — keyboard or mouse.
 - Clipboard sets no `screen:`, so we must: set the `PanelWindow.screen` to the
   Quickshell screen whose `.name` matches `Hyprland.focusedMonitor.name`, resolved when
   opening.
+- Consequence of that single surface: the scrim `MouseArea` only ever sees clicks on the
+  overview's own monitor, so a click on any other monitor goes to the window under the
+  cursor there and leaves the overview up. Fixed with a second `Variants` over
+  `Quickshell.screens`: a transparent full-screen `PanelWindow` per screen, visible only
+  while `opened` and only where `modelData !== targetScreen`, `keyboardFocus: None` (the
+  overview keeps keyboard focus exclusively) and closing on **press**, so a drag begun on
+  another monitor cannot leave the overview open.
 - Window geometry (`toplevel.lastIpcObject.at/size/class`) can be **stale** — call
   `Hyprland.refreshToplevels()` on open and bind to the resulting updates.
 - Coordinates: window `at`/`size` are global **logical** px; monitor origin is
