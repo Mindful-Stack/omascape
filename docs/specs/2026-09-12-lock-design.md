@@ -505,7 +505,10 @@ Two facts killed the border approach:
   only disable a rule, never remove one, and install runs on every overview open), and recreated
   after a `configreloaded` like every other rule, since that drops `_G` entirely. Its own `pcall`,
   so a failure cannot take down the exclusion rules or the share observer — the actual
-  protection — and it is re-raised into the install's existing `reportLua` path.
+  protection — and it is re-raised into the install's existing `reportLua` path. When the layer
+  rule AND the filesystem step both fail, the install reports the filesystem one: a failed layer
+  rule costs the cue's blanking, a failed publish costs share DETECTION, so the frame never appears
+  at all.
 - **When it shows.** A monitor's frame is visible iff `locks.sharing` **and** the workspace that
   monitor is currently SHOWING is armed. "Shown" is the monitor's special workspace when one is
   open (`lastIpcObject.specialWorkspace.name`, e.g. `special:scratchpad`), else its active

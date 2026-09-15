@@ -376,6 +376,34 @@ case("a failing layer rule is reported but leaves the observer and the publish i
   eq(Mock.layerRuleNamed(hl, "omyview-lockframe") ~= nil, true, "the next install retries it")
   eq(#hl.__notifications, 1, "the clean retry reports nothing new")
 end)
+-- Round 4b review fix: when BOTH the layer rule and the filesystem step fail, the install has one
+-- `ok, err` to report and must spend it on the FILESYSTEM. A failed layer rule costs the local
+-- cue's blanking (the frame would show up in the capture); a failed share-state publish costs
+-- share DETECTION itself, so the frame and the overview's placeholder never appear at all — the
+-- bigger failure, and the one whose cause (a broken runtime dir) the user can act on.
+-- Distinguishes: the original `if not fok … if not pok` order, which reported the cosmetic
+-- layer-rule error and swallowed the share-state one entirely.
+case("install reports the share-state failure, not the layer-rule one, when both fail", function()
+  local hl = Mock.new({})
+  hl.__fail_on = "layer_rule"
+  hl.__runtime_dir = false                  -- XDG_RUNTIME_DIR unset: ensureDir() cannot succeed
+  run("LOCK_INSTALL", hl)
+  eq(#hl.__notifications, 1, "one report")
+  local text = hl.__notifications[1].text
+  assert(text:find("XDG_RUNTIME_DIR", 1, true), "names the share-state failure, got: " .. text)
+  assert(not text:find("layer_rule", 1, true), "not the cosmetic layer-rule error, got: " .. text)
+  eq(#hl.__subs, 1, "the share observer still exists either way")
+end)
+-- Distinguishes: a layer-rule failure that stops being reported at all once the precedence above
+-- is in place (the swap must only decide which error WINS, never drop the loser's own case).
+case("a layer-rule failure alone is still the reported error", function()
+  local hl = Mock.new({})
+  hl.__fail_on = "layer_rule"
+  run("LOCK_INSTALL", hl)
+  eq(#hl.__notifications, 1, "one report")
+  assert(hl.__notifications[1].text:find("layer_rule", 1, true), "names the layer rule failure")
+  eq(state(hl), "0", "the filesystem step still ran and published")
+end)
 -- Distinguishes: a counter reset by re-install, or an install that publishes stale state.
 case("lock install preserves the share counter", function()
   local hl = Mock.new({})

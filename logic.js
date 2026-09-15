@@ -1122,8 +1122,14 @@ function lockInstallLua() {
         '      L.ensureDir()\n' +
         '      L.apply()\n' +
         '    end)\n' +
-        '    if not fok then error(ferr, 0) end\n' +
+        // Precedence, when both steps failed and there is one `ok, err` to report: the FILESYSTEM
+        // wins. A failed layer rule only costs the local cue's blanking (the frame would appear in
+        // the capture); a failed ensureDir/publish costs share DETECTION itself, so the frame and
+        // the overview's placeholder never appear at all — the bigger failure, and the one whose
+        // cause (a broken runtime dir) the user can act on. Each is still reported when it fails
+        // alone.
         '    if not pok then error(perr, 0) end\n' +
+        '    if not fok then error(ferr, 0) end\n' +
         '  end)\n' +
         '  ' + reportLua('lock install') + '\n' +
         'end'

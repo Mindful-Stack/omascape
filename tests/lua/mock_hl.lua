@@ -16,7 +16,8 @@
 -- below), "io.open" (returns nil for any path), "io.write" (the open file's write returns nil),
 -- "io.close" (the open file's close returns nil, so nothing commits to hl.__files), "rename"
 -- (os.rename returns nil, err). `hl.__runtime_dir` overrides the fake XDG_RUNTIME_DIR (default
--- "/run/user/1000"). `hl.__os`/`hl.__io` are the fakes tst_chunks.lua's `run()` installs in
+-- "/run/user/1000"); `false` means the variable is UNSET, which breaks the install's filesystem
+-- step without spending the single `hl.__fail_on` slot. `hl.__os`/`hl.__io` are the fakes tst_chunks.lua's `run()` installs in
 -- place of the real `os`/`io` inside a chunk's environment; each falls through to the real
 -- library (via `__index`) for anything not faked here. `hl.__os.execute` always returns nil,
 -- like the real compositor's Lua (it reaps the child itself, so the exit status never reaches
@@ -132,7 +133,16 @@ function M.new(opts)
   hl.__dir_exists = false          -- set true by a real "mkdir" execute; a test can clear it to
                                     -- simulate the runtime dir vanishing after a successful install
   hl.__os = setmetatable({
-    getenv = function(k) if k == "XDG_RUNTIME_DIR" then return hl.__runtime_dir or "/run/user/1000" end return nil end,
+    -- `hl.__runtime_dir = false` (not nil, which just selects the default) models the variable
+    -- being UNSET: the only way to break the filesystem step independently of `hl.__fail_on`,
+    -- which names a single operation and is needed elsewhere in the same case.
+    getenv = function(k)
+      if k == "XDG_RUNTIME_DIR" then
+        if hl.__runtime_dir == false then return nil end
+        return hl.__runtime_dir or "/run/user/1000"
+      end
+      return nil
+    end,
     -- Always nil: the real compositor reaps the child itself, so os.execute's return value is
     -- never a usable success/failure signal (verified live). Still recorded in hl.__mkdirs so
     -- "attempted the mkdir" assertions have something to check, and marks the directory as
