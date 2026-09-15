@@ -949,8 +949,10 @@ Item {
             color: "transparent"
             WlrLayershell.namespace: "omyview-catcher"
             WlrLayershell.layer: WlrLayer.Overlay
-            // The overview holds keyboard focus exclusively; a catcher taking any would steal the
-            // key handling the moment the pointer crossed monitors.
+            // No keyboard interactivity at all: Hyprland only moves keyboard focus to a layer
+            // surface under the pointer when its interactivity is not `none`, so a focus-less
+            // catcher leaves the keys with the overview's own (OnDemand) surface however far the
+            // pointer wanders. It must NOT be Exclusive either — see the panel's keyboardFocus.
             WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
             exclusionMode: ExclusionMode.Ignore
             // On PRESS, not click: a drag begun on another monitor must not leave the overview up.
@@ -968,7 +970,16 @@ Item {
         color: "transparent"
         WlrLayershell.namespace: "omyview"
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+        // OnDemand, not Exclusive. Hyprland 0.56 (InputManager.cpp, mouseMoveUnified: "forced above
+        // all") routes EVERY pointer event to the exclusive layer surfaces while any exists — and
+        // when the cursor is over none of them it hands the event to the first one anyway, at
+        // out-of-bounds coordinates. So with Exclusive, a click on another monitor never reached
+        // that monitor's catcher (nor its windows: the other screen went dead). An OnDemand overlay
+        // layer still grabs keyboard focus the moment it maps (LayerSurface.cpp, GRABSFOCUS) and
+        // keeps it while the pointer is over it or over a focus-less surface like the catcher
+        // (the refocus at mouseMoveUnified requires interactivity != none), so bare keys keep
+        // reaching keyCatcher, and pointer routing is the normal per-monitor hit test.
+        WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
         // Pointer input is released the moment `opened` drops, like keyboard focus: an empty
         // input region makes the fading surface click-through.
         mask: root.opened ? null : emptyRegion
