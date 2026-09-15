@@ -99,44 +99,50 @@ tile = tile[:start] + '    Rectangle { anchors.fill: parent; color: tile.bg }\n\
 (dest / 'logic.js').write_text((source / 'logic.js').read_text())
 # Share-time reminder frame: the same treatment as Overview.qml's own PanelWindow — layer-shell
 # properties dropped, the window itself an Item. The anchors are what the compositor resolves into
-# a size, so the fixture resolves them itself, from the screen the strip was given: the side strips
-# span the full height, the top/bottom ones are inset by the side strips' width. The strip's own
-# thickness is NOT resolved here — the `implicit*` line and the painted `Rectangle` are carried
-# through verbatim and Qt applies them to the Item, so the suite measures the real numbers. Each
-# replacement is keyed to the exact anchor set, to that `implicit*` line (the one-logical-pixel
-# outset) and to the paint's own anchors (which END of the surface it sits at — the whole point of
-# the outset, see LockFrame.qml), so changing any of the three fails here rather than silently
-# producing a strip the geometry test would then "pass" on.
+# a size, so the fixture resolves them itself, from the screen the strip was given: every strip
+# spans its whole edge (the side strips the full height, the top/bottom ones the full width — it is
+# their PAINT that is inset). The strip's thickness is NOT resolved here — the `implicit*` line and
+# the painted `Rectangle` are carried through verbatim and Qt applies them to the Item, so the suite
+# measures the real numbers, including the device-pixel snapping of `frame.surfaceSize`. Each
+# replacement is keyed to the exact anchor set, to that `implicit*` line and to the paint's own
+# anchors (which edge it hugs, and its margins), so changing any of them fails here rather than
+# silently producing a strip the geometry tests would then "pass" on.
 frame = (source / 'LockFrame.qml').read_text()
 frame = re.sub(r'^import Quickshell.*\n', '', frame, flags=re.M)
 frame = frame.replace('Scope {', 'Item {').replace('PanelWindow {', 'Item {')
 frame = re.sub(r'^\s*(screen: frame\.frameScreen|WlrLayershell\..*|exclusionMode:.*|color: "transparent"'
                r'|mask: \w+|Region \{ id: \w+ \})\n', '', frame, flags=re.M)
-FILL_H = '''        Rectangle {
+def fill_h(edge):
+    return '''        Rectangle {
             objectName: "lockFrameFill"; color: frame.frameColor
-            anchors { top: parent.top; left: parent.left; right: parent.right }
+            anchors { %s: parent.%s; left: parent.left; right: parent.right
+                      leftMargin: frame.thickness; rightMargin: frame.thickness }
             height: frame.thickness
         }
-'''
-FILL_V = '''        Rectangle {
+''' % (edge, edge)
+
+
+def fill_v(edge):
+    return '''        Rectangle {
             objectName: "lockFrameFill"; color: frame.frameColor
-            anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+            anchors { %s: parent.%s; top: parent.top; bottom: parent.bottom }
             width: frame.thickness
         }
-'''
+''' % (edge, edge)
+
+
 for edge in ('top', 'bottom'):
     frame = replaced(frame, '''        anchors { %s: true; left: true; right: true }
-        margins { left: frame.thickness; right: frame.thickness }
-        implicitHeight: frame.thickness + 1
-''' % edge + FILL_H, '''        width: Math.max(0, (frame.frameScreen ? frame.frameScreen.width : 0) - 2 * frame.thickness)
-        implicitHeight: frame.thickness + 1
-''' + FILL_H, 'LockFrame %s strip anchors + outset + paint' % edge)
+        implicitHeight: frame.surfaceSize
+''' % edge + fill_h(edge), '''        width: frame.frameScreen ? frame.frameScreen.width : 0
+        implicitHeight: frame.surfaceSize
+''' + fill_h(edge), 'LockFrame %s strip anchors + surface + paint' % edge)
 for edge in ('left', 'right'):
     frame = replaced(frame, '''        anchors { top: true; bottom: true; %s: true }
-        implicitWidth: frame.thickness + 1
-''' % edge + FILL_V, '''        height: frame.frameScreen ? frame.frameScreen.height : 0
-        implicitWidth: frame.thickness + 1
-''' + FILL_V, 'LockFrame %s strip anchors + outset + paint' % edge)
+        implicitWidth: frame.surfaceSize
+''' % edge + fill_v(edge), '''        height: frame.frameScreen ? frame.frameScreen.height : 0
+        implicitWidth: frame.surfaceSize
+''' + fill_v(edge), 'LockFrame %s strip anchors + surface + paint' % edge)
 (dest / 'LockFrame.qml').write_text(frame)
 (dest / 'FindBar.qml').write_text((source / 'FindBar.qml').read_text())   # no shell imports: verbatim
 # Shell-only helpers: the config loader needs Quickshell.Io, the shadow a GPU shader.

@@ -923,6 +923,31 @@ function lockColorToQml(hypr) {
     return "#" + hex
 }
 
+// The logical thickness of a frame strip's SURFACE, given the painted thickness and the monitor's
+// scale: the smallest integer at least one logical px larger than the paint whose DEVICE size is a
+// whole number. The blanking box a `no_screen_share` layer draws is rasterised from the surface's
+// logical geometry × the scale with its origin floored and its size truncated — it covers
+// `[floor(start), floor(start) + floor(size))` — so a surface whose device size is fractional is
+// always one device line short, and whichever line that is (inner or outer) shows the frame in
+// every capture. Snapping the SURFACE (never the paint: `lockBorderSize` is what the user asked
+// for) makes the blanked box exactly the surface, with the paint strictly inside it.
+// The search stops 12 px out: at that point no scale in practical use has failed to land on a
+// whole number, and growing the surface without bound to satisfy an exotic scale would blank far
+// more of the screen than the cue occupies. Falling back to `thickness + 1` there costs at most a
+// one-device-pixel hairline of the frame colour in a capture, which discloses nothing.
+// A scale that is not a positive finite number (a monitor object we never got, a malformed
+// snapshot) degrades the same way instead of throwing — this runs in a binding.
+function lockFrameSurfaceSize(thickness, scale) {
+    var t = (typeof thickness === "number" && isFinite(thickness)) ? Math.max(0, Math.round(thickness)) : 0
+    var base = t + 1
+    if (typeof scale !== "number" || !isFinite(scale) || scale <= 0) return base
+    for (var s = base; s <= t + 12; s++) {
+        var d = s * scale
+        if (Math.abs(d - Math.round(d)) < 1e-4) return s
+    }
+    return base
+}
+
 // Bump on ANY change to the observer callback's body (including which `kind` values it
 // ignores). `_G.omyview_lock` is compositor Lua state that survives a shell restart, and the
 // callback lives in a closure owned by the old subscription — `L.sub:is_active()` stays true

@@ -199,10 +199,13 @@ Optional user settings live in `~/.config/omarchy/omyview.json` (watched; edits 
   accepted (Hyprland's own colour syntax), anything else falls back to the default. The alpha of
   `rgba(...)` is honoured, so e.g. `"rgba(ff444480)"` is a half-transparent red.
 - `lockBorderSize` — thickness of that frame in pixels, `0`–`20` (default `6`); `0` turns the
-  reminder off. The frame is a local reminder only — it is blanked in every capture, so a viewer
-  sees a plain black box, never your windows and never the frame. Along the bottom and right
-  screen edges the frame stops one pixel short of the physical edge, which is what keeps it out
-  of the capture on fractionally scaled monitors.
+  reminder off. The frame is drawn flush against all four screen edges and is a local reminder
+  only — it is blanked in every capture, so a viewer sees a plain black box, never your windows and
+  never the frame. (Under the paint each strip claims a slightly larger, invisible surface, sized
+  so that it lands on whole device pixels at your monitor's scale — that is what keeps the frame
+  out of the recording. On an exotic scale where no such size exists within 12 px, a single
+  device-pixel hairline of the frame colour can show in a capture; it reveals that a frame is
+  there, never what is behind it.)
 
 ### Blurred scrim (optional, Hyprland side)
 

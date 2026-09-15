@@ -19,27 +19,28 @@ import "logic.js" as Logic
 // Existence is `visible:`, never create/destroy: mapping and unmapping a layer surface per share
 // edge is what the hysteresis (LOCK_SHARE_GRACE_MS) exists to avoid in the first place.
 //
-// The left and right strips run the full height and the top/bottom ones are inset by that width,
-// so every corner is painted exactly once (a doubled corner would read darker on a translucent
-// colour).
+// The left and right strips run the full height, the top and bottom ones the full width, and it is
+// the top/bottom PAINT that is inset by the side strips' thickness — so every corner is painted
+// exactly once (a doubled corner would read darker on a translucent colour) while all four
+// surfaces still start and end on a screen edge, which is what the snapping below relies on.
 //
-// Each strip's SURFACE is one logical pixel thicker than its PAINT, and the paint occupies the
-// FIRST `thickness` px of that surface — the spare pixel is always the last one. The blanking box
-// a `no_screen_share` layer draws (ScreenshareFrame.cpp scales the layer's logical position and
-// size by the monitor scale) is rasterised in whole DEVICE pixels with its origin floored and its
-// size truncated: it covers [floor(start), floor(start) + floor(size)). So a surface's first device
-// pixel is always blanked and its last one is not, whenever the device size is fractional — at
-// scale 1.25 a thickness of 6 is 7.5 device px. Painting first-pixels-in therefore keeps every
-// painted pixel inside the blanked box at any scale; painting to the far end is what leaked one
-// device row/column in round 4 (inner edge, top band mean 0.0527) and again at the outer edge in
-// round 4b's first measurement.
-// For the top/left strips "first" IS the screen edge. The bottom/right surfaces run the other way,
-// so their paint stops ONE LOGICAL PX SHORT of the physical edge — invisible in practice (that is
-// where the bezel is) and the price of a capture that is black everywhere. Measured clean on all
-// four edges at scale 1.25 with lockBorderSize 6 (2026-09-15).
-// The thickness itself is NOT snapped to whole device pixels: `implicitHeight`/`implicitWidth` are
-// logical ints, which cannot express e.g. 6.4, and rounding would silently change the configured
-// size.
+// The PAINT is flush against the screen edge on all four sides. What is bigger than the paint is
+// the SURFACE: each strip maps `Logic.lockFrameSurfaceSize(thickness, monitorScale)` logical px —
+// the smallest size above the paint whose DEVICE size is a whole number — and paints `thickness`
+// of it against the outer edge.
+// Why: the blanking box a `no_screen_share` layer draws (ScreenshareFrame.cpp scales the layer's
+// logical position and size by the monitor scale) is rasterised with its origin floored and its
+// size truncated — it covers [floor(start), floor(start) + floor(size)). A monitor's device size
+// is a whole number and each strip starts at logical 0 or at (W or H) − s, so when s·scale is
+// whole the box is EXACTLY the surface, and the paint — strictly inside the surface — cannot
+// reach a device pixel the box misses. A surface whose device size is fractional always loses one
+// device line, and whichever line that is carries the frame colour into the recording: round 4
+// leaked the inner edge (6 logical px at scale 1.25 is 7.5 device px; top band mean 0.0527), and
+// round 4b's first fix leaked the outer one instead.
+// The PAINT is never snapped — `lockBorderSize` is what the user asked for. On an exotic scale
+// where no whole-number surface exists within 12 px, `lockFrameSurfaceSize` falls back to
+// `thickness + 1` and a one-device-pixel hairline of the frame colour can show in a capture; it
+// discloses nothing (the audience learns a frame exists, never what is behind it).
 
 Scope {
     id: frame
@@ -60,6 +61,15 @@ Scope {
     readonly property bool shown:
         frame.thickness > 0 && Logic.lockFrameVisible(frame.sharing, frame.armed, frame.monIpc)
 
+    // The monitor's scale decides how many logical px a strip's surface needs to land on whole
+    // device pixels (see the comment above). `HyprlandMonitor.scale` is a live property, so a
+    // monitor rescaled at runtime re-snaps the surfaces; a monitor we do not have yet counts as
+    // unscaled, which makes the surface the smallest it can be rather than guessing.
+    readonly property real monitorScale:
+        (frame.monitor && typeof frame.monitor.scale === "number" && frame.monitor.scale > 0)
+            ? frame.monitor.scale : 1
+    readonly property int surfaceSize: Logic.lockFrameSurfaceSize(frame.thickness, frame.monitorScale)
+
     PanelWindow {
         objectName: "lockFrameTop"
         visible: frame.shown
@@ -72,11 +82,11 @@ Scope {
         mask: emptyTop
         Region { id: emptyTop }
         anchors { top: true; left: true; right: true }
-        margins { left: frame.thickness; right: frame.thickness }
-        implicitHeight: frame.thickness + 1
+        implicitHeight: frame.surfaceSize
         Rectangle {
             objectName: "lockFrameFill"; color: frame.frameColor
-            anchors { top: parent.top; left: parent.left; right: parent.right }
+            anchors { top: parent.top; left: parent.left; right: parent.right
+                      leftMargin: frame.thickness; rightMargin: frame.thickness }
             height: frame.thickness
         }
     }
@@ -92,11 +102,11 @@ Scope {
         mask: emptyBottom
         Region { id: emptyBottom }
         anchors { bottom: true; left: true; right: true }
-        margins { left: frame.thickness; right: frame.thickness }
-        implicitHeight: frame.thickness + 1
+        implicitHeight: frame.surfaceSize
         Rectangle {
             objectName: "lockFrameFill"; color: frame.frameColor
-            anchors { top: parent.top; left: parent.left; right: parent.right }
+            anchors { bottom: parent.bottom; left: parent.left; right: parent.right
+                      leftMargin: frame.thickness; rightMargin: frame.thickness }
             height: frame.thickness
         }
     }
@@ -112,7 +122,7 @@ Scope {
         mask: emptyLeft
         Region { id: emptyLeft }
         anchors { top: true; bottom: true; left: true }
-        implicitWidth: frame.thickness + 1
+        implicitWidth: frame.surfaceSize
         Rectangle {
             objectName: "lockFrameFill"; color: frame.frameColor
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
@@ -131,10 +141,10 @@ Scope {
         mask: emptyRight
         Region { id: emptyRight }
         anchors { top: true; bottom: true; right: true }
-        implicitWidth: frame.thickness + 1
+        implicitWidth: frame.surfaceSize
         Rectangle {
             objectName: "lockFrameFill"; color: frame.frameColor
-            anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+            anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
             width: frame.thickness
         }
     }

@@ -402,10 +402,10 @@ TestCase {
     // Distinguishes: strips that hard-code the default thickness/colour instead of reading the
     // config, and an alpha left at the end of the hex string (Qt reads `#rrggbbaa` as `#aarrggbb`,
     // so `rgba(3355ff80)` passed through unchanged would render as an opaque near-black).
-    // The side strips run the full height and the top/bottom ones are inset by that width, so
-    // every corner is painted exactly once — a doubled corner would read darker on a translucent
-    // colour. The PAINTED rectangle is what `lockBorderSize` promises; the surface around it is
-    // one logical pixel bigger (see the outset test below).
+    // The side strips run the full height, the top/bottom ones the full width, and the top/bottom
+    // PAINT is inset by the side strips' thickness so every corner is painted exactly once — a
+    // doubled corner would read darker on a translucent colour. The painted rectangle is what
+    // `lockBorderSize` promises; the surface around it is bigger (see the snapping test below).
     function test_frame_thickness_and_colour_follow_the_config() {
         view.testConfig.lockBorder = "rgba(3355ff80)"
         view.testConfig.lockBorderSize = 4
@@ -415,39 +415,53 @@ TestCase {
         compare(fillOf("lockFrameLeft").width, 4)
         compare(fillOf("lockFrameRight").width, 4)
         compare(strip("lockFrameLeft").height, screenObj.height, "the side strips span the screen")
-        compare(strip("lockFrameTop").width, screenObj.width - 8, "inset by the side strips")
+        compare(strip("lockFrameTop").width, screenObj.width, "so do the top/bottom ones")
+        compare(fillOf("lockFrameTop").width, screenObj.width - 8, "the PAINT is inset by the side strips")
+        compare(fillOf("lockFrameTop").x, 4, "and starts where the left strip's paint ends")
         compare(fillOf("lockFrameTop").color, Qt.color("#803355ff"), "alpha moved to the front")
     }
-    // The `no_screen_share` blanking box that hides a strip from every capture is rasterised in
-    // WHOLE DEVICE pixels from the surface's logical geometry × the monitor scale: its origin
-    // floors and its size truncates, so it covers [floor(start), floor(start) + floor(size)) — the
-    // FIRST device pixel of a surface is always blanked, the LAST one is not whenever the device
-    // size is fractional (6 logical px at scale 1.25 is 7.5). Each strip therefore maps a surface
-    // one logical px thicker than its paint and puts the paint at the START of that surface, so
-    // the spare pixel is always the last one and the paint is always strictly inside the blanked
-    // box — measured clean at scale 1.25 on every edge (2026-09-15).
-    // "Start" is the screen edge for the top/left strips and one pixel INSIDE the screen edge for
-    // the bottom/right ones, whose surfaces run the other way: their paint stops one logical px
-    // short of the physical edge, which is where the frame sits under the bezel anyway.
-    // Distinguishes: the outset regressing (surface == paint: the hairline is back), the paint
-    // growing with the surface (a thicker frame than configured), and a paint pushed to the far
-    // end of its surface, which is what leaked the outermost device row/column in round 4b's first
-    // measurement.
-    function test_each_strip_paints_the_first_logical_px_of_its_surface() {
-        view.testConfig.lockBorderSize = 4
+    // The `no_screen_share` blanking box that hides a strip from every capture is rasterised from
+    // the surface's logical geometry × the monitor scale, with its origin floored and its size
+    // truncated: it covers [floor(start), floor(start) + floor(size)). A surface whose DEVICE size
+    // is fractional is therefore always one device line short of itself, and whichever line that is
+    // carries the frame colour into the recording — measured twice in round 4b, once at the inner
+    // edge and once at the outer one. So the SURFACE (never the paint) is snapped to the smallest
+    // size whose device size is whole: at scale 1.25 a 6 px paint gets an 8 px surface (10 device
+    // px), and the paint sits flush against the screen edge inside it.
+    // Distinguishes: no snapping (surface 7 at scale 1.25, which leaks), a paint that grows with
+    // the surface (a thicker frame than configured), and a paint anchored INWARD, which is the
+    // one-pixel gap at the bottom/right edges the user could see.
+    function test_strip_surfaces_snap_to_whole_device_pixels_with_the_paint_flush() {
+        mon.scale = 1.25
+        view.testConfig.lockBorderSize = 6
         ctrlL(); view.testLocks.setSharing(true)
-        compare(strip("lockFrameTop").height, 5, "top surface: paint + one px")
-        compare(fillOf("lockFrameTop").height, 4, "top paint")
+        compare(strip("lockFrameTop").height, 8, "6 px paint, 8 px surface: 8 * 1.25 = 10 device px")
+        compare(strip("lockFrameBottom").height, 8)
+        compare(strip("lockFrameLeft").width, 8)
+        compare(strip("lockFrameRight").width, 8)
+        compare(fillOf("lockFrameTop").height, 6, "the paint is still exactly lockBorderSize")
         compare(fillOf("lockFrameTop").y, 0, "flush with the screen's top edge")
-        compare(strip("lockFrameBottom").height, 5, "bottom surface")
-        compare(fillOf("lockFrameBottom").height, 4, "bottom paint")
-        compare(fillOf("lockFrameBottom").y, 0, "one px short of the screen's bottom edge")
-        compare(strip("lockFrameLeft").width, 5, "left surface")
-        compare(fillOf("lockFrameLeft").width, 4, "left paint")
-        compare(fillOf("lockFrameLeft").x, 0, "flush with the screen's left edge")
-        compare(strip("lockFrameRight").width, 5, "right surface")
-        compare(fillOf("lockFrameRight").width, 4, "right paint")
-        compare(fillOf("lockFrameRight").x, 0, "one px short of the screen's right edge")
+        compare(fillOf("lockFrameBottom").height, 6)
+        compare(fillOf("lockFrameBottom").y, 2, "flush with the bottom edge: 8 - 6")
+        compare(fillOf("lockFrameLeft").width, 6)
+        compare(fillOf("lockFrameLeft").x, 0, "flush with the left edge")
+        compare(fillOf("lockFrameRight").width, 6)
+        compare(fillOf("lockFrameRight").x, 2, "flush with the right edge: 8 - 6")
+        compare(fillOf("lockFrameTop").x, 6, "corners: the top paint starts where the left paint ends")
+        compare(fillOf("lockFrameTop").width, screenObj.width - 12)
+    }
+    // Distinguishes: a surface snapped to a fixed size rather than to the MONITOR's scale — on an
+    // unscaled monitor every logical px is already whole, so the smallest surface must be chosen
+    // and the frame must not silently get thicker.
+    function test_unscaled_monitor_takes_the_smallest_surface() {
+        mon.scale = 1
+        view.testConfig.lockBorderSize = 6
+        ctrlL(); view.testLocks.setSharing(true)
+        compare(strip("lockFrameTop").height, 7, "thickness + 1, nothing to snap")
+        compare(strip("lockFrameLeft").width, 7)
+        compare(fillOf("lockFrameTop").height, 6)
+        compare(fillOf("lockFrameBottom").y, 1)
+        compare(fillOf("lockFrameRight").x, 1)
     }
     // Distinguishes: a size of 0 drawing hairline strips (or full-screen ones) instead of
     // disabling the cue, which is what the documented `lockBorderSize: 0` promises.

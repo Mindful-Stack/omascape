@@ -479,29 +479,35 @@ Two facts killed the border approach:
 
 - **Mechanism.** `LockFrame.qml` maps four thin `PanelWindow`s per screen (top, bottom, left,
   right), `WlrLayer.Overlay`, `WlrLayershell.namespace: "omyview-lockframe"`, each
-  `lockBorderSize` px thick along its edge. The left/right strips span the full height and the
-  top/bottom ones are inset by that width (`margins`), so every corner is painted exactly once —
-  a doubled corner would read darker on a translucent colour. They reserve no space
+  painting `lockBorderSize` px along its edge. Every strip spans its whole edge — the left/right
+  ones the full height, the top/bottom ones the full width — and it is the top/bottom PAINT that is
+  inset by the side strips' thickness, so every corner is painted exactly once (a doubled corner
+  would read darker on a translucent colour) while all four surfaces still start and end on a
+  screen edge, which is what the snapping below relies on. They reserve no space
   (`ExclusionMode.Ignore`), take no keyboard focus, and are click-through: `mask` is set to an
   empty `Region`, the same trick the overview uses while closed. Existence is `visible:`, never
   create/destroy — mapping a layer surface per share edge is the churn the hysteresis exists to
   avoid.
-- **The one-pixel outset (round 4b).** Each strip's SURFACE is one logical pixel thicker than its
-  PAINT (`implicitHeight: thickness + 1` with a child `Rectangle` of `height: thickness`), and the
-  paint occupies the FIRST `thickness` px of that surface, so the spare pixel is always the LAST
-  one. The blanking box is rasterised in whole DEVICE pixels from the layer's logical geometry ×
-  the monitor scale, with the origin floored and the size truncated — it covers
-  `[floor(start), floor(start) + floor(size))`. A surface's first device pixel is therefore always
-  blanked and its last one is not, whenever the device size is fractional (6 logical px at scale
-  1.25 is 7.5). Paint-first puts every painted pixel inside the blanked box at any scale; paint-last
-  leaks exactly one device line — the inner edge in round 4 (top band 0.0527) and the outer edge in
-  round 4b's first measurement. For the top and left strips "first" is the screen edge; the bottom
-  and right surfaces run the other way, so their paint stops one logical px short of the physical
-  edge — invisible in practice (that is where the bezel is) and the price of a capture that is
-  black everywhere. The `margins` stay at `thickness`, so the corners are still painted exactly
-  once. The thickness itself is deliberately NOT snapped to whole device pixels:
-  `implicitWidth`/`implicitHeight` are logical ints, and rounding would silently change the size
-  the user configured.
+- **Device-pixel snapping (round 4b).** The PAINT is flush against the screen edge on all four
+  sides — `lockBorderSize` px of it, exactly what the user asked for. What is bigger is the
+  SURFACE: each strip maps `Logic.lockFrameSurfaceSize(thickness, monitor.scale)` logical px, the
+  smallest size above the paint whose DEVICE size is a whole number (at scale 1.25 a 6 px paint
+  gets an 8 px surface = 10 device px; at scale 1 it gets 7). The blanking box is rasterised from
+  the layer's logical geometry × the monitor scale with its origin floored and its size truncated —
+  it covers `[floor(start), floor(start) + floor(size))`. A monitor's device size is a whole number
+  and every strip starts at logical 0 or at (W or H) − s, so when s·scale is whole the box is
+  EXACTLY the surface and the paint, strictly inside it, cannot reach a pixel the box misses. A
+  fractional device size always loses one device line, and whichever line that is carries the frame
+  colour into the recording: round 4 leaked the inner edge (top band 0.0527), and round 4b's first
+  attempt — paint flush, surface one px bigger — leaked the outer one (2576 pixels on device row
+  1599 and column 2559).
+  The strips therefore span their whole edge (top/bottom the full width, left/right the full
+  height) and it is the top/bottom PAINT that carries `leftMargin`/`rightMargin` of `thickness`, so
+  corners are still painted exactly once while every surface starts and ends on a screen edge.
+  The paint is never snapped, and the search stops 12 px out: on a scale where nothing lands whole,
+  `lockFrameSurfaceSize` falls back to `thickness + 1` and a one-device-pixel hairline can show in
+  a capture — it discloses nothing. A scale that is not a positive finite number degrades the same
+  way rather than throwing, since this runs in a binding.
 - **Blanking.** `lockInstallLua()` creates one named LAYER rule,
   `hl.layer_rule({ name = "omyview-lockframe", match = { namespace = "omyview-lockframe" },
   no_screen_share = true })`, kept as `L.frameRule`. A `no_screen_share` layer renders as an
@@ -547,7 +553,8 @@ Two facts killed the border approach:
   without `Quickshell.screens` changing — so without the epoch the binding would hold a stale (or
   null) pointer and that screen's frame would stay hidden for good.
 - **Pure core** (`logic.js`, Tier 1 tested, no QML): `lockFrameShownSelector(mon)`,
-  `lockFrameVisible(sharing, armed, mon)`, `lockFrameRefreshEvent(name)` and
+  `lockFrameVisible(sharing, armed, mon)`, `lockFrameRefreshEvent(name)`,
+  `lockFrameSurfaceSize(thickness, scale)` (see the snapping bullet) and
   `lockColorToQml(hypr)`. The last converts the accepted `rgb(rrggbb)` / `rgba(rrggbbaa)` to
   `#rrggbb` / `#aarrggbb` — the alpha moves to the FRONT, because Qt reads `#rrggbbaa` as
   `#aarrggbb`, so `rgba(ff444480)` passed through unchanged would render as an opaque near-black.
@@ -563,19 +570,26 @@ Two facts killed the border approach:
   the frame binds to both directly, so no `lockSync()` round trip through the compositor is
   involved any more; the round-2 `onLockBorderChanged`/`onLockBorderSizeChanged` handlers are gone.
 - **What a viewer sees.** Effectively a black screen on an armed workspace: the exclusion box with
-  the frame strips blacked out by the layer rule, and **no trace of the frame itself**. Measured
-  2026-09-15 with the outset and paint-first geometry (eDP-1, 2560x1600 at scale 1.25,
-  `lockBorderSize: 6` — the default — share triggered by `grim` itself: the first capture flips the
-  state file, the second one 1 s later sees the frame; `hyprctl -j layers` confirmed four strips at
-  7 logical px): whole-monitor mean **0.00191**, bands 0.0222 (top — the unblanked bar, which reads
-  0.1089 with no frame on screen at all), 0.0108 (bottom), 0.00034 (left), 0.00039 (right), and a
-  scan of all 4.1 M pixels for the frame colour (R ≥ 180, G/B ≤ 130) finds **zero**. Round 4b's
-  first attempt, with the paint flush to the far edge, left 2576 such pixels on device row 1599 and
-  column 2559: the blanking box floors its origin and truncates its size, so it covered rows
-  1591…1598 of a strip painted over 1592…1599 — which is why the bottom and right strips now stop
-  one logical px short of the physical edge. The bar (and any other unblanked layer) is visible in
-  the capture as always; only windows on the armed workspace and the frame's own surfaces are
-  blacked.
+  the frame strips blacked out by the layer rule, and **no trace of the frame itself**. Verified
+  2026-09-15 with the snapped-surface geometry, as a controlled experiment on HDMI-A-1
+  (2560x1440, scale 1, `lockBorderSize: 6`, share triggered by `grim` itself — the first capture
+  flips the state file, the second one 1 s later sees the frame):
+  - layer rule **enabled**: **zero** frame-coloured pixels (R ≥ 180, G/B ≤ 130) in the whole
+    capture, mean 0.00252.
+  - layer rule **disabled** (`frameRule:set_enabled(false)`, the control): **21016** frame-coloured
+    pixels, and device **row 0, row 1439, column 0 and column 2559 are frame-coloured across their
+    whole length** — the paint really is flush against all four physical edges.
+  - re-enabled: back to **zero**.
+  The surfaces measured 7 logical px there (scale 1) and 8 logical px on eDP-1 (scale 1.25) — the
+  snapping, live. The same 8-logical-px surface at scale 1.25 was measured earlier the same day
+  with a completely black capture (every band mean exactly 0, zero frame-coloured pixels), while a
+  7-logical-px one leaked 2576 pixels; a fresh capture-side control on eDP-1 was not possible
+  because its armed workspace held a FULLSCREEN window, whose own exclusion box blacks the entire
+  capture (it is drawn after the layer rects, so it covers the frame too — a stronger result, but
+  not a discriminating one). Earlier rounds' numbers, for the record: round 4's inner-edge hairline
+  read 0.0527 in the top band, and round 4b's first attempt left device row 1599 and column 2559
+  frame-coloured. The bar (and any other unblanked layer) is visible in a capture as always; only
+  windows on the armed workspace and the frame's own surfaces are blacked.
 - **Presentation only.** The reminder shares the observer's race and its `kind == 1` filter; a
   missed event costs the cue, never protection. Since round 3 it also lags the *end* of a share by
   up to `LOCK_SHARE_GRACE_MS` (3 s) — same reasoning: the cue may linger, never under-report.
@@ -588,21 +602,24 @@ Two facts killed the border approach:
   after the full `LOCK_SHARE_GRACE_MS` (checked at grace − 1 ms and at grace); a true edge inside
   the window cancels the pending timer for good; a sync publishes nothing at all. The suite reads
   `LOCK_SHARE_GRACE_MS` out of the same rendered chunk file rather than copying the number.
-  Tier 1: the four pure functions, including the special-closed payload falling back to the active
-  workspace, a malformed monitor object, and `rgba(ff444480)` → `#80ff4444`. UI
+  Tier 1: the five pure functions, including the special-closed payload falling back to the active
+  workspace, a malformed monitor object, `rgba(ff444480)` → `#80ff4444`, and
+  `lockFrameSurfaceSize` over the scales that matter (1, 1.25, 1.5, 2 and the awkward 1.2 / 1.6 /
+  rounded thirds, plus `NaN` and `0` degrading to `thickness + 1`). UI
   (`tests/ui/lock.qml`): the frame appears only while sharing an armed workspace, stays hidden for
   an unarmed workspace on the same monitor (positive control: the monitor switches to it), follows
   an open special workspace and drops when `activespecialv2>>,,TEST` closes it, takes its
   thickness and colour from non-default config values, disappears at `lockBorderSize: 0`, and a
   `workspacev2` raw event refreshes the monitor snapshot exactly once while an unrelated event
   does not. The fixture resolves the strips' layer-shell anchors into real geometry keyed to the
-  exact anchor set and to the outset line, so changing which edges a strip is anchored to — or
-  dropping the outset — fails `prepare.py` loudly instead of leaving a strip the geometry
-  assertions would pass on.
-  Round 4b adds: every strip's surface is `size + 1` with its paint at `size`, sitting at the START
-  of the surface (the paint's offset inside the surface is asserted on all four strips, so a paint
-  pushed to the far end — the leak measured mid-round — fails); a monitor object REPLACED behind
-  the same screen — swapped without notifying, the way
+  exact anchor set, the `implicit*` surface line and the paint's own anchors and margins, so
+  changing any of them fails `prepare.py` loudly instead of leaving a strip the geometry assertions
+  would pass on.
+  Round 4b adds: at stub scale 1.25 a 6 px paint gets 8 px surfaces on all four strips with the
+  paint flush to each screen edge (top `y = 0`, bottom `y = 2`, left `x = 0`, right `x = 2`, and
+  the top paint inset by 6 on both sides), while at stub scale 1 the same config gets the smallest
+  7 px surfaces — so neither the snapping nor the flush paint can regress unnoticed; a monitor
+  object REPLACED behind the same screen — swapped without notifying, the way
   `monitorFor()` behaves — is picked up after a refresh event. Lua: an install over a round-3
   `_G.omyview_lock` disables its `L.borders` rules and drops the table (and survives a handle
   whose `set_enabled` throws); an install where both the layer rule and the filesystem step fail

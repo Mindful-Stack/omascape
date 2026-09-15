@@ -1068,4 +1068,24 @@ TestCase {
         compare(Logic.lockColorToQml(undefined), "#ff4444")
         compare(Logic.lockColorToQml("#ff4444"), "#ff4444", "already-QML input is not accepted, but degrades to the default")
     }
+    // A frame strip's surface must land on WHOLE device pixels, or the `no_screen_share` blanking
+    // box — floored origin, truncated size — misses one device line of it and the frame leaks into
+    // the capture. This picks the smallest surface at least one logical px thicker than the paint
+    // whose device size is integral. Distinguishes: no snapping at all (always thickness + 1, which
+    // is 8.75 device px at scale 1.25), a search that stops at the first candidate without checking
+    // the product, and one that never gives up (an irrational-ish scale must fall back rather than
+    // grow the frame without bound).
+    function test_lockFrameSurfaceSize() {
+        compare(Logic.lockFrameSurfaceSize(6, 1.25), 8, "7*1.25 = 8.75 is fractional; 8*1.25 = 10 is not")
+        compare(Logic.lockFrameSurfaceSize(6, 1), 7, "scale 1: thickness + 1 is already whole")
+        compare(Logic.lockFrameSurfaceSize(6, 1.5), 8, "7*1.5 = 10.5 fractional, 8*1.5 = 12 whole")
+        compare(Logic.lockFrameSurfaceSize(6, 2), 7, "any integer scale takes the smallest surface")
+        compare(Logic.lockFrameSurfaceSize(7, 1.25), 8, "the search starts at thickness + 1, not at a fixed size")
+        compare(Logic.lockFrameSurfaceSize(6, 1.2), 10, "needs 4 more px than the minimum")
+        compare(Logic.lockFrameSurfaceSize(6, 1.6), 10)
+        compare(Logic.lockFrameSurfaceSize(6, 1.666667), 9, "a rounded 5/3 counts as whole within the tolerance")
+        compare(Logic.lockFrameSurfaceSize(6, 1.333333), 9, "same for a rounded 4/3")
+        compare(Logic.lockFrameSurfaceSize(6, NaN), 7, "a nonsense scale degrades to thickness + 1")
+        compare(Logic.lockFrameSurfaceSize(6, 0), 7, "and so does a zero scale, which would divide the world by zero")
+    }
 }
