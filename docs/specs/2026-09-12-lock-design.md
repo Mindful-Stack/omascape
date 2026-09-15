@@ -148,6 +148,10 @@ if not L then
   _G.omyview_lock = L
 end
 if L.effective == nil then L.effective = L.sharing > 0 end   -- an _G table from a pre-hysteresis build
+if L.borders then                                            -- round-3 leftovers: window-border rules
+  for _, r in pairs(L.borders) do pcall(function() r:set_enabled(false) end) end
+  L.borders = nil                                            -- this API cannot remove a rule, only disable it
+end
 function L.ensureDir()                                         -- probe first; called on EVERY install, see below
   local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end
   local dir = base .. "/omyview"
@@ -509,6 +513,13 @@ Two facts killed the border approach:
   rule AND the filesystem step both fail, the install reports the filesystem one: a failed layer
   rule costs the cue's blanking, a failed publish costs share DETECTION, so the frame never appears
   at all.
+- **Upgrading off round 3 (round 4b).** A compositor that has been running since round 3 still
+  holds `_G.omyview_lock.borders`, a table of `omyview-lock-border-<sel>` window rules that may
+  still be enabled and that nothing in round 4 touches. Since this Lua API can disable a rule but
+  never remove one, they would keep rimming every window on an armed workspace until the user's
+  next config reload — round 4's live check had to run `hyprctl reload` by hand for exactly this.
+  The install now disables each one (guarded individually: a dead handle must not abort the
+  install) and drops the table, so the sweep happens once.
 - **When it shows.** A monitor's frame is visible iff `locks.sharing` **and** the workspace that
   monitor is currently SHOWING is armed. "Shown" is the monitor's special workspace when one is
   open (`lastIpcObject.specialWorkspace.name`, e.g. `special:scratchpad`), else its active

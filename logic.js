@@ -1014,6 +1014,17 @@ function lockInstallLua() {
         // pre-hysteresis build starts out agreeing with whatever is actually running, and a later
         // re-install never resets a live `false` grace decision back to `true`.
         '    if L.effective == nil then L.effective = L.sharing > 0 end\n' +
+        // Upgrade off round 3: a compositor that has been running since then still holds an
+        // `L.borders` table of `omyview-lock-border-<sel>` window rules — possibly enabled — that
+        // nothing in round 4 touches any more. This Lua API can disable a rule but never remove
+        // one, so without this sweep those rims would keep colouring every window on an armed
+        // workspace until the user's next config reload. Disabled once (each guarded on its own:
+        // a dead handle must not abort the install) and the table dropped, so a later install has
+        // nothing left to do.
+        '    if L.borders then\n' +
+        '      for _, r in pairs(L.borders) do pcall(function() r:set_enabled(false) end) end\n' +
+        '      L.borders = nil\n' +
+        '    end\n' +
         '    function L.ensureDir()\n' +
         '      local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end\n' +
         '      local dir = base .. "/omyview"\n' +

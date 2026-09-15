@@ -28,6 +28,13 @@ local function run(name, hl)
   assert(type(fn) == "function", name .. " must evaluate to a function")
   fn()
 end
+-- The private `_G` a chunk will see, materialised BEFORE the first run: lets a case seed the
+-- compositor state an older build left behind (`_G.omyview_lock` from round 3) and then install
+-- over it, which is the upgrade path itself — not something a run can be made to produce.
+local function globals(hl)
+  hl.__env = hl.__env or envFor(hl)
+  return hl.__env._G
+end
 
 local failures = 0
 local function case(label, f)
@@ -375,6 +382,43 @@ case("a failing layer rule is reported but leaves the observer and the publish i
   run("LOCK_INSTALL", hl)
   eq(Mock.layerRuleNamed(hl, "omyview-lockframe") ~= nil, true, "the next install retries it")
   eq(#hl.__notifications, 1, "the clean retry reports nothing new")
+end)
+-- Round 4b, the upgrade path off round 3. A compositor still holding a ROUND-3 `_G.omyview_lock`
+-- has an `L.borders` table of `omyview-lock-border-*` window rules, possibly enabled, that round
+-- 4's code never touches: this Hyprland Lua API can disable a rule but never remove one, so those
+-- rims would keep colouring every window on an armed workspace until the user's next config
+-- reload (which is exactly what round 4's live check had to do by hand). The install disables them
+-- once and drops the table.
+-- Distinguishes: an install that ignores the leftover table (the stale rims survive), and one that
+-- drops the table without disabling the rules first (same rims, minus the handles to fix them).
+case("install disables and forgets a round-3 border rule table", function()
+  local hl = Mock.new({})
+  local stale = hl.window_rule({ name = "omyview-lock-border-3", match = { workspace = "3" },
+                                 border_color = "rgb(ff4444)", border_size = 6, enabled = true })
+  eq(stale:is_enabled(), true, "the leftover starts enabled (so the check below is not vacuous)")
+  local G = globals(hl)
+  G.omyview_lock = { rules = {}, sharing = 0, effective = false, grace = nil, sub = nil,
+                     subVer = nil, dir = nil, borders = { ["3"] = stale },
+                     borderCfg = { color = "rgb(ff4444)", size = 6 } }
+  run("LOCK_INSTALL", hl)
+  eq(stale:is_enabled(), false, "the round-3 rim is switched off")
+  eq(G.omyview_lock.borders, nil, "and the table is gone, so the sweep happens once")
+  eq(#hl.__notifications, 0, "a clean upgrade reports nothing")
+  eq(state(hl), "0", "the install still completed")
+end)
+-- Distinguishes: a stale handle whose set_enabled throws aborting the whole install — the share
+-- observer and the layer rule would never be installed on that upgrade.
+case("a stale border rule that cannot be disabled does not break the install", function()
+  local hl = Mock.new({})
+  local stale = hl.window_rule({ name = "omyview-lock-border-3", match = { workspace = "3" }, enabled = true })
+  local G = globals(hl)
+  G.omyview_lock = { rules = {}, sharing = 0, effective = false, borders = { ["3"] = stale } }
+  hl.__fail_on = "rule.set_enabled"
+  run("LOCK_INSTALL", hl)
+  hl.__fail_on = nil
+  eq(G.omyview_lock.borders, nil, "dropped anyway: nothing else can reach that handle")
+  eq(#hl.__subs, 1, "the share observer was still installed")
+  eq(state(hl), "0", "and the state file published")
 end)
 -- Round 4b review fix: when BOTH the layer rule and the filesystem step fail, the install has one
 -- `ok, err` to report and must spend it on the FILESYSTEM. A failed layer rule costs the local
