@@ -8,6 +8,8 @@ workspace, or **drag a window onto another workspace** to move it there.
 Built to replace the dead `walker`-based `workspace-picker.sh` after Omarchy Quattro
 removed `walker`.
 
+![Omyview open over omarchy.org: two monitor groups, live thumbnails of every window](preview.png)
+
 ## Features
 
 - **Live window previews.** Each window is a real, live thumbnail of its contents (via
@@ -57,6 +59,34 @@ removed `walker`.
 - **Zero idle cost.** The component stays loaded with the shell so open and close can animate,
   but nothing runs until you summon it: captures start when the surface is mapped and stop when
   it hides (only the config-file watcher and one `hyprctl` probe at startup run before that).
+
+---
+
+## Screenshots
+
+**Drag a window to another workspace.** The tile follows the cursor and the target box lights
+up; dropping moves the window silently, the overview stays open.
+
+![A window tile mid-drag, hovering another workspace box](docs/screenshots/drag.webp)
+
+**Type to find.** `slack` matched two windows: they ring in the accent colour, everything else
+dims, and the bar counts the matches.
+
+![Find bar with the query "slack", two matching windows ringed](docs/screenshots/find.webp)
+
+**Scratchpad row.** `Ctrl+S` shows Omarchy's scratchpad below the workspaces; drop a window on
+it to send it there.
+
+![The scratchpad row shown under the workspace grid](docs/screenshots/scratchpad.webp)
+
+**Lock for screen sharing.** Armed workspaces carry a lock badge and show icons instead of
+thumbnails; their windows are black in every capture.
+
+![Five workspaces armed with the lock badge](docs/screenshots/lock.webp)
+
+**Follows your theme.** Rosé Pine, Osaka Jade and Matte Black, no configuration.
+
+![The overview under three Omarchy themes](docs/screenshots/themes.webp)
 
 ---
 
