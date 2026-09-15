@@ -11,10 +11,13 @@ QtObject {
     property bool hint: true         // key hints under the workspace grid
     property int workspaces: 10      // always show ids 1..N, even ones Hyprland has not created; 0 = off
     property string motion: "auto"   // "auto" follows Hyprland animations:enabled; "full" | "off"
-    // Share-time reminder border (docs/specs/2026-09-12-lock-design.md, addendum): local-only
-    // cue on an armed workspace's windows while a share is active. `lockBorder` accepts only the
-    // `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms (Logic.parseConfig); anything else falls back to
-    // the default. `lockBorderSize` 0 keeps the user's own border size (no `border_size` field).
+    // Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum): the local-only
+    // frame omyview draws around a monitor that is SHOWING an armed workspace while a share is
+    // running (LockFrame.qml — four layer-shell strips, blanked in every capture). `lockBorder`
+    // accepts only the `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms (Logic.parseConfig); anything
+    // else falls back to the default. `lockBorderSize` is the strip thickness in px;
+    // 0 turns the reminder off. The key names predate round 4's switch from window borders to
+    // the frame and are kept so existing config files keep working.
     property string lockBorder: "rgb(ff4444)"
     property int lockBorderSize: 6
 

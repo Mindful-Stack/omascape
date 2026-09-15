@@ -558,18 +558,28 @@ Two facts killed the border approach:
   the frame binds to both directly, so no `lockSync()` round trip through the compositor is
   involved any more; the round-2 `onLockBorderChanged`/`onLockBorderSizeChanged` handlers are gone.
 - **What a viewer sees.** Effectively a black screen on an armed workspace: the exclusion box with
-  the frame strips blacked out by the layer rule. Live-measured 2026-09-14 (eDP-1, 2560x1600 at
-  scale 1.25, `lockBorderSize: 6`, OBS capturing): whole-monitor mean brightness **0.00238**, and
-  the strips' own bands read 0.0527 (top), 0.0525 (bottom), 0.00086 (left), 0.00109 (right) —
-  because the blanking rect covers whole device pixels and 6 logical px at scale 1.25 is 7.5 of
-  them: a **one-device-pixel hairline** of the frame colour survives at each strip's inner edge
-  (row 7 across the width, row 1599, and short segments of columns 7 / 2552 within the bar's
-  band). It is the same class of leak round 3 accepted for the window rims, and it discloses
-  nothing: the audience learns the frame exists, never what is behind it. A frame thickness whose
-  device size is a whole number (e.g. 4 or 8 at scale 1.25) should avoid it; not probed, because
-  the user took the machine back mid-check. Note that the bar (and any other unblanked layer) is
-  visible in the capture as always — only windows on the armed workspace and the frame's own
-  surfaces are blacked.
+  the frame strips blacked out by the layer rule. Re-measured 2026-09-15 with the one-pixel outset
+  (eDP-1, 2560x1600 at scale 1.25, share triggered by `grim` itself — the first capture flips the
+  state file, the second one 1 s later sees the frame):
+  - `lockBorderSize: 6` (surface 7 logical px = 8.75 device px): whole-monitor mean **0.00211**;
+    bands 0.0224 (top, almost all of it the unblanked bar), 0.0420 (bottom), 0.00038 (left),
+    0.00106 (right). A scan for frame-coloured pixels (R ≥ 180, G/B ≤ 130) finds **2576**, all of
+    them on the two outermost lines: device row 1599 (x 8…2559) and device column 2559 (rows
+    0…31, the only part of that column not already blacked by a window's exclusion box). The
+    **inner-edge hairline round 4 measured is gone** — rows 0…7 and columns 0…11 are pure black.
+  - `lockBorderSize: 7` (surface 8 logical px = **10.0** device px): every band mean exactly
+    **0**, whole-monitor 0.00170, and **zero** frame-coloured pixels anywhere.
+  So the outset fixes the inner edge at any scale, but a strip anchored to the bottom or right
+  edge still loses its last device pixel whenever its surface's device size is fractional:
+  `ScreenshareFrame.cpp` builds the blanking box from the layer's logical position and size scaled
+  by the monitor scale, and rasterising that float box drops the far edge (measured: the blanked
+  box covered device rows 1591…1598 of a strip painted over 1592…1599). Neither more outset nor a
+  thicker strip helps — only a whole-number device size does, so the fix is a `lockBorderSize`
+  where `(size + 1) × scale` is an integer (a `size + 1` that is a multiple of 4 covers every
+  0.25 scale step). Documented in the README; the default stays 6, and what leaks discloses
+  nothing — the audience learns the frame exists, never what is behind it. The bar (and any other
+  unblanked layer) is visible in the capture as always; only windows on the armed workspace and
+  the frame's own surfaces are blacked.
 - **Presentation only.** The reminder shares the observer's race and its `kind == 1` filter; a
   missed event costs the cue, never protection. Since round 3 it also lags the *end* of a share by
   up to `LOCK_SHARE_GRACE_MS` (3 s) — same reasoning: the cue may linger, never under-report.
@@ -590,8 +600,16 @@ Two facts killed the border approach:
   thickness and colour from non-default config values, disappears at `lockBorderSize: 0`, and a
   `workspacev2` raw event refreshes the monitor snapshot exactly once while an unrelated event
   does not. The fixture resolves the strips' layer-shell anchors into real geometry keyed to the
-  exact anchor set, so changing which edges a strip is anchored to fails `prepare.py` loudly
-  instead of leaving a zero-sized strip for the geometry assertions to pass on.
+  exact anchor set and to the outset line, so changing which edges a strip is anchored to — or
+  dropping the outset — fails `prepare.py` loudly instead of leaving a strip the geometry
+  assertions would pass on.
+  Round 4b adds: every strip's surface is `size + 1` with its paint at `size`, anchored to the
+  outward edge (the paint's offset inside the surface is asserted, so an outset on the wrong side
+  fails); a monitor object REPLACED behind the same screen — swapped without notifying, the way
+  `monitorFor()` behaves — is picked up after a refresh event. Lua: an install over a round-3
+  `_G.omyview_lock` disables its `L.borders` rules and drops the table (and survives a handle
+  whose `set_enabled` throws); an install where both the layer rule and the filesystem step fail
+  reports the filesystem one, while each still reports when it fails alone.
 
 ## Edge cases
 
