@@ -8,6 +8,8 @@ workspace, or **drag a window onto another workspace** to move it there.
 Built to replace the dead `walker`-based `workspace-picker.sh` after Omarchy Quattro
 removed `walker`.
 
+![Omyview open over omarchy.org: two monitor groups, live thumbnails of every window](preview.webp)
+
 ## Features
 
 - **Live window previews.** Each window is a real, live thumbnail of its contents (via
@@ -59,6 +61,35 @@ removed `walker`.
 - **Zero idle cost.** The component stays loaded with the shell so open and close can animate,
   but nothing runs until you summon it: captures start when the surface is mapped and stop when
   it hides (only the config-file watcher and one `hyprctl` probe at startup run before that).
+
+---
+
+## Screenshots
+
+**Drag a window to another workspace.** The tile follows the cursor and the target box lights
+up; dropping moves the window silently, the overview stays open.
+
+![A window tile mid-drag, hovering another workspace box](docs/screenshots/drag.webp)
+
+**Type to find.** `slack` matched two windows: they ring in the accent colour, everything else
+dims, and the bar counts the matches.
+
+![Find bar with the query "slack", two matching windows ringed](docs/screenshots/find.webp)
+
+**Scratchpad row.** `Ctrl+S` shows Omarchy's scratchpad below the workspaces; drop a window on
+it to send it there.
+
+![The scratchpad row shown under the workspace grid](docs/screenshots/scratchpad.webp)
+
+**Lock for screen sharing.** Armed workspaces carry a lock badge; their windows are black in
+every capture, and while a capture is running (here: the screenshot itself) the box shows a lock
+instead of its windows.
+
+![Five workspaces armed with the lock badge](docs/screenshots/lock.webp)
+
+**Follows your theme.** Tokyo Night, Rosé Pine, Osaka Jade and Matte Black, no configuration.
+
+![The overview under four Omarchy themes](docs/screenshots/themes.webp)
 
 ---
 
@@ -158,6 +189,35 @@ omarchy plugin remove se.mindfulstack.omyview
 ```
 
 …then delete the SUPER+P bind you added and `hyprctl reload`.
+
+### What it touches on your system
+
+Omyview never edits your Hyprland or Omarchy configuration. Everything it writes is its own:
+
+- `~/.config/omarchy/omyview.json` — **read only**, never created. Your optional settings (see
+  Configuration).
+- `~/.config/omarchy/omyview-locks.json` — written when you arm or disarm a workspace with
+  `Ctrl+L`. Holds the set of armed workspaces so it survives a shell restart.
+- `$XDG_RUNTIME_DIR/omyview/share-state` — a one-character file (`0` or `1`) the compositor-side
+  observer writes at shell start and whenever a screen share starts or stops, via a temporary
+  file next to it that is renamed into place (plus a short-lived probe file when the directory
+  is checked). Gone at logout.
+- **Runtime Hyprland rules** — omyview talks to Hyprland over its IPC socket with the same Lua
+  API your `hyprland.lua` uses. At shell start it installs a share observer (the thing that
+  writes `share-state`) and a `no_screen_share` layer rule for its own reminder frame; when you
+  arm a workspace it adds a `no_screen_share` window rule for that workspace. All of this lives
+  in the running compositor only: disarming disables the workspace rule, `hyprctl reload` drops
+  everything and omyview re-installs what is still armed, and nothing is ever written to a config
+  file.
+
+`omarchy plugin remove se.mindfulstack.omyview` deletes the plugin directory. Delete the two
+files above yourself if you want no trace left.
+
+### Dependencies
+
+Nothing beyond a stock Omarchy Quattro install: Quickshell (`omarchy-shell`), Hyprland with Lua
+configuration, `hyprctl` (one probe at startup), and `sh` + `mkdir` (run once from the compositor
+to create the runtime directory). No packages are installed and nothing is downloaded at runtime.
 
 ### Troubleshooting
 
@@ -263,17 +323,26 @@ Contributions are welcome — bug reports, fixes, and the roadmap items in `ROAD
 
 ### Project layout
 
-| File          | What it is                                                        |
-| ------------- | ----------------------------------------------------------------- |
-| `manifest.json` | Omarchy plugin manifest (id, kind, entry point). Schema v1.     |
-| `Overview.qml`  | The whole plugin — a single QML component (the overlay).        |
-| `DESIGN.md`     | What it does and why (the v1 design).                           |
-| `PLAN.md`       | How it was built, task by task, with the verified gotchas.      |
-| `ROADMAP.md`    | What's next (docked verification, both-screens dimming, thumbs).|
+| File / dir          | What it is                                                              |
+| ------------------- | ----------------------------------------------------------------------- |
+| `manifest.json`     | Omarchy plugin manifest (id, kind, entry point). Schema v1.             |
+| `Overview.qml`      | The overlay: layout, input, drag-and-drop, animation.                   |
+| `WindowTile.qml`    | One window thumbnail (live capture or icon fallback).                    |
+| `FindBar.qml`       | The type-to-find query bar.                                             |
+| `LockFrame.qml`     | The share-time reminder frame around a monitor with an armed workspace. |
+| `OmyviewConfig.qml` | Reads and watches `~/.config/omarchy/omyview.json`.                     |
+| `OmyviewLocks.qml`  | Armed-workspace state, the share observer and the runtime rules.        |
+| `SoftShadow.qml`    | Shadow under floating tiles.                                            |
+| `logic.js`          | Pure logic: geometry, reconcile, Lua chunk generation. Unit-tested.     |
+| `tests/`            | Tier 1 logic + UI tests (`mise run test`), Lua chunk suite, integration. |
+| `DESIGN.md`         | What it does and why.                                                   |
+| `docs/specs/`       | One design doc per feature (find, scratchpad, lock, …).                 |
+| `ROADMAP.md`        | What's next.                                                            |
+| `PLAN.md`           | The v1 build log, with the verified gotchas.                            |
 
 If you're new to Quickshell/QML: it's Qt Quick (declarative UI, JavaScript for logic). You
-don't need to know it deeply — `Overview.qml` is self-contained and commented, and the shell
-APIs it uses (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inline in
+don't need to know it deeply — the QML files are commented, and the shell
+APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inline in
 `DESIGN.md`.
 
 ### Local development loop
