@@ -47,10 +47,7 @@ removed `walker`.
   you don't want seen. While a share is running, any monitor showing an armed workspace gets a
   thin coloured frame around its edges as a local reminder (`lockBorder`/`lockBorderSize` below) —
   that frame is for you only: it is blanked in every capture, so a viewer just sees the plain
-  black box and never your windows (on a fractionally scaled monitor the single outermost pixel
-  row along the bottom and right screen edges can still carry the frame colour — it shows that a
-  frame is there, nothing behind it; see `lockBorderSize` for the sizes that avoid even that).
-  It follows whatever that monitor is showing,
+  black box and never your windows. It follows whatever that monitor is showing,
   the scratchpad included, and it is click-through and reserves no space. The frame (and the
   placeholder in the overview) can lag a few seconds behind the end of a share: the compositor
   signals sharing per captured frame, so omyview waits out a short grace period before believing a
@@ -203,12 +200,9 @@ Optional user settings live in `~/.config/omarchy/omyview.json` (watched; edits 
   `rgba(...)` is honoured, so e.g. `"rgba(ff444480)"` is a half-transparent red.
 - `lockBorderSize` — thickness of that frame in pixels, `0`–`20` (default `6`); `0` turns the
   reminder off. The frame is a local reminder only — it is blanked in every capture, so a viewer
-  sees a plain black box and never your windows. The blanking works in whole *device* pixels,
-  which on a fractionally scaled monitor can leave the outermost row/column at the bottom and
-  right screen edges showing the frame colour. Pick a size where `(lockBorderSize + 1) × scale`
-  is a whole number and nothing survives at all — at scale 1.25, `7` measured completely black
-  while `6` left that single row and column. A `lockBorderSize + 1` that is a multiple of 4
-  (`3`, `7`, `11`, `15`, `19`) is whole at every 0.25 scale step.
+  sees a plain black box, never your windows and never the frame. Along the bottom and right
+  screen edges the frame stops one pixel short of the physical edge, which is what keeps it out
+  of the capture on fractionally scaled monitors.
 
 ### Blurred scrim (optional, Hyprland side)
 

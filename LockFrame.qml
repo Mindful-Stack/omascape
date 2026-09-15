@@ -23,16 +23,23 @@ import "logic.js" as Logic
 // so every corner is painted exactly once (a doubled corner would read darker on a translucent
 // colour).
 //
-// Each strip's SURFACE is one logical pixel thicker than its PAINT, with the extra pixel on the
-// inner side (the paint hugs the screen edge). The blanking box a `no_screen_share` layer draws
-// covers whole DEVICE pixels, so a surface sized exactly like the paint leaks on a fractionally
-// scaled monitor: at scale 1.25 a thickness of 6 is 7.5 device px, the blanking truncates to 7 and
-// the paint covers 8 — the one-device-pixel hairline round 4's capture measured (top band mean
-// 0.0527). With the outset, at any scale s ≥ 1 the blanked box spans at least floor((t+1)·s) ≥
-// ceil(t·s) device px from the edge while the paint covers at most ceil(t·s), so the paint is
-// strictly inside the blanked box however the rounding falls. The thickness itself is NOT snapped
-// to whole device pixels: `implicitHeight`/`implicitWidth` are logical ints, which cannot express
-// e.g. 6.4, and rounding it would silently change the size the user configured.
+// Each strip's SURFACE is one logical pixel thicker than its PAINT, and the paint occupies the
+// FIRST `thickness` px of that surface — the spare pixel is always the last one. The blanking box
+// a `no_screen_share` layer draws (ScreenshareFrame.cpp scales the layer's logical position and
+// size by the monitor scale) is rasterised in whole DEVICE pixels with its origin floored and its
+// size truncated: it covers [floor(start), floor(start) + floor(size)). So a surface's first device
+// pixel is always blanked and its last one is not, whenever the device size is fractional — at
+// scale 1.25 a thickness of 6 is 7.5 device px. Painting first-pixels-in therefore keeps every
+// painted pixel inside the blanked box at any scale; painting to the far end is what leaked one
+// device row/column in round 4 (inner edge, top band mean 0.0527) and again at the outer edge in
+// round 4b's first measurement.
+// For the top/left strips "first" IS the screen edge. The bottom/right surfaces run the other way,
+// so their paint stops ONE LOGICAL PX SHORT of the physical edge — invisible in practice (that is
+// where the bezel is) and the price of a capture that is black everywhere. Measured clean on all
+// four edges at scale 1.25 with lockBorderSize 6 (2026-09-15).
+// The thickness itself is NOT snapped to whole device pixels: `implicitHeight`/`implicitWidth` are
+// logical ints, which cannot express e.g. 6.4, and rounding would silently change the configured
+// size.
 
 Scope {
     id: frame
@@ -89,7 +96,7 @@ Scope {
         implicitHeight: frame.thickness + 1
         Rectangle {
             objectName: "lockFrameFill"; color: frame.frameColor
-            anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+            anchors { top: parent.top; left: parent.left; right: parent.right }
             height: frame.thickness
         }
     }
@@ -127,7 +134,7 @@ Scope {
         implicitWidth: frame.thickness + 1
         Rectangle {
             objectName: "lockFrameFill"; color: frame.frameColor
-            anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
             width: frame.thickness
         }
     }
