@@ -79,8 +79,9 @@ it to send it there.
 
 ![The scratchpad row shown under the workspace grid](docs/screenshots/scratchpad.webp)
 
-**Lock for screen sharing.** Armed workspaces carry a lock badge and show icons instead of
-thumbnails; their windows are black in every capture.
+**Lock for screen sharing.** Armed workspaces carry a lock badge; their windows are black in
+every capture, and while a capture is running (here: the screenshot itself) the box shows a lock
+instead of its windows.
 
 ![Five workspaces armed with the lock badge](docs/screenshots/lock.webp)
 
@@ -195,13 +196,17 @@ Omyview never edits your Hyprland or Omarchy configuration. Everything it writes
   Configuration).
 - `~/.config/omarchy/omyview-locks.json` — written when you arm or disarm a workspace with
   `Ctrl+L`. Holds the set of armed workspaces so it survives a shell restart.
-- `$XDG_RUNTIME_DIR/omyview/share-state` — a one-character file the compositor-side observer
-  writes while a screen share starts and stops. Gone at logout.
-- **Runtime Hyprland rules** — when a workspace is armed, omyview asks Hyprland (over its IPC
-  socket, with the same Lua API your `hyprland.lua` uses) for a `no_screen_share` window rule on
-  that workspace, plus a layer rule for its own reminder frame and a share-state observer. These
-  live in the running compositor only: disarming disables the rule, `hyprctl reload` clears them
-  all, and nothing is ever written to a config file.
+- `$XDG_RUNTIME_DIR/omyview/share-state` — a one-character file (`0` or `1`) the compositor-side
+  observer writes at shell start and whenever a screen share starts or stops, via a temporary
+  file next to it that is renamed into place (plus a short-lived probe file when the directory
+  is checked). Gone at logout.
+- **Runtime Hyprland rules** — omyview talks to Hyprland over its IPC socket with the same Lua
+  API your `hyprland.lua` uses. At shell start it installs a share observer (the thing that
+  writes `share-state`) and a `no_screen_share` layer rule for its own reminder frame; when you
+  arm a workspace it adds a `no_screen_share` window rule for that workspace. All of this lives
+  in the running compositor only: disarming disables the workspace rule, `hyprctl reload` drops
+  everything and omyview re-installs what is still armed, and nothing is ever written to a config
+  file.
 
 `omarchy plugin remove se.mindfulstack.omyview` deletes the plugin directory. Delete the two
 files above yourself if you want no trace left.
@@ -209,7 +214,8 @@ files above yourself if you want no trace left.
 ### Dependencies
 
 Nothing beyond a stock Omarchy Quattro install: Quickshell (`omarchy-shell`), Hyprland with Lua
-configuration, and `hyprctl`. No packages are installed and nothing is downloaded at runtime.
+configuration, `hyprctl` (one probe at startup), and `sh` + `mkdir` (run once from the compositor
+to create the runtime directory). No packages are installed and nothing is downloaded at runtime.
 
 ### Troubleshooting
 
