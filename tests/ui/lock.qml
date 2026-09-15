@@ -465,6 +465,33 @@ TestCase {
         compare(view.compositor.monitorRefreshes, before + 1, "an unrelated event does not")
     }
 
+    // `Hyprland.monitorFor(screen)` is a ONE-SHOT binding: nothing about a `HyprlandMonitor`
+    // object tells QML when Hyprland replaces it. It can be recreated for the same screen without
+    // `Quickshell.screens` changing (a monitor reconfigure across `configreloaded`), and the
+    // frame's pointer then goes stale — or null — leaving that screen's frame hidden for good.
+    // `monitorEpoch`, bumped wherever the snapshot is refreshed, is what re-resolves it.
+    // Distinguishes: the plain one-shot binding, which keeps reading the object it resolved at
+    // creation and never sees the replacement.
+    function test_frame_follows_a_monitor_object_replaced_behind_the_same_screen() {
+        keyClick(Qt.Key_Right)                         // select ws 2
+        compare(view.selectedId, 2)
+        ctrlL()                                        // arm ws 2; the monitor still shows ws 1
+        view.testLocks.setSharing(true)
+        compare(strip("lockFrameTop").visible, false, "ws 2 armed, ws 1 shown")
+        // A NEW monitor object for the same screen name, showing the armed workspace — what a
+        // reconfigure hands back from `monitorFor()`. The old object is left as it was, so a frame
+        // still bound to it cannot pass this. The list is mutated IN PLACE rather than reassigned,
+        // so nothing in the stub notifies: the real `Hyprland.monitorFor()` is a C++ invokable
+        // whose result is a plain one-shot value, and an assignment here would re-evaluate the
+        // binding by itself and hide the very staleness this test is about.
+        var fresh = createTemporaryObject(monitorStub, tc)
+        fresh.lastIpcObject = ipc(2, "")
+        view.compositor.monitors.values = [fresh]
+        view.compositor.rawEvent({ name: "workspacev2", data: "2,2" })
+        compare(strip("lockFrameTop").visible, true, "the frame picked up the replacement object")
+        compare(mon.lastIpcObject.activeWorkspace.id, 1, "the stale object never changed")
+    }
+
     function tileOf(addr) {
         var ch = view.testCanvas.children
         for (var i = 0; i < ch.length; i++) if (ch[i].model && ch[i].model.address === addr) return ch[i]

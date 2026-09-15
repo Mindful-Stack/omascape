@@ -521,6 +521,12 @@ Two facts killed the border approach:
   `monitorremovedv2` and `configreloaded`. Not the whole stream: a refresh is an IPC round trip,
   and a window title change cannot move a workspace between monitors. The frame re-evaluates on
   `locks.sharing` and `locks.armed` too, since it binds to both.
+  The same handler bumps `root.monitorEpoch`, and the per-screen binding reads it
+  (`monitor: (root.monitorEpoch, Hyprland.monitorFor(modelData))`). `monitorFor()` is a C++
+  invokable returning a one-shot value: nothing notifies QML when Hyprland REPLACES the
+  `HyprlandMonitor` object for a screen — which a monitor reconfigure across `configreloaded` does,
+  without `Quickshell.screens` changing — so without the epoch the binding would hold a stale (or
+  null) pointer and that screen's frame would stay hidden for good.
 - **Pure core** (`logic.js`, Tier 1 tested, no QML): `lockFrameShownSelector(mon)`,
   `lockFrameVisible(sharing, armed, mon)`, `lockFrameRefreshEvent(name)` and
   `lockColorToQml(hypr)`. The last converts the accepted `rgb(rrggbb)` / `rgba(rrggbbaa)` to

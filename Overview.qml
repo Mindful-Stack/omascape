@@ -99,6 +99,13 @@ Item {
     // (unlike the armed set, "still malformed" has no "unchanged" case to suppress it against).
     // Without this guard that would toast on every such echo, not just the first.
     property bool lockInvalidNotified: false
+    // Bumped wherever the monitor snapshots are refreshed, purely so the reminder frame's
+    // `Hyprland.monitorFor(screen)` binding re-resolves. That call is a C++ invokable returning a
+    // one-shot value: nothing notifies QML when Hyprland REPLACES the HyprlandMonitor object for a
+    // screen (a monitor reconfigure across `configreloaded` does exactly that, without
+    // `Quickshell.screens` changing), so the binding would keep a stale — or null — pointer and
+    // that screen's frame would stay hidden for good.
+    property int monitorEpoch: 0
     // Enforcement lives in the compositor; these keep it in step with the armed set. Install is
     // idempotent and cheap; sync is sent only once `armed` has resolved (never an unresolved set).
     function lockInstall() {
@@ -888,8 +895,12 @@ Item {
             // monitor SHOWS may have changed (Logic.lockFrameRefreshEvent) — deliberately not the
             // whole stream, since a refresh is an IPC round trip. Runs whether or not the overview
             // is open: the frame is a desktop cue, not part of the picker.
-            if (event && Logic.lockFrameRefreshEvent(event.name)
-                    && typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
+            if (event && Logic.lockFrameRefreshEvent(event.name)) {
+                if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
+                // Same events, second reason: `monitorFor()` may now answer with a DIFFERENT
+                // object for the same screen (see monitorEpoch).
+                root.monitorEpoch++
+            }
             if (root.opened) root.scheduleRebuild()
         }
     }
@@ -910,7 +921,9 @@ Item {
         LockFrame {
             required property var modelData
             frameScreen: modelData
-            monitor: Hyprland.monitorFor(modelData)
+            // The comma operator is the dependency: `monitorEpoch` is read (and so captured) on
+            // every evaluation, `monitorFor()`'s one-shot result is what the binding yields.
+            monitor: (root.monitorEpoch, Hyprland.monitorFor(modelData))
             sharing: locks.sharing
             armed: locks.armed
             frameColor: Logic.lockColorToQml(config.lockBorder)
