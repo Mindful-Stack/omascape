@@ -931,6 +931,35 @@ Item {
         }
     }
 
+    // Click-catcher for the OTHER screens: the overview is a single surface on the focused screen,
+    // so a click on another monitor would otherwise land on that monitor's windows and leave the
+    // overview open. One transparent overlay per non-target screen, only while opened; it swallows
+    // the click (the same as the outside-click on the overview's own screen does) and closes.
+    Variants {
+        model: Quickshell.screens
+        PanelWindow {
+            required property var modelData
+            objectName: "omyviewCatcher"
+            // Never on the target screen: it would sit above the card and eat every click meant
+            // for it. `targetScreen` is an element of `Quickshell.screens` (focusedScreen()), the
+            // same objects this model carries, so identity is the comparison.
+            visible: root.opened && modelData !== root.targetScreen
+            screen: modelData
+            anchors { top: true; bottom: true; left: true; right: true }
+            color: "transparent"
+            WlrLayershell.namespace: "omyview-catcher"
+            WlrLayershell.layer: WlrLayer.Overlay
+            // No keyboard interactivity at all: Hyprland only moves keyboard focus to a layer
+            // surface under the pointer when its interactivity is not `none`, so a focus-less
+            // catcher leaves the keys with the overview's own (OnDemand) surface however far the
+            // pointer wanders. It must NOT be Exclusive either — see the panel's keyboardFocus.
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+            exclusionMode: ExclusionMode.Ignore
+            // On PRESS, not click: a drag begun on another monitor must not leave the overview up.
+            MouseArea { anchors.fill: parent; onPressed: root.close() }
+        }
+    }
+
     PanelWindow {
         id: panel
         // Stays mapped through the exit fade (the pattern Omarchy's PopupCard uses); keyboard
@@ -941,7 +970,16 @@ Item {
         color: "transparent"
         WlrLayershell.namespace: "omyview"
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+        // OnDemand, not Exclusive. Hyprland 0.56 (InputManager.cpp, mouseMoveUnified: "forced above
+        // all") routes EVERY pointer event to the exclusive layer surfaces while any exists — and
+        // when the cursor is over none of them it hands the event to the first one anyway, at
+        // out-of-bounds coordinates. So with Exclusive, a click on another monitor never reached
+        // that monitor's catcher (nor its windows: the other screen went dead). An OnDemand overlay
+        // layer still grabs keyboard focus the moment it maps (LayerSurface.cpp, GRABSFOCUS) and
+        // keeps it while the pointer is over it or over a focus-less surface like the catcher
+        // (the refocus at mouseMoveUnified requires interactivity != none), so bare keys keep
+        // reaching keyCatcher, and pointer routing is the normal per-monitor hit test.
+        WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
         // Pointer input is released the moment `opened` drops, like keyboard focus: an empty
         // input region makes the fading surface click-through.
         mask: root.opened ? null : emptyRegion

@@ -31,10 +31,15 @@ jump to one — keyboard or mouse.
 
 - **Trigger:** SUPER+P **toggles** the overlay (open *and* close), via `omarchy-shell
   shell toggle`. Esc, a scrim click (outside the rows), and selecting a workspace also
-  close it. Verified 2026-09-06: the overlay uses *exclusive* keyboard focus so bare keys
-  (numbers/arrows/Esc) reach it, **and** Hyprland still processes the SUPER+P keybind over
-  that exclusive focus — so both coexist. (An earlier assumption that exclusive focus
-  would swallow SUPER+P was disproved by testing; no on-demand-focus change needed.)
+  close it. The overlay uses *on-demand* keyboard focus (changed from *exclusive* on
+  2026-09-15): an on-demand overlay layer grabs keyboard focus when it maps, so bare keys
+  (numbers/arrows/Esc) reach it, and Hyprland still processes the SUPER+P keybind over it.
+  Exclusive focus had a side effect Hyprland 0.56 documents in `InputManager.cpp`
+  ("forced above all"): while an exclusive layer exists, *every* pointer event on every
+  monitor is routed to the exclusive surfaces, and to the first one at out-of-bounds
+  coordinates when the cursor is over none — which is why a click on another monitor
+  used to do nothing and, with a catcher there, made that monitor dead instead of
+  closing the overview.
 - **Cells:** one per workspace. Windows drawn as a **spatial mini-map** — each window a
   rounded box at its real relative position/size with the app icon (title if it fits).
   Focused workspace = accent border; empty = dimmed. `special:scratchpad` is excluded by
@@ -79,12 +84,21 @@ jump to one — keyboard or mouse.
 - Surface = a `PanelWindow` (Quickshell.Wayland), **not** `Ui/Panel.qml` (that is only
   the IPC open/close lifecycle base). Mirror Clipboard's `PanelWindow`: fullscreen
   anchors, `color:"transparent"`, `WlrLayershell.layer: WlrLayer.Overlay`,
-  `WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive`, `exclusionMode: Ignore`,
+  `WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand` (see Behavior), `exclusionMode: Ignore`,
   a scrim `Rectangle` (`Color.menu.scrim`) + a scrim `MouseArea{onClicked: close()}`,
   and a focusable `keyCatcher` `Item{ focus:true; Keys.priority: BeforeItem }`.
 - Clipboard sets no `screen:`, so we must: set the `PanelWindow.screen` to the
   Quickshell screen whose `.name` matches `Hyprland.focusedMonitor.name`, resolved when
   opening.
+- Consequence of that single surface: the scrim `MouseArea` only ever sees clicks on the
+  overview's own monitor, so a click on any other monitor goes to the window under the
+  cursor there and leaves the overview up. Fixed with a second `Variants` over
+  `Quickshell.screens`: a transparent full-screen `PanelWindow` per screen, visible only
+  while `opened` and only where `modelData !== targetScreen`, `keyboardFocus: None` (Hyprland
+  only refocuses a layer under the pointer when its interactivity is not `none`, so the keys
+  stay with the overview's on-demand surface) and closing on **press**, so a drag begun on
+  another monitor cannot leave the overview open. Requires the overview's own surface to be
+  on-demand, not exclusive (see Behavior).
 - Window geometry (`toplevel.lastIpcObject.at/size/class`) can be **stale** — call
   `Hyprland.refreshToplevels()` on open and bind to the resulting updates.
 - Coordinates: window `at`/`size` are global **logical** px; monitor origin is

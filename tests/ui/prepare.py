@@ -8,16 +8,23 @@ import sys
 source, dest = map(Path, sys.argv[1:])
 
 
-def replaced(text, old, new, what):
-    """Substitute `old`, failing loudly when it is not there.
+def replaced(text, old, new, what, count=1):
+    """Substitute `old` exactly `count` times, failing loudly on any other number.
 
     Several of these substitutions stand in for the compositor (layer-shell anchors resolving to
     real geometry, Variants creating one delegate per screen). A silently missed replacement would
     leave the fixture with zero-sized or uninstantiated surfaces, which reads in the suite as
     "the feature is broken" — this says which line moved instead.
+
+    The count is part of that guard, not decoration: there are now two per-screen `Variants` blocks
+    (the lock frame and the click-catcher) and each is keyed on its own delegate type. Were a third
+    one to be added, or a delegate renamed, matching "somewhere" is no longer enough — a block
+    silently taking the other block's treatment is exactly the failure this catches.
     """
-    if old not in text:
-        raise SystemExit('prepare.py: %s no longer matches the source; update the fixture' % what)
+    hits = text.count(old)
+    if hits != count:
+        raise SystemExit('prepare.py: %s matches %d time(s), expected %d; update the fixture'
+                         % (what, hits, count))
     return text.replace(old, new)
 
 
@@ -29,17 +36,37 @@ qml = re.sub(r'Style\.font\.\w*Family', '"sans-serif"', qml)
 qml = re.sub(r'Style\.font\.\w+', '11', qml)
 qml = re.sub(r'Style\.space\((\d+)\)', r'\1', qml)
 qml = qml.replace('Hyprland.', 'compositor.').replace('target: Hyprland', 'target: compositor')
-# The share-time reminder frame's per-screen instantiation. Quickshell's `Variants` has no
-# offscreen equivalent; `Repeater` creates one delegate per array entry with the same `modelData`
-# injection, and the fixture root is an Item so the strips land under it. Done BEFORE the generic
-# `Quickshell.screens` substitution so the frame's model is the test-controlled screen list while
-# focusedScreen() keeps seeing an empty one.
+# The two per-screen instantiations — the share-time reminder frame and the click-catcher for the
+# screens the overview is NOT on. Quickshell's `Variants` has no offscreen equivalent; `Repeater`
+# creates one delegate per array entry with the same `modelData` injection, and the fixture root is
+# an Item so both land under it. Each is keyed on its own delegate type, so a block that grew, moved
+# or changed delegate fails here instead of silently taking the other block's treatment. Done BEFORE
+# the generic `Quickshell.screens` substitution so both models are the test-controlled screen list.
 qml = replaced(qml, '''    Variants {
-        model: Quickshell.screens''', '''    Repeater {
-        model: root.testScreens''', 'Variants block')
+        model: Quickshell.screens
+        LockFrame {''', '''    Repeater {
+        model: root.testScreens
+        LockFrame {''', 'LockFrame Variants block')
+# The catcher's own stacking is fixture-only. In the shell each catcher is a separate layer surface
+# on a separate monitor, so the overview's surface is never above it — that is the whole point. Here
+# every window is a sibling Item under one root and the overview's panel is the LAST sibling, so
+# without this z the panel's scrim would swallow a press aimed at another screen's catcher and the
+# suite could not tell a working catcher from a missing one.
+qml = replaced(qml, '''    Variants {
+        model: Quickshell.screens
+        PanelWindow {''', '''    Repeater {
+        model: root.testScreens
+        Item {
+            z: 1000''', 'catcher Variants block')
+# focusedScreen() resolves Hyprland's focused monitor to one of Quickshell's screens and hands the
+# object back; `open()` stores it as `targetScreen`, which the catcher then compares delegates
+# against BY IDENTITY. Pointing it at the same test-controlled list is what makes that identity real
+# in the fixture (suites that leave `testScreens` empty keep the old behaviour: targetScreen null).
+qml = replaced(qml, 'screens = Quickshell.screens || []', 'screens = root.testScreens || []',
+               'focusedScreen screen list')
 qml = qml.replace('Quickshell.screens', '[]').replace('ToplevelManager.toplevels', 'null')
 qml = qml.replace('PanelWindow {', 'Item {')
-qml = re.sub(r'^\s*(screen: root.targetScreen|WlrLayershell\..*|exclusionMode:.*|color: "transparent"|mask: .*|Region \{ id: emptyRegion \})\n', '\n', qml, flags=re.M)
+qml = re.sub(r'^\s*(screen: root\.targetScreen|screen: modelData|WlrLayershell\..*|exclusionMode:.*|color: "transparent"|mask: .*|Region \{ id: emptyRegion \})\n', '\n', qml, flags=re.M)
 qml = qml.replace('anchors { top: true; bottom: true; left: true; right: true }', 'width: 1200; height: 800')
 qml = qml.replace('id: root', '''id: root
     property alias testModel: tilesModel
