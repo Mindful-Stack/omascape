@@ -42,6 +42,9 @@ TestCase {
         seed(view)
         view.open()
         wait(400)      // past the 200 ms entrance and the 300 ms open-settle window, with slack
+        // Lock plumbing (Component.onCompleted + open()) dispatches install chunks that are not
+        // under test here; drop them so command-count assertions see only the test's own action.
+        view.compositor.commands = []
     }
     function cleanup() { view.close() }
     function tileOf(addr) {
@@ -676,10 +679,10 @@ TestCase {
     function test_event_after_a_refresh_gets_its_own_refresh_within_a_tick() {
         wait(400)                         // open()'s settle window has ended
         view.compositor.refreshes = 0
-        view.compositor.rawEvent()        // leading edge: refresh at once
+        view.compositor.rawEvent({})      // leading edge: refresh at once
         compare(view.compositor.refreshes, 1)
         wait(10)
-        view.compositor.rawEvent()        // mid-stream: a second refresh is owed
+        view.compositor.rawEvent({})      // mid-stream: a second refresh is owed
         wait(100)
         compare(view.compositor.refreshes, 2, "the later event must trigger another refresh")
     }
@@ -688,7 +691,7 @@ TestCase {
     function test_event_flood_still_rebuilds_and_throttles_refresh() {
         boxesSpy.target = view; boxesSpy.clear()
         view.compositor.refreshes = 0
-        for (var i = 0; i < 20; i++) { view.compositor.rawEvent(); wait(25) }   // 500 ms stream
+        for (var i = 0; i < 20; i++) { view.compositor.rawEvent({}); wait(25) }   // 500 ms stream
         verify(boxesSpy.count >= 5, "rebuilt during the flood (got " + boxesSpy.count + ")")
         verify(view.compositor.refreshes <= 10, "at most one refresh per settle tick (got " + view.compositor.refreshes + ")")
         var after = boxesSpy.count

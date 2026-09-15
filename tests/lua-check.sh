@@ -39,6 +39,23 @@ TestCase {
         console.log("CHUNK FLOATING_MOVE_SCRATCH " + Logic.floatingMoveLua("0xabc", Logic.SCRATCHPAD_ID, { x: 200, y: 1600 }))
         console.log("CHUNK SCRATCHPAD_SHOW " + Logic.scratchpadShowLua())
         console.log("CHUNK SCRATCHPAD_FOCUS " + Logic.scratchpadFocusLua("0xabc"))
+        console.log("CHUNK LOCK_INSTALL " + Logic.lockInstallLua())
+        console.log("CHUNK LOCK_SYNC_3 " + Logic.lockSyncLua(["3"]))
+        console.log("CHUNK LOCK_SYNC_3_SCRATCH " + Logic.lockSyncLua(["3", "special:scratchpad"]))
+        console.log("CHUNK LOCK_SYNC_NONE " + Logic.lockSyncLua([]))
+        // Not a chunk: the observer's grace period, shipped through the same file so the Lua
+        // suite advances its fake clock by the REAL constant instead of a copy that could drift.
+        // `return 3000` parses like any other chunk, so the parse check below needs no exception.
+        console.log("CHUNK LOCK_SHARE_GRACE_MS " + Logic.LOCK_SHARE_GRACE_MS)
+        var badText = "bad \\\\ \" line\nbreak"
+        console.log("CHUNK NOTIFY " + Logic.notifyLua(badText))
+        // Regression guard for the escape-then-truncate bug: the 200th raw character (index 199,
+        // the last one the 200-char slice keeps) is a backslash, with more text after it so the
+        // budget actually cuts. Slicing the RAW text first (then escaping) means that backslash
+        // is either wholly kept or wholly dropped, never split into a lone trailing "\" that
+        // would escape the chunk's closing quote.
+        var longText = "a".repeat(199) + "\\\\" + "tail text past the two hundred character budget"
+        console.log("CHUNK NOTIFY_LONG " + Logic.notifyLua(longText))
     }
 }
 EOF
@@ -54,8 +71,8 @@ QT_QPA_PLATFORMTHEME=generic QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1
 sed -n 's/^.*CHUNK //p' "$fixture/qml.out" > "$fixture/chunks.txt"
 
 count=$(grep -c . "$fixture/chunks.txt" || true)
-if [ "$qml_status" -ne 0 ] || [ "$count" -lt 7 ]; then
-  echo "FAIL: $RUNNER exited $qml_status; expected 7 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
+if [ "$qml_status" -ne 0 ] || [ "$count" -lt 14 ]; then
+  echo "FAIL: $RUNNER exited $qml_status; expected 14 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
   echo "--- raw qml output:" >&2; cat "$fixture/qml.out" >&2
   exit 1
 fi

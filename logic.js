@@ -239,7 +239,8 @@ function layout(input) {
             for (var c = 0; c < chunk.length; c++) {
                 var box = { workspaceId: chunk[c].id, monitorName: name, monFocused: focusedGroup,
                             special: "", x: inset + c * (cw + gap), y: y, w: cw, h: gch,
-                            focused: !!chunk[c].focused, occupied: !!chunk[c].occupied }
+                            focused: !!chunk[c].focused, occupied: !!chunk[c].occupied,
+                            armed: !!chunk[c].armed, placeholder: !!chunk[c].placeholder }
                 boxes.push(box); boxByWs[box.workspaceId] = box
             }
             var rowW = chunk.length * cw + (chunk.length - 1) * gap
@@ -272,7 +273,8 @@ function layout(input) {
         var sbox = { workspaceId: sws.id, monitorName: sws.monitorName, monFocused: false,
                      special: sws.special, x: inset + Math.round((rowW - 2 * inset - cw) / 2), y: y, w: cw,
                      h: cellHeightFor(monByName[sws.monitorName]),
-                     focused: !!sws.focused, occupied: !!sws.occupied }
+                     focused: !!sws.focused, occupied: !!sws.occupied,
+                     armed: !!sws.armed, placeholder: !!sws.placeholder }
         boxes.push(sbox); boxByWs[sbox.workspaceId] = sbox
         y += sbox.h + inset
         sgroup.w = rowW; sgroup.h = y - sgroup.y
@@ -295,6 +297,7 @@ function layout(input) {
     var tiles = []
     for (var wi = 0; wi < input.windows.length; wi++) {
         var win = input.windows[wi], wbox = boxByWs[win.workspaceId]; if (!wbox) continue
+        if (wbox.placeholder) continue     // lock placeholder: no tile, no capture (spec: Rendering)
         var wmon = monByName[wbox.monitorName]; if (!wmon) continue
         var mode = fullscreenMode(win), layer = win.floating ? 2 : 1, slot = null
         if (mode) {
@@ -678,6 +681,13 @@ function hyprAnimationsEnabled(json) {
     return true
 }
 
+// Share-time reminder frame colour (docs/specs/2026-09-12-lock-design.md, addendum): only the
+// `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are accepted — Hyprland's own colour syntax, kept
+// for continuity with the rest of the user's Hyprland config even though the frame is now drawn
+// by the shell. `lockColorToQml` converts an accepted value to QML's `#aarrggbb` order and
+// rejects everything else, so an unvalidated string can never reach a colour property.
+var LOCK_BORDER_RE = /^rgba?\([0-9a-fA-F]{6}([0-9a-fA-F]{2})?\)$/
+
 // ~/.config/omarchy/omyview.json → a fully-defaulted settings object. Every key has a default;
 // a missing file, a parse error, a wrong type or an unknown key never changes behaviour.
 function parseConfig(raw) {
@@ -689,7 +699,11 @@ function parseConfig(raw) {
         hint: (typeof o.hint === "boolean") ? o.hint : true,
         workspaces: (typeof o.workspaces === "number" && isFinite(o.workspaces))
             ? Math.max(0, Math.floor(o.workspaces)) : 10,
-        motion: (o.motion === "full" || o.motion === "off") ? o.motion : "auto"
+        motion: (o.motion === "full" || o.motion === "off") ? o.motion : "auto",
+        lockBorder: (typeof o.lockBorder === "string" && LOCK_BORDER_RE.test(o.lockBorder))
+            ? o.lockBorder : "rgb(ff4444)",
+        lockBorderSize: (typeof o.lockBorderSize === "number" && isFinite(o.lockBorderSize))
+            ? Math.max(0, Math.min(20, Math.floor(o.lockBorderSize))) : 6
     }
 }
 
@@ -833,6 +847,453 @@ function scratchpadFocusLua(addr) {
         '    run(hl.dsp.window.alter_zorder({ mode = "top", window = sel }))\n' +
         '  end)\n' +
         '  ' + reportLua('focus scratchpad window') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}
+
+// ---- Workspace lock (docs/specs/2026-09-12-lock-design.md) ---------------------------------
+// A selector is a workspace id ("3") or a special workspace name ("special:scratchpad"). It is
+// interpolated into Lua, so anything else is refused here, in JavaScript, before it can reach
+// a chunk.
+// Hyprland parses "007" as workspace 7 (leading zeros stripped), so a hand-edited "007" would
+// arm workspace 7 with no badge to show it — numeric selectors must be a canonical decimal.
+var LOCK_SELECTOR_RE = /^([1-9]\d*|special:[A-Za-z0-9_-]+)$/
+function validLockSelector(sel) { return typeof sel === "string" && LOCK_SELECTOR_RE.test(sel) }
+
+// ---- Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum) --------------
+// The cue is four thin layer-shell strips omyview draws at the monitor edges, blanked in every
+// capture by a `no_screen_share` layer rule on their namespace. These four functions are the
+// whole decision: which workspace a monitor is showing, whether that earns a frame, which raw
+// events invalidate the monitor snapshot, and how the configured colour becomes a QML one.
+
+// The selector for the workspace a monitor currently SHOWS, from its `lastIpcObject`: the special
+// workspace when one is open, else the active workspace. Hyprland reports
+// `specialWorkspace: { id: 0, name: "" }` when none is open (the same "nothing" the
+// `activespecialv2>>,,<mon>` payload announces), so the NAME — not the object's presence — is
+// what decides. The result is a locks-file selector ("3" / "special:scratchpad"), never the
+// dynamic special id. A malformed or missing snapshot yields null and never throws: this runs in
+// a binding that re-evaluates on every monitor event, including ones that land before the first
+// refresh.
+function lockFrameShownSelector(mon) {
+    if (!mon || typeof mon !== "object") return null
+    var sp = mon.specialWorkspace
+    if (sp && typeof sp === "object" && typeof sp.name === "string" && sp.name.length) return sp.name
+    var aw = mon.activeWorkspace
+    if (aw && typeof aw === "object" && typeof aw.id === "number" && isFinite(aw.id)) return String(aw.id)
+    return null
+}
+
+// Is a monitor's frame visible? Only while a share is actually running (`locks.sharing`, the
+// debounced compositor signal) AND the workspace that monitor is showing is armed. `armed` is the
+// array `applyLocksTo` maintains — null while the locks file is still unresolved, which means no
+// frame (never guess protection that may not be installed yet).
+function lockFrameVisible(sharing, armed, mon) {
+    if (sharing !== true || !armed || !armed.length) return false
+    var sel = lockFrameShownSelector(mon)
+    return sel !== null && armed.indexOf(sel) >= 0
+}
+
+// Raw Hyprland events after which a monitor's `lastIpcObject` may be stale, so the shell must ask
+// for a fresh one (`Hyprland.refreshMonitors()`). Payloads verified in 0.56.2 source:
+//   workspacev2>>id,name                — the focused monitor changed workspace
+//   focusedmonv2>>monname,wsid          — focus moved to another monitor
+//   activespecialv2>>id,name,monname    — a special workspace opened/closed there ("" id+name = closed)
+//   moveworkspacev2>>id,name,monname    — a workspace moved to another monitor
+//   monitoraddedv2 / monitorremovedv2   — the set of monitors changed
+//   configreloaded                      — every Lua global (our layer rule included) is gone
+// Deliberately NOT the whole event stream: a refresh is an IPC round trip, and window titles,
+// focus changes and open/close events cannot move a workspace between monitors.
+function lockFrameRefreshEvent(name) {
+    return name === "workspacev2" || name === "focusedmonv2" || name === "activespecialv2" ||
+           name === "moveworkspacev2" || name === "monitoraddedv2" || name === "monitorremovedv2" ||
+           name === "configreloaded"
+}
+
+// The configured colour (Hyprland's `rgb(rrggbb)` / `rgba(rrggbbaa)`, validated by
+// LOCK_BORDER_RE) as a QML colour string. The alpha moves from the END to the FRONT: Qt reads
+// `#rrggbbaa` as `#aarrggbb`, so `rgba(ff444480)` left as-is would render as a nearly opaque
+// near-black instead of a translucent red. Anything else — including an already-QML `#rrggbb` —
+// falls back to the default red rather than producing an invalid colour, which QML would resolve
+// to black.
+function lockColorToQml(hypr) {
+    var s = String(hypr === undefined || hypr === null ? "" : hypr)
+    if (!LOCK_BORDER_RE.test(s)) return "#ff4444"
+    var hex = s.slice(s.indexOf("(") + 1, s.length - 1)
+    if (hex.length === 8) return "#" + hex.slice(6, 8) + hex.slice(0, 6)
+    return "#" + hex
+}
+
+// The logical thickness of a frame strip's SURFACE, given the painted thickness and the monitor's
+// scale: the smallest integer at least one logical px larger than the paint whose DEVICE size is a
+// whole number. The blanking box a `no_screen_share` layer draws is rasterised from the surface's
+// logical geometry × the scale with its origin floored and its size truncated — it covers
+// `[floor(start), floor(start) + floor(size))` — so a surface whose device size is fractional is
+// always one device line short, and whichever line that is (inner or outer) shows the frame in
+// every capture. Snapping the SURFACE (never the paint: `lockBorderSize` is what the user asked
+// for) makes the blanked box exactly the surface, with the paint strictly inside it.
+// The search stops 12 px out: at that point no scale in practical use has failed to land on a
+// whole number, and growing the surface without bound to satisfy an exotic scale would blank far
+// more of the screen than the cue occupies. Falling back to `thickness + 1` there costs at most a
+// one-device-pixel hairline of the frame colour in a capture, which discloses nothing.
+// A scale that is not a positive finite number (a monitor object we never got, a malformed
+// snapshot) degrades the same way instead of throwing — this runs in a binding.
+function lockFrameSurfaceSize(thickness, scale) {
+    var t = (typeof thickness === "number" && isFinite(thickness)) ? Math.max(0, Math.round(thickness)) : 0
+    var base = t + 1
+    if (typeof scale !== "number" || !isFinite(scale) || scale <= 0) return base
+    for (var s = base; s <= t + 12; s++) {
+        var d = s * scale
+        if (Math.abs(d - Math.round(d)) < 1e-4) return s
+    }
+    return base
+}
+
+// Bump on ANY change to the observer callback's body (including which `kind` values it
+// ignores). `_G.omyview_lock` is compositor Lua state that survives a shell restart, and the
+// callback lives in a closure owned by the old subscription — `L.sub:is_active()` stays true
+// across a restart, so without a version check the install's own idempotence guard
+// (`if not (L.sub and L.sub:is_active())`) would keep the STALE callback forever; a shell
+// restart alone could never deliver a behaviour change to a running compositor, only a
+// `configreloaded` (which drops `_G` entirely) would.
+// 3 (share-time reminder border, 2026-09-14 addendum): the callback body changed from calling
+// `L.publish()` to calling `L.apply()` (reconcile every window-border rule's enabled state, THEN
+// publish) — a running compositor whose callback still only publishes would never toggle a border
+// added after it started, so the body change itself had to force the stale callback out, the same
+// as the `kind` filter did at version 2.
+// 4 (share-state hysteresis, 2026-09-14 round 3): the callback body changed again — it no longer
+// applies every edge. It keeps `L.sharing` as the raw counter but drives the cue and the state
+// file from `L.effective`, a debounced view of it: a true edge applies at once and cancels any
+// pending grace timer, a false edge only arms a `LOCK_SHARE_GRACE_MS` oneshot that turns the cue
+// off if no true arrived meanwhile. A compositor still running the v3 callback would keep
+// flapping twice a second (see LOCK_SHARE_GRACE_MS below), so the body change had to force the
+// stale callback out.
+// NOT bumped for round 4 (the window-border rules replaced by the shell's own layer-shell frame):
+// the callback body's TEXT is unchanged — it still calls `L.apply()`, which every install
+// redefines on the shared `L` table before the version check runs, so a compositor running the v4
+// callback picks up the new (publish-only) `L.apply()` the moment the new shell installs. Only a
+// change to the callback's own body needs a bump.
+var LOCK_OBSERVER_VERSION = 4
+
+// Grace period before a share that stopped signalling is treated as over. Hyprland's
+// ScreenshareSession.cpp emits `screenshare.state(true, …)` on every successfully COPIED frame
+// and `screenshare.state(false, …)` from a 500 ms timer that fires whenever no frame arrived for
+// half a second — so a consumer that pulls frames irregularly (OBS on a mostly static screen)
+// makes the compositor emit false/true pairs for the whole recording: measured 20 events in 30 s
+// on 2026-09-14, every false run under ~1 s. Applying each edge rewrote the state file twice a
+// second, which the shell's FileView dutifully reloaded — flickering the reminder frame and the
+// overview's placeholder with it (in round 3 it also toggled `border_size`, relayouting every
+// window on the workspace). 3000 ms leaves headroom over the longest measured gap for a fully
+// static screen. The trade-off is one-sided: too short means flicker, too long means the frame
+// lingers a few seconds after the share really ended — cosmetic only, because the exclusion rules
+// are always on and privacy never depends on this signal.
+var LOCK_SHARE_GRACE_MS = 3000
+
+// Install the compositor-side lock state: one table in _G, the share observer that publishes 1/0
+// to $XDG_RUNTIME_DIR/omyview/share-state, and the `no_screen_share` LAYER rule that blanks the
+// reminder frame's own strips in every capture (see the frame-rule block below). No such rule for
+// the overview's own namespace: a `no_screen_share` layer renders as an opaque black rect over
+// that surface's whole box while mapped (ScreenshareFrame.cpp), which for the overview would mean
+// a black rect over the whole screen whenever it is open — and toplevel export of an armed window
+// is denied by Hyprland regardless (see lockSyncLua's per-workspace window rules), so the
+// overview cannot leak armed pixels without it. The frame's strips are thin edge surfaces, so the
+// same blanking is exactly what is wanted there.
+// Idempotent: re-running keeps the rules, the subscription and the share counter.
+// Dispatched at shell start, on configreloaded (a reload drops every global) and at open().
+// The share observer is created FIRST, unconditionally inside the outer pcall, before anything
+// touches the filesystem: a broken $XDG_RUNTIME_DIR (or a write/rename failure) must degrade
+// only share detection, never the lock itself. Before that, `L.subVer` is checked against
+// `LOCK_OBSERVER_VERSION`: a mismatch (nil on an old install, or an older version number) drops
+// the existing subscription — even though it is still `is_active()` — so the block below always
+// creates a fresh one carrying the current callback (see LOCK_OBSERVER_VERSION above).
+// `L.publish` and `L.ensureDir` are defined unconditionally too — the observer's callback closes
+// over them. The verify-dir-and-publish step runs in its OWN inner pcall; on failure it is
+// re-raised (`error(perr, 0)`) so the outer pcall's own `ok, err` — which reportLua reads —
+// carries the filesystem failure while the subscription it already created is left standing on
+// `L`, unaffected by the raised error.
+// `L.ensureDir()` runs on EVERY install, not only when `L.dir` is nil: `_G.omyview_lock` is
+// compositor Lua state that survives a shell restart, so a previous install's `L.dir` can point
+// at a runtime directory that no longer exists (removed by a cleaner, or just gone —
+// live-confirmed after the user's first manual restart: `L.dir` stayed set to a directory that
+// had vanished, and every publish failed with "cannot write share-state" forever, since nothing
+// ever re-checked). It probes FIRST (a single `io.open`) and only runs `mkdir -p` — measured at
+// ~2.5ms of compositor main-thread time — when the probe fails, so the common case (directory
+// already there) costs one file open, not a shell-out, even though it runs on every install
+// (including every overview open). `L.publish()` also calls `L.ensureDir()` and retries its own
+// `io.open` once if the directory turns out to be gone at share-event time, so a share observed
+// between installs recovers immediately instead of failing until the next `configreloaded` or
+// `open()`.
+// `os.execute`'s return value cannot be trusted here (live-verified on this Hyprland build):
+// the compositor reaps the child itself, so Lua never sees an exit status — `os.execute`
+// returns nil even when `mkdir -p` succeeded and the directory exists. It is called (only when
+// the probe already failed) and its result ignored; the directory is verified directly instead:
+// open (and immediately remove) a probe file in it.
+function lockInstallLua() {
+    return (
+        'function()\n' +
+        '  local ok, err = pcall(function()\n' +
+        '    local L = _G.omyview_lock\n' +
+        '    if not L then L = { rules = {}, sharing = 0, effective = false, grace = nil, sub = nil, subVer = nil, dir = nil, frameRule = nil }; _G.omyview_lock = L end\n' +
+        // `L.sharing` is the raw balanced counter; `L.effective` is the debounced view of it that
+        // the state file follows (see LOCK_SHARE_GRACE_MS). Seeded from the
+        // counter — and only when unset — so an install landing on an `_G.omyview_lock` from a
+        // pre-hysteresis build starts out agreeing with whatever is actually running, and a later
+        // re-install never resets a live `false` grace decision back to `true`.
+        '    if L.effective == nil then L.effective = L.sharing > 0 end\n' +
+        // Upgrade off round 3: a compositor that has been running since then still holds an
+        // `L.borders` table of `omyview-lock-border-<sel>` window rules — possibly enabled — that
+        // nothing in round 4 touches any more. This Lua API can disable a rule but never remove
+        // one, so without this sweep those rims would keep colouring every window on an armed
+        // workspace until the user's next config reload. Disabled once (each guarded on its own:
+        // a dead handle must not abort the install) and the table dropped, so a later install has
+        // nothing left to do.
+        '    if L.borders then\n' +
+        '      for _, r in pairs(L.borders) do pcall(function() r:set_enabled(false) end) end\n' +
+        '      L.borders = nil\n' +
+        '    end\n' +
+        '    function L.ensureDir()\n' +
+        '      local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end\n' +
+        '      local dir = base .. "/omyview"\n' +
+        '      local probe = io.open(dir .. "/.omyview-probe", "w")\n' +
+        '      if not probe then\n' +
+        '        os.execute("mkdir -p \'" .. dir .. "\'")\n' +
+        '        probe = io.open(dir .. "/.omyview-probe", "w")\n' +
+        '        if not probe then error("runtime dir unavailable: " .. dir) end\n' +
+        '      end\n' +
+        '      probe:close(); os.remove(dir .. "/.omyview-probe")\n' +
+        '      L.dir = dir\n' +
+        '    end\n' +
+        '    function L.publish()\n' +
+        '      local tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"\n' +
+        '      local f = io.open(tmp, "w")\n' +
+        '      if not f then\n' +
+        '        L.ensureDir()\n' +
+        '        tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"\n' +
+        '        f = io.open(tmp, "w")\n' +
+        '      end\n' +
+        '      if not f then error("cannot write share-state") end\n' +
+        '      local w = f:write(L.effective and "1" or "0"); local c = f:close()\n' +
+        '      if not w or not c then os.remove(tmp); error("write share-state failed") end\n' +
+        '      local rok, rerr = os.rename(tmp, dst)\n' +
+        '      if not rok then os.remove(tmp); error("rename share-state: " .. tostring(rerr)) end\n' +
+        '    end\n' +
+        // L.apply() is defined here — before the subVer check and the observer subscription
+        // below, which calls it — so a fresh subscription's callback always closes over a
+        // fully-defined function (never a stale/partial one from an earlier install). Since round
+        // 4 the compositor side has nothing to reconcile on a share edge (the cue is the shell's
+        // own layer-shell frame, driven by the published state file), so applying IS publishing.
+        // It stays a named function rather than being inlined: the observer callback's body text
+        // is what LOCK_OBSERVER_VERSION guards, and keeping the indirection means a future change
+        // on this side does not force every running compositor's subscription to be replaced.
+        '    function L.apply()\n' +
+        '      L.publish()\n' +
+        '    end\n' +
+        '    if L.subVer ~= ' + LOCK_OBSERVER_VERSION + ' then\n' +
+        '      if L.sub then pcall(function() L.sub:remove() end) end\n' +
+        '      L.sub = nil\n' +
+        '      L.subVer = ' + LOCK_OBSERVER_VERSION + '\n' +
+        '    end\n' +
+        '    if not (L.sub and L.sub:is_active()) then\n' +
+        // Hysteresis (see LOCK_SHARE_GRACE_MS): the ON edge applies at once and cancels any
+        // pending off; the OFF edge only arms a oneshot that applies it LOCK_SHARE_GRACE_MS
+        // later, and only if the count is still 0 by then. A fresh timer per off-edge, never a
+        // re-armed one: probed live on 0.56.2, a oneshot that has already fired cannot be
+        // restarted (set_enabled(true)/set_timeout after firing do nothing), while
+        // set_enabled(false) BEFORE it fires cancels it for good. The timer callback carries its
+        // own pcall + print: it runs on the compositor's clock, outside the pcall below, and
+        // L.apply() can raise (a publish failure) — an unguarded error there would surface as a
+        // bare Lua error inside the compositor rather than an omyview log line.
+        '      L.sub = hl.on("screenshare.state", function(active, kind)\n' +
+        '        if kind == 1 then return end\n' +
+        '        local sok, serr = pcall(function()\n' +
+        '          L.sharing = math.max(0, L.sharing + (active and 1 or -1))\n' +
+        '          if L.sharing > 0 then\n' +
+        '            if L.grace then pcall(function() L.grace:set_enabled(false) end); L.grace = nil end\n' +
+        '            if not L.effective then L.effective = true; L.apply() end\n' +
+        // `elseif L.effective`: an off edge while already idle has nothing to turn off, so it
+        // arms nothing (a pending grace always implies L.effective == true). If hl.timer is
+        // missing or throws, degrade to the immediate off rather than leave L.effective stuck
+        // true — stuck, every later ON edge would be a no-op and every OFF edge would throw
+        // again, so the rim would stay on every armed workspace until a config reload.
+        '          elseif L.effective then\n' +
+        '            if L.grace then pcall(function() L.grace:set_enabled(false) end) end\n' +
+        '            local tok, t = pcall(function()\n' +
+        '              return hl.timer(function()\n' +
+        '                L.grace = nil\n' +
+        '                local gok, gerr = pcall(function()\n' +
+        '                  if L.sharing == 0 and L.effective then L.effective = false; L.apply() end\n' +
+        '                end)\n' +
+        '                if not gok then print("omyview: share grace timer failed: " .. tostring(gerr)) end\n' +
+        '              end, { timeout = ' + LOCK_SHARE_GRACE_MS + ', type = "oneshot" })\n' +
+        '            end)\n' +
+        '            L.grace = tok and t or nil\n' +
+        '            if not L.grace then L.effective = false; L.apply() end\n' +
+        '          end\n' +
+        '        end)\n' +
+        '        if not sok then print("omyview: share observer failed: " .. tostring(serr)) end\n' +
+        '      end)\n' +
+        '    end\n' +
+        // Share-time reminder frame (addendum, round 4): the strips omyview maps at the monitor
+        // edges are its own layer surfaces, and this rule is what keeps them out of every capture
+        // — a `no_screen_share` LAYER renders as an opaque black rect over that surface's own box
+        // while mapped (ScreenshareFrame.cpp), so the frame's four thin strips go black in the
+        // recording and the red cue stays purely local. Live-probed 2026-09-14 on the bar's
+        // namespace: only that surface's 26 px strip went black (mean 0), the rest of the frame
+        // was untouched — per-surface blanking, not a whole-screen blank.
+        // Created once and kept on `L` (this Hyprland Lua API can only disable a rule, never
+        // remove it, and install runs on every overview open), but re-created after a
+        // `configreloaded` like every other rule, since that drops `_G` entirely. A surviving
+        // rule that is somehow disabled is re-enabled rather than duplicated: a second rule under
+        // the same name would not undo the first. Its own pcall, so a failure here cannot take
+        // down the exclusion rules or the share observer — which are the actual protection — and
+        // the error is re-raised below into the install's existing report path.
+        '    local fok, ferr = pcall(function()\n' +
+        '      if L.frameRule then\n' +
+        '        local iok, cur = pcall(function() return L.frameRule:is_enabled() end)\n' +
+        '        if (not iok) or cur == false then L.frameRule:set_enabled(true) end\n' +
+        '      else\n' +
+        '        L.frameRule = hl.layer_rule({ name = "omyview-lockframe", match = { namespace = "omyview-lockframe" }, no_screen_share = true })\n' +
+        '      end\n' +
+        '    end)\n' +
+        '    local pok, perr = pcall(function()\n' +
+        '      L.ensureDir()\n' +
+        '      L.apply()\n' +
+        '    end)\n' +
+        // Precedence, when both steps failed and there is one `ok, err` to report: the FILESYSTEM
+        // wins. A failed layer rule only costs the local cue's blanking (the frame would appear in
+        // the capture); a failed ensureDir/publish costs share DETECTION itself, so the frame and
+        // the overview's placeholder never appear at all — the bigger failure, and the one whose
+        // cause (a broken runtime dir) the user can act on. Each is still reported when it fails
+        // alone.
+        '    if not pok then error(perr, 0) end\n' +
+        '    if not fok then error(ferr, 0) end\n' +
+        '  end)\n' +
+        '  ' + reportLua('lock install') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}
+
+// Reconcile the compositor's rule table with the full armed set: create (enabled) or re-enable
+// a named rule per armed selector, disable every other rule the table holds. Each step is
+// guarded on its own so one failure never leaves another selector unprotected; failures are
+// reported once, naming every selector that failed. A failed re-enable drops the dead handle
+// from L.rules (rather than leaving it there forever, unusable): the next sync that arms the
+// same selector sees no handle and creates a fresh rule instead of retrying a broken one.
+// This chunk never publishes the share-state file: a sync never changes `L.sharing` (only the
+// observer does), so republishing here would be redundant and — being a filesystem operation —
+// could fail for reasons that have nothing to do with rule reconciliation. Folding that failure
+// into this chunk's `ok, err` would make "lock sync failed" notifications fire for a stale
+// runtime directory even though every rule was reconciled correctly; this chunk's report
+// describes rule reconciliation only.
+function lockSyncLua(armed) {
+    var sels = []
+    for (var i = 0; i < (armed || []).length; i++) if (validLockSelector(armed[i])) sels.push('"' + armed[i] + '"')
+    return (
+        'function()\n' +
+        '  local ARMED = {' + sels.join(', ') + '}\n' +
+        '  local L = _G.omyview_lock\n' +
+        '  local ok, err = L ~= nil, "lock not installed"\n' +
+        '  if L then\n' +
+        '    local want = {}; for _, sel in ipairs(ARMED) do want[sel] = true end\n' +
+        '    local failed = {}\n' +
+        '    local function step(sel, f) local sok, serr = pcall(f); if not sok then failed[#failed + 1] = sel .. ": " .. tostring(serr) end end\n' +
+        '    for sel in pairs(want) do\n' +
+        '      step(sel, function()\n' +
+        '        local r = L.rules[sel]\n' +
+        '        if not r then\n' +
+        '          r = hl.window_rule({ name = "omyview-lock-" .. sel, match = { workspace = sel }, no_screen_share = true, enabled = true })\n' +
+        '          L.rules[sel] = r\n' +
+        '        else\n' +
+        '          local eok, eerr = pcall(function() r:set_enabled(true) end)\n' +
+        '          if not eok then L.rules[sel] = nil; error(eerr, 0) end\n' +
+        '        end\n' +
+        '      end)\n' +
+        '    end\n' +
+        '    for sel, r in pairs(L.rules) do if not want[sel] then step(sel, function() r:set_enabled(false) end) end end\n' +
+        '    ok, err = #failed == 0, table.concat(failed, "; ")\n' +
+        '  end\n' +
+        '  ' + reportLua('lock sync') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}
+
+// Parse the locks file. Only the shape { armed: [selector…] } is accepted; every selector is
+// validated. Returns { ok, armed } or { ok: false, error }.
+function parseLocks(raw) {
+    var o
+    try { o = JSON.parse(String(raw || "")) } catch (e) { return { ok: false, error: "not JSON" } }
+    if (!o || typeof o !== "object" || !Array.isArray(o.armed)) return { ok: false, error: "no armed array" }
+    var out = []
+    for (var i = 0; i < o.armed.length; i++) {
+        if (!validLockSelector(o.armed[i])) return { ok: false, error: "bad selector: " + String(o.armed[i]) }
+        if (out.indexOf(o.armed[i]) < 0) out.push(o.armed[i])
+    }
+    return { ok: true, armed: out }
+}
+
+// Reduce a locks-file load result onto the current `armed` value. `status` is "ok" (raw holds
+// the file's fresh text), "missing" (the file does not exist: resolves to [] once, on the first
+// load only — a later "missing" load, e.g. the user deleted the file, keeps the last valid set)
+// or "error:<text>" (any other read/parse failure: keeps the previous value — still null if this
+// is the first load — and reports it). Returns { armed, changed, error }: `armed` is the value
+// the caller should store, `changed` says whether a `loadedArmed()`-style signal is due, `error`
+// is set (a string) when the file should be reported as unreadable/invalid.
+function applyLocksTo(current, raw, status) {
+    if (status === "missing") {
+        if (current === null) return { armed: [], changed: true, error: null }
+        return { armed: current, changed: false, error: null }
+    }
+    if (status !== "ok") {
+        var text = status.indexOf("error:") === 0 ? status.slice(6) : status
+        return { armed: current, changed: false, error: text }
+    }
+    var parsed = parseLocks(raw)
+    if (!parsed.ok) return { armed: current, changed: false, error: parsed.error }
+    // `watchChanges`/an explicit reload() re-emits `loaded` even when the bytes on disk did not
+    // change (our own atomic write reads back its own content; a repeated stub `loadArmed` in
+    // tests). Comparing here — not just returning `changed: true` on every successful parse —
+    // is what stops that echo from re-dispatching a sync (and, via the Overview, re-rebuilding)
+    // for every "load" that carries no real change. `current === null` always counts as changed
+    // (the first resolution): there is no previous set to compare against.
+    return { armed: parsed.armed, changed: current === null || !sameSelectors(current, parsed.armed), error: null }
+}
+
+// Same selectors, in the same order — a plain array-of-strings equality used only to decide
+// whether a load actually changed anything.
+function sameSelectors(a, b) {
+    if (a.length !== b.length) return false
+    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+    return true
+}
+
+// Toggle `sel` in `armed`. Returns a new array, or `null` when the toggle must be refused
+// (armed is unresolved, or the selector fails validation) — the caller treats null as "did
+// nothing" and must not sync or write.
+function toggleSelector(armed, sel) {
+    if (armed === null || !validLockSelector(sel)) return null
+    var next = armed.slice(); var i = next.indexOf(sel)
+    if (i >= 0) next.splice(i, 1); else next.push(sel)
+    return next
+}
+
+// One-line, pcall-guarded chunk that shows a Hyprland notification. Every value that reaches
+// here (a Quickshell FileView error, a JSON parse error) is untrusted text, so it is truncated
+// to a 200-character budget FIRST, on the raw (unescaped) input, and only THEN escaped —
+// escaping first and truncating the result would risk slicing a just-introduced `\\` escape
+// pair in half, leaving a lone trailing backslash that escapes the chunk's closing quote and
+// makes the whole thing unparseable. Escaping itself: backslashes and quotes first (order
+// matters — escaping the quote first would double-escape the backslash it just introduced),
+// then newlines/tabs flattened to a single space (the chunk itself must stay single-line).
+function notifyLua(text) {
+    var raw = String(text === undefined || text === null ? "" : text)
+    var cut = raw.length > 200
+    if (cut) raw = raw.slice(0, 200) + "…"
+    var t = raw
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, "\\\"")
+        .replace(/[\n\r\t]+/g, " ")
+    return (
+        'function()\n' +
+        '  pcall(function() hl.notification.create({ text = "' + t + '", duration = 4000, icon = "error" }) end)\n' +
         'end'
     ).replace(/\n\s*/g, ' ')
 }

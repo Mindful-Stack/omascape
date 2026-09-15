@@ -88,6 +88,68 @@ Item {
     readonly property int cardRadius: boxRadius + card.pad
 
     OmyviewConfig { id: config }
+    OmyviewLocks { id: locks }
+    // "Reported once per open": a toggle attempted while the locks file is still unresolved
+    // (never loaded, or stuck on a malformed file) is a no-op; without feedback the user just
+    // sees Ctrl+L do nothing. Reset in open() so a later, working open() can warn again.
+    property bool lockUnresolvedNotified: false
+    // Same idea for a malformed/unreadable file's own report: a stuck FileView can re-emit
+    // `loaded` (a watcher firing on an unrelated directory event, a repeated reload) without the
+    // file's content changing, and Logic.applyLocksTo re-reports the same error every time
+    // (unlike the armed set, "still malformed" has no "unchanged" case to suppress it against).
+    // Without this guard that would toast on every such echo, not just the first.
+    property bool lockInvalidNotified: false
+    // Bumped wherever the monitor snapshots are refreshed, purely so the reminder frame's
+    // `Hyprland.monitorFor(screen)` binding re-resolves. That call is a C++ invokable returning a
+    // one-shot value: nothing notifies QML when Hyprland REPLACES the HyprlandMonitor object for a
+    // screen (a monitor reconfigure across `configreloaded` does exactly that, without
+    // `Quickshell.screens` changing), so the binding would keep a stale — or null — pointer and
+    // that screen's frame would stay hidden for good.
+    property int monitorEpoch: 0
+    // Enforcement lives in the compositor; these keep it in step with the armed set. Install is
+    // idempotent and cheap; sync is sent only once `armed` has resolved (never an unresolved set).
+    function lockInstall() {
+        Hyprland.dispatch(Logic.lockInstallLua())
+        lockRefreshTimer.restart()
+    }
+    function lockSync() {
+        if (locks.armed === null) return
+        Hyprland.dispatch(Logic.lockSyncLua(locks.armed))
+    }
+    function lockToggleSelected() {
+        if (!Logic.hasWs(selectedId)) return
+        if (locks.armed === null) {
+            if (!lockUnresolvedNotified) {
+                lockUnresolvedNotified = true
+                Hyprland.dispatch(Logic.notifyLua(
+                    "omyview: locks file unreadable — fix or delete ~/.config/omarchy/omyview-locks.json"))
+            }
+            return
+        }
+        if (!locks.toggleInMemory(Logic.wsSelector(selectedId))) return
+        lockSync()          // the compositor is the enforcement; it must not wait for the write
+        locks.persist()
+        rebuild()
+    }
+    Connections {
+        target: locks
+        function onLoadedArmed() { root.lockSync(); if (root.opened) root.rebuild() }
+        function onSharingChanged() { if (root.opened) root.rebuild() }
+        function onWriteFailed(why) { Hyprland.dispatch(Logic.notifyLua("omyview: could not save locks: " + why)) }
+        function onInvalidFile(why) {
+            if (root.lockInvalidNotified) return
+            root.lockInvalidNotified = true
+            Hyprland.dispatch(Logic.notifyLua("omyview: locks file ignored: " + why))
+        }
+    }
+    // Quickshell's FileView watches the file's *parent directory*, not the file itself: if
+    // $XDG_RUNTIME_DIR/omyview does not exist yet (every fresh login, before the compositor's
+    // install chunk has run its `mkdir -p`), the watch never attaches, and share-state changes
+    // go unseen for the rest of the session — reload() is the only thing that re-attaches it.
+    // Restarting this timer on every lockInstall() re-reads both files ~400ms later, by which
+    // point the directory has had time to appear, so watchChanges starts working from then on.
+    Timer { id: lockRefreshTimer; interval: 400; onTriggered: locks.refresh() }
+    Component.onCompleted: lockInstall()           // shell start, before any open
 
     // Motion vocabulary. Every duration and easing in the picker comes from here; tiles get it
     // as a property (they never import the shell). `scale` is a test hook (0 = instant);
@@ -191,29 +253,47 @@ Item {
             // appear, so fall back to the focused monitor by name instead.
             var monName = special ? ((mon && monNames[mon.name]) ? mon.name : focusedMonitorName)
                                   : (mon ? mon.name : "?")
+            var wsSel = Logic.wsSelector(wsId)
+            var wsArmed = locks.isArmed(wsSel), wsPlaceholder = locks.placeholder(wsSel)
             wss.push({ id: wsId, monitorName: monName, special: special,
                        focused: ws.id === focusedWsId,
-                       occupied: ws.toplevels && ws.toplevels.values.length > 0 })
+                       occupied: ws.toplevels && ws.toplevels.values.length > 0,
+                       armed: wsArmed, placeholder: wsPlaceholder })
             var tls = ws.toplevels ? ws.toplevels.values : []
             for (var t = 0; t < tls.length; t++) {
                 var o = tls[t] ? tls[t].lastIpcObject : null
                 if (!o || !o.at || !o.size || !o.address) continue
+                if (wsPlaceholder) continue          // find/drag never see a placeholder's windows
                 wins.push({ address: o.address, cls: o["class"] || "", title: o.title || "",
                             ax: o.at[0], ay: o.at[1], sw: o.size[0], sh: o.size[1],
                             workspaceId: wsId,
-                            // Reserved for the workspace-lock feature; nothing reads this yet.
+                            // Not read by the overview yet.
                             special: special, floating: !!o.floating,
                             fullscreen: Logic.fullscreenMode(o),
                             grouped: !!(o.grouped && o.grouped.length) })
             }
         }
         // Hyprland drops an emptied special workspace; the row is still a place to drop windows.
-        if (scratchpadShown && !haveScratch)
+        if (scratchpadShown && !haveScratch) {
+            wsSel = Logic.wsSelector(Logic.SCRATCHPAD_ID)
             wss.push({ id: Logic.SCRATCHPAD_ID, monitorName: focusedMonitorName, special: "scratchpad",
-                       focused: false, occupied: false })
-        return { monitors: mons,
-                 workspaces: Logic.padWorkspaces(wss, config.workspaces, focusedMonitorName),
-                 windows: wins, focusedMonitorName: focusedMonitorName,
+                       focused: false, occupied: false,
+                       armed: locks.isArmed(wsSel), placeholder: locks.placeholder(wsSel) })
+        }
+        // padWorkspaces() fills gaps with synthetic (empty) records that carry no armed/
+        // placeholder flags: without this, arming an empty workspace shows no badge, and a
+        // formerly-armed workspace loses its badge the instant its last window closes and it
+        // becomes a pad slot instead of a real record.
+        var padded = Logic.padWorkspaces(wss, config.workspaces, focusedMonitorName)
+        for (var pi = 0; pi < padded.length; pi++) {
+            var pw = padded[pi]
+            if (pw.armed === undefined) {
+                var pwSel = Logic.wsSelector(pw.id)
+                pw.armed = locks.isArmed(pwSel); pw.placeholder = locks.placeholder(pwSel)
+            }
+        }
+        return { monitors: mons, workspaces: padded, windows: wins,
+                 focusedMonitorName: focusedMonitorName,
                  availW: root.availCanvasW, params: root.params }
     }
 
@@ -425,6 +505,16 @@ Item {
         var box = boxForWs(targetWs), mon = box ? _monByName[box.monitorName] : null
         var win = _windowByAddress[addr]
         if (!box || !mon || !win) return
+        if (box.placeholder) {                     // dispatch only: no optimistic row, no pending entry
+            var ppos = win.floating ? Logic.dropToWindowPos(dropX, dropY, box, mon, params, win) : null
+            if (ppos) Hyprland.dispatch(Logic.floatingMoveLua(addr, targetWs, ppos))
+            // A tiled source gets a plain move (no split side): a placeholder box shows no
+            // tiles, so there is no anchor window to insert against.
+            else Hyprland.dispatch('hl.dsp.window.move({ workspace = "' + Logic.wsSelector(targetWs) +
+                                   '", follow = false, window = "address:' + addr + '" })')
+            scheduleRebuild()
+            return
+        }
         var sourceWs = win.workspaceId // model.wsid may still be optimistic
         var tile = tileRectFor(addr)
         if (!win.floating && !win.grouped && tile && !Logic.isScratchpad(targetWs)) {
@@ -594,7 +684,8 @@ Item {
             var b = boxes[i]
             var row = { workspaceId: b.workspaceId, bx: b.x, by: b.y, bw: b.w, bh: b.h,
                         focused: !!b.focused, occupied: !!b.occupied,
-                        // Reserved for the workspace-lock feature; nothing reads this yet.
+                        armed: !!b.armed, placeholder: !!b.placeholder,
+                        // Not read by the overview yet.
                         special: b.special || "" }
             seen[b.workspaceId] = true
             var idx = boxIndex(b.workspaceId)
@@ -622,6 +713,19 @@ Item {
         var keepId = root.selectedId   // the workspace the user has selected, before layout
         buildHandles()
         var input = buildInput()
+        // A box that just became a placeholder must not keep an optimistic tile (it would be a
+        // live capture on a box that shows none): drop pending moves into it before applyTiles.
+        // Target-only: a pending move OUT of a box that becomes a placeholder keeps its row
+        // until it lands or times out — bounded by the pending deadline, and the window itself
+        // is under this same rule once it settles on the placeholder side.
+        if (Object.keys(pendingMoves).length) {
+            var ph = {}
+            for (var pw = 0; pw < input.workspaces.length; pw++) {
+                var w = input.workspaces[pw]
+                if (w.placeholder) ph[w.id] = true
+            }
+            for (var pa in pendingMoves) if (ph[pendingMoves[pa].workspaceId]) delete pendingMoves[pa]
+        }
         root._windows = input.windows
         var cmap = {}, tmap = {}, fmap = {}, wmap = {}
         for (var i = 0; i < input.windows.length; i++) {
@@ -688,6 +792,8 @@ Item {
         if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
         config.probeMotion()                       // async; result lands for this or the next open
         targetScreen = focusedScreen(); hideScratchpad(); selectedIndex = -1; opened = true
+        lockUnresolvedNotified = false; lockInvalidNotified = false
+        lockInstall(); lockSync(); locks.refresh()
         resetFind()
         _showVisuals(true)                         // before the first rebuild: layout motion is gated on it
         rebuild()          // instant paint from current data
@@ -782,13 +888,47 @@ Item {
     // Window/workspace changes while open: refresh + settle (never an immediate stale rebuild).
     Connections {
         target: Hyprland
-        function onRawEvent() { if (root.opened) root.scheduleRebuild() }
+        function onRawEvent(event) {
+            if (event && event.name === "configreloaded") { root.lockInstall(); root.lockSync() }
+            // Share-time reminder frame (addendum): each monitor's `lastIpcObject` is a snapshot,
+            // and the frame is a binding on it. These are the events after which the workspace a
+            // monitor SHOWS may have changed (Logic.lockFrameRefreshEvent) — deliberately not the
+            // whole stream, since a refresh is an IPC round trip. Runs whether or not the overview
+            // is open: the frame is a desktop cue, not part of the picker.
+            if (event && Logic.lockFrameRefreshEvent(event.name)) {
+                if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
+                // Same events, second reason: `monitorFor()` may now answer with a DIFFERENT
+                // object for the same screen (see monitorEpoch).
+                root.monitorEpoch++
+            }
+            if (root.opened) root.scheduleRebuild()
+        }
     }
     // The watched config file changing the padded workspace count while open: the compositor
-    // data is not stale, so a plain rebuild re-lays the wells at once.
+    // data is not stale, so a plain rebuild re-lays the wells at once. `lockBorder`/
+    // `lockBorderSize` need no handler at all now — the frame binds to them directly.
     Connections {
         target: config
         function onWorkspacesChanged() { if (root.opened) root.rebuild() }
+    }
+
+    // Share-time reminder frame: one per screen, four strips each (LockFrame.qml). Lives outside
+    // the overview's own PanelWindow — it is on screen while a share runs, whether or not the
+    // picker is open — and is therefore gated on the manifest's keepLoaded, like every other
+    // always-on part of this component.
+    Variants {
+        model: Quickshell.screens
+        LockFrame {
+            required property var modelData
+            frameScreen: modelData
+            // The comma operator is the dependency: `monitorEpoch` is read (and so captured) on
+            // every evaluation, `monitorFor()`'s one-shot result is what the binding yields.
+            monitor: (root.monitorEpoch, Hyprland.monitorFor(modelData))
+            sharing: locks.sharing
+            armed: locks.armed
+            frameColor: Logic.lockColorToQml(config.lockBorder)
+            thickness: config.lockBorderSize
+        }
     }
 
     PanelWindow {
@@ -835,7 +975,7 @@ Item {
             readonly property real maxCardW: panel.width > 0 ? panel.width - 16 : 1616
             readonly property real maxCardH: panel.height > 0 ? panel.height - 64 : 900
             // The hint row never widens past the screen (maxCardW still caps it), but it does
-            // widen a narrow card: a layout with few/narrow workspaces must not clip the seven
+            // widen a narrow card: a layout with few/narrow workspaces must not clip the eight
             // key hints against the card edge.
             implicitWidth: Math.min(Math.max(canvas.implicitWidth, config.hint ? hint.implicitWidth : 0) + pad * 2, maxCardW)
             implicitHeight: Math.min(canvas.implicitHeight + pad * 2 + hintSpace, maxCardH)
@@ -863,6 +1003,7 @@ Item {
                     if (chord) {
                         if (chord === Qt.ControlModifier && e.key === Qt.Key_Backspace && finding) root.setQuery("")
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_S) root.toggleScratchpad()
+                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_L) root.lockToggleSelected()
                         return
                     }
                     if (e.key === Qt.Key_Escape) { if (finding) root.setQuery(""); else root.close(); return }
@@ -973,12 +1114,24 @@ Item {
                             Text {
                                 objectName: "wsNumeral"
                                 anchors.centerIn: parent
-                                visible: !boxItem.model.occupied
+                                visible: !boxItem.model.occupied && !boxItem.model.placeholder
                                 text: root.wsLabel(boxItem.model.workspaceId)
                                 color: root.foreground
                                 opacity: 0.10
                                 font.pixelSize: Math.round(boxItem.height * 0.45)
                                 font.weight: Font.DemiBold
+                            }
+                            // lock placeholder: the workspace is armed and a share is running —
+                            // no tiles are laid out, so the well shows only this glyph.
+                            Text {
+                                objectName: "lockGlyph"
+                                anchors.centerIn: parent
+                                visible: boxItem.model.placeholder
+                                text: "\u{F033E}"          // nf-md-lock
+                                color: root.foreground
+                                opacity: 0.25
+                                font.family: root.fontFamily
+                                font.pixelSize: Math.round(boxItem.height * 0.4)
                             }
                             MouseArea {   // click empty area of a workspace => jump
                                 anchors.fill: parent
@@ -1020,6 +1173,11 @@ Item {
                         model: tilesModel
                         WindowTile {
                             required property var model
+                            // Re-evaluates when `locks.armed` changes: an armed box's windows are under a
+                            // no_screen_share window rule, and Hyprland denies toplevel export of such a
+                            // window outright — capturing it live would show its "permission denied" texture,
+                            // not the window, so the tile falls back to its icon instead.
+                            readonly property bool boxArmed: locks.isArmed(Logic.wsSelector(model.wsid))
                             // Layout motion runs on these glide targets, not on x/y: the drag breaks the x/y
                             // bindings and owns them directly, so a glide still in flight can never fight the
                             // pointer. Release parks the targets at the drop point (Behaviors off), rebinds x/y,
@@ -1044,8 +1202,9 @@ Item {
                             dragging: root.draggingAddress === model.address
                             handle: root.handleByAddress[model.address] || null
                             // Kept loaded while hidden (keepLoaded): captures run only while the
-                            // surface is mapped.
-                            capMode: panel.visible ? "live" : "icon"
+                            // surface is mapped. An armed box always falls back to its icon, share
+                            // or not — the compositor denies the capture either way (see boxArmed).
+                            capMode: (panel.visible && !boxArmed) ? "live" : "icon"
                             borderColor: root.dropTargetAddress === model.address ? root.accent : root.hairline
                             dropTarget: root.dropTargetAddress === model.address
                             dropSide: root.dropTargetAddress === model.address ? root.dropTargetSide : ""
@@ -1171,8 +1330,9 @@ Item {
                             color: model.focused ? root.accent : root.badgeColor
                             Text {
                                 id: badgeText
+                                objectName: "wsBadgeText"
                                 anchors.centerIn: parent
-                                text: root.wsLabel(badge.model.workspaceId)
+                                text: root.wsLabel(badge.model.workspaceId) + (badge.model.armed ? " \u{F033E}" : "")
                                 color: badge.model.focused ? root.background : root.foreground
                                 font.family: root.fontFamily
                                 font.pixelSize: root.labelSize
@@ -1248,7 +1408,7 @@ Item {
                     id: hintKeys
                     model: [ { k: "1–0", l: "jump" }, { k: "↑ ↓ ← →", l: "move" }, { k: "↵", l: "select" },
                              { k: "drag", l: "move window" }, { k: "type", l: "find" },
-                             { k: "ctrl+s", l: "scratchpad" }, { k: "esc", l: "close" } ]
+                             { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" }, { k: "esc", l: "close" } ]
                     Row {
                         required property var modelData
                         spacing: 5

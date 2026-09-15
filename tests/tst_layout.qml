@@ -184,6 +184,24 @@ TestCase {
         compare(Logic.parseConfig('').workspaces, 10)
         compare(Logic.parseConfig('{"workspaces": 4}').motion, "auto")   // other keys keep defaults
     }
+    // Share-time reminder border (docs/specs/2026-09-12-lock-design.md, addendum): `lockBorder`
+    // accepts only the rgb(hhhhhh) / rgba(hhhhhhhh) hex forms, `lockBorderSize` is an integer
+    // 0..20 defaulting to 6. Anything else falls back to the default, including an
+    // injection-shaped string trying to break out of the Lua string the builder puts it in.
+    function test_parse_config_lock_border() {
+        compare(Logic.parseConfig('{"lockBorder": "rgb(ff4444)"}').lockBorder, "rgb(ff4444)")
+        compare(Logic.parseConfig('{"lockBorder": "rgba(ff444488)"}').lockBorder, "rgba(ff444488)")
+        compare(Logic.parseConfig('{"lockBorder": "red"}').lockBorder, "rgb(ff4444)")
+        compare(Logic.parseConfig('{"lockBorder": "rgb(zz)"}').lockBorder, "rgb(ff4444)")
+        compare(Logic.parseConfig('{"lockBorder": "rgb(ff4444)\\"); error(\\"x"}').lockBorder, "rgb(ff4444)")
+        compare(Logic.parseConfig('').lockBorder, "rgb(ff4444)")
+        compare(Logic.parseConfig('{"lockBorderSize": 10}').lockBorderSize, 10)
+        compare(Logic.parseConfig('{"lockBorderSize": 0}').lockBorderSize, 0)
+        compare(Logic.parseConfig('{"lockBorderSize": 25}').lockBorderSize, 20)
+        compare(Logic.parseConfig('{"lockBorderSize": -3}').lockBorderSize, 0)
+        compare(Logic.parseConfig('{"lockBorderSize": "six"}').lockBorderSize, 6)
+        compare(Logic.parseConfig('').lockBorderSize, 6)
+    }
     // a single group gets neither the header band nor the inset
     function test_single_group_has_no_inset() {
         var r = Logic.layout({ monitors:[edp()],
@@ -832,6 +850,22 @@ TestCase {
         var r = Logic.layout(input)
         compare(r.groups.length, 1); compare(boxById(r, Logic.SCRATCHPAD_ID), null)
     }
+    // Distinguishes: a placeholder workspace still emitting tiles (a capture would start), and
+    // the flags not reaching the box (the delegate could not draw badge/glyph).
+    function test_placeholder_workspace_has_flags_and_no_tiles() {
+        var input = scratchInput([
+            { address: "0xA", cls: "x", ax: 0, ay: 26, sw: 1024, sh: 1254, workspaceId: 1, floating: false, fullscreen: 0 },
+            { address: "0xB", cls: "x", ax: 0, ay: 26, sw: 1024, sh: 1254, workspaceId: 2, floating: false, fullscreen: 0 }])
+        input.workspaces[0].armed = true; input.workspaces[0].placeholder = true    // ws 1
+        input.workspaces[1].armed = true                                           // ws 2: armed, not sharing
+        var r = Logic.layout(input)
+        compare(boxById(r, 1).armed, true); compare(boxById(r, 1).placeholder, true)
+        compare(boxById(r, 2).armed, true); compare(boxById(r, 2).placeholder, false)
+        compare(boxById(r, Logic.SCRATCHPAD_ID).armed, false); compare(boxById(r, Logic.SCRATCHPAD_ID).placeholder, false)
+        var addrs = r.tiles.map(function (t) { return t.address })
+        compare(addrs.indexOf("0xA"), -1, "no tile on the placeholder workspace")
+        verify(addrs.indexOf("0xB") >= 0, "armed-but-visible workspace keeps its tiles")
+    }
     // Distinguishes: a tiled scratchpad window dropped or drawn as floating (layer 2).
     function test_tiled_window_on_the_scratchpad_renders_as_a_tiled_tile() {
         var r = Logic.layout(scratchInput([
@@ -864,4 +898,194 @@ TestCase {
         verify(normal.indexOf('workspace = "3"') >= 0); verify(normal.indexOf('w.workspace.id == 3') >= 0)
     }
 
+    // Distinguishes: a builder that interpolates any string into the Lua array (a selector with
+    // a quote or a Lua comment would break out of the chunk).
+    function test_lock_selectors_are_validated() {
+        compare(Logic.validLockSelector("3"), true)
+        compare(Logic.validLockSelector("10"), true)
+        compare(Logic.validLockSelector("special:scratchpad"), true)
+        compare(Logic.validLockSelector("special:my-pad_2"), true)
+        compare(Logic.validLockSelector(""), false)
+        compare(Logic.validLockSelector("-2"), false)
+        // Hyprland parses "007" as workspace 7 (leading zeros stripped): a hand-edited "007"
+        // would arm workspace 7 with no badge to show it, so leading zeros are refused; "0" is
+        // refused too (Hyprland workspaces are 1-indexed).
+        compare(Logic.validLockSelector("0"), false)
+        compare(Logic.validLockSelector("007"), false)
+        compare(Logic.validLockSelector("3\"); error(\"x"), false)
+        compare(Logic.validLockSelector("special:a b"), false)
+        compare(Logic.validLockSelector(undefined), false)
+    }
+    // Distinguishes: the sync chunk carrying an invalid selector, or dropping valid ones.
+    function test_lock_sync_chunk_carries_only_valid_selectors() {
+        var lua = Logic.lockSyncLua(["3", "bad one", "special:scratchpad"])
+        verify(lua.indexOf('"3"') >= 0 && lua.indexOf('"special:scratchpad"') >= 0)
+        verify(lua.indexOf("bad one") < 0)
+        verify(lua.indexOf("omyview-lock-") >= 0, "rules are named")
+        compare(Logic.lockSyncLua([]).indexOf("local ARMED = {}") >= 0, true)
+    }
+    // Distinguishes: a parser that accepts a bad selector (it would reach a Lua chunk) or
+    // rejects a valid file.
+    function test_parseLocks() {
+        compare(Logic.parseLocks('{ "armed": ["3", "special:scratchpad", "3"] }').armed, ["3", "special:scratchpad"])
+        compare(Logic.parseLocks('{ "armed": [] }').ok, true)
+        compare(Logic.parseLocks('nope').ok, false)
+        compare(Logic.parseLocks('{ "armed": ["x y"] }').ok, false)
+        compare(Logic.parseLocks('{}').ok, false)
+    }
+    // Distinguishes: a load reducer that treats every "missing" status the same regardless of
+    // whether armed has already resolved — a later missing load (the file was deleted after a
+    // successful first read) must keep the in-memory set, not silently disarm it.
+    function test_applyLocksTo_missing() {
+        var first = Logic.applyLocksTo(null, "", "missing")
+        compare(first.armed, []); compare(first.changed, true); compare(first.error, null)
+        var later = Logic.applyLocksTo(["3"], "", "missing")
+        compare(later.armed, ["3"]); compare(later.changed, false); compare(later.error, null)
+    }
+    // Distinguishes: a read error (permission, a directory in its place, …) mistaken for
+    // "missing" — that would silently disarm every rule the compositor holds.
+    function test_applyLocksTo_error() {
+        var first = Logic.applyLocksTo(null, "", "error:boom")
+        compare(first.armed, null); compare(first.changed, false); compare(first.error, "boom")
+        var later = Logic.applyLocksTo(["3"], "", "error:boom")
+        compare(later.armed, ["3"]); compare(later.changed, false); compare(later.error, "boom")
+    }
+    // Distinguishes: a malformed file's parse error not surfacing, or clobbering a good set.
+    function test_applyLocksTo_malformed() {
+        var first = Logic.applyLocksTo(null, "nope", "ok")
+        compare(first.armed, null); compare(first.changed, false); verify(first.error)
+        var later = Logic.applyLocksTo(["3"], "nope", "ok")
+        compare(later.armed, ["3"]); compare(later.changed, false); verify(later.error)
+    }
+    function test_applyLocksTo_ok() {
+        var r = Logic.applyLocksTo(null, '{ "armed": ["3", "special:scratchpad"] }', "ok")
+        compare(r.armed, ["3", "special:scratchpad"]); compare(r.changed, true); compare(r.error, null)
+        // A first load of an empty set must still count as a change — the start-up
+        // reconciliation sync depends on it firing even when nothing is armed.
+        compare(Logic.applyLocksTo(null, '{ "armed": [] }', "ok").changed, true)
+    }
+    // Distinguishes: every successful parse being reported as a change (a reload echo —
+    // watchChanges/reload() re-emitting `loaded` with unchanged bytes — would then re-dispatch
+    // a sync, and while open a rebuild, for nothing) from one that actually compares against
+    // the current set, order included.
+    function test_applyLocksTo_unchanged_reload_is_not_a_change() {
+        var same = Logic.applyLocksTo(["3", "special:scratchpad"], '{ "armed": ["3", "special:scratchpad"] }', "ok")
+        compare(same.armed, ["3", "special:scratchpad"]); compare(same.changed, false)
+        var reordered = Logic.applyLocksTo(["3", "special:scratchpad"], '{ "armed": ["special:scratchpad", "3"] }', "ok")
+        compare(reordered.changed, true, "a different order still counts as changed")
+        var different = Logic.applyLocksTo(["3"], '{ "armed": ["4"] }', "ok")
+        compare(different.changed, true)
+    }
+    // Distinguishes: a toggle that mutates in place (aliasing the caller's array) or accepts an
+    // unresolved/invalid selector.
+    function test_toggleSelector() {
+        var armed = ["3"]
+        var next = Logic.toggleSelector(armed, "3")
+        compare(next, []); compare(armed, ["3"], "the input array is untouched")
+        compare(Logic.toggleSelector([], "3"), ["3"])
+        compare(Logic.toggleSelector(null, "3"), null, "refuses while unresolved")
+        compare(Logic.toggleSelector([], "bad selector"), null, "refuses an invalid selector")
+    }
+
+    // ---- Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum) ----------
+    // The frame is drawn on the workspace SHOWN on a monitor, which is its special workspace when
+    // one is open and its active workspace otherwise. Distinguishes: a selector taken from the
+    // active workspace even while a special workspace covers it (the frame would then follow the
+    // workspace underneath the scratchpad), and a special workspace read by its dynamic id rather
+    // than the name the locks file stores.
+    function test_lockFrameShownSelector_prefers_the_open_special_workspace() {
+        compare(Logic.lockFrameShownSelector(
+            { activeWorkspace: { id: 3, name: "3" }, specialWorkspace: { id: -98, name: "special:scratchpad" } }),
+            "special:scratchpad")
+        compare(Logic.lockFrameShownSelector(
+            { activeWorkspace: { id: 3, name: "3" }, specialWorkspace: { id: 0, name: "" } }), "3")
+    }
+    // Hyprland reports `specialWorkspace: { id: 0, name: "" }` when no special workspace is open
+    // (verified on 0.56.2), which is also what the `activespecialv2>>,,eDP-1` payload announces:
+    // the empty name must fall back to the active workspace, not become a selector of its own.
+    // Distinguishes: a truthiness test on `specialWorkspace` alone (the object is always present).
+    function test_lockFrameShownSelector_falls_back_when_the_special_closed() {
+        compare(Logic.lockFrameShownSelector(
+            { activeWorkspace: { id: 7, name: "7" }, specialWorkspace: { id: 0, name: "" } }), "7")
+        compare(Logic.lockFrameShownSelector({ activeWorkspace: { id: 7, name: "7" } }), "7",
+                "no specialWorkspace key at all")
+    }
+    // Distinguishes: a malformed/absent snapshot throwing (the binding runs on every monitor
+    // event, including ones that arrive before the first refresh has landed) instead of
+    // resolving to "no workspace shown".
+    function test_lockFrameShownSelector_malformed_is_null_and_never_throws() {
+        compare(Logic.lockFrameShownSelector(null), null)
+        compare(Logic.lockFrameShownSelector(undefined), null)
+        compare(Logic.lockFrameShownSelector({}), null)
+        compare(Logic.lockFrameShownSelector({ activeWorkspace: null }), null)
+        compare(Logic.lockFrameShownSelector({ activeWorkspace: { name: "3" } }), null, "no id")
+        compare(Logic.lockFrameShownSelector("eDP-1"), null)
+    }
+    // Distinguishes: a frame shown whenever the workspace is armed (it must also need a live
+    // share), shown for a share alone (every monitor would be framed), or shown for an armed
+    // workspace that is not the one on this monitor.
+    function test_lockFrameVisible() {
+        var mon3 = { activeWorkspace: { id: 3, name: "3" }, specialWorkspace: { id: 0, name: "" } }
+        var mon4 = { activeWorkspace: { id: 4, name: "4" }, specialWorkspace: { id: 0, name: "" } }
+        var scratch = { activeWorkspace: { id: 3, name: "3" },
+                        specialWorkspace: { id: -98, name: "special:scratchpad" } }
+        compare(Logic.lockFrameVisible(true, ["3"], mon3), true)
+        compare(Logic.lockFrameVisible(false, ["3"], mon3), false, "no share, no frame")
+        compare(Logic.lockFrameVisible(true, ["3"], mon4), false, "another monitor's workspace is armed")
+        compare(Logic.lockFrameVisible(true, [], mon3), false)
+        compare(Logic.lockFrameVisible(true, null, mon3), false, "armed still unresolved")
+        compare(Logic.lockFrameVisible(true, ["3"], null), false, "no monitor snapshot")
+        // The scratchpad covers ws 3: armed ws 3 alone must NOT frame it, and arming the
+        // scratchpad must.
+        compare(Logic.lockFrameVisible(true, ["3"], scratch), false)
+        compare(Logic.lockFrameVisible(true, ["special:scratchpad"], scratch), true)
+    }
+    // `HyprlandMonitor.lastIpcObject` is a snapshot, so the frame is only correct if these exact
+    // events trigger a `Hyprland.refreshMonitors()`. Distinguishes: a handler that refreshes on
+    // every raw event (an IPC round trip per window title change) or one that misses the v2
+    // payload names Hyprland 0.56.2 actually emits.
+    function test_lockFrameRefreshEvent() {
+        var want = ["workspacev2", "focusedmonv2", "activespecialv2", "moveworkspacev2",
+                    "monitoraddedv2", "monitorremovedv2", "configreloaded"]
+        for (var i = 0; i < want.length; i++)
+            compare(Logic.lockFrameRefreshEvent(want[i]), true, want[i] + " must refresh monitors")
+        var no = ["workspace", "activespecial", "monitoradded", "focusedmon", "openwindow",
+                  "windowtitlev2", "activewindowv2", "", undefined, null]
+        for (var j = 0; j < no.length; j++)
+            compare(Logic.lockFrameRefreshEvent(no[j]), false, String(no[j]) + " must not refresh")
+    }
+    // The config colour is Hyprland's `rgb(rrggbb)` / `rgba(rrggbbaa)`; QML wants `#rrggbb` /
+    // `#aarrggbb`. Distinguishes: an alpha left at the END (`#rrggbbaa` is read by Qt as
+    // #aarrggbb, so `rgba(ff444480)` would render as a nearly-black 0xff-alpha colour) and a
+    // rejected value producing an invalid colour string instead of the default.
+    function test_lockColorToQml() {
+        compare(Logic.lockColorToQml("rgb(ff4444)"), "#ff4444")
+        compare(Logic.lockColorToQml("rgba(ff444480)"), "#80ff4444", "alpha moves to the front")
+        compare(Logic.lockColorToQml("rgb(3355FF)"), "#3355FF")
+        compare(Logic.lockColorToQml("red"), "#ff4444")
+        compare(Logic.lockColorToQml("rgb(zz)"), "#ff4444")
+        compare(Logic.lockColorToQml(""), "#ff4444")
+        compare(Logic.lockColorToQml(undefined), "#ff4444")
+        compare(Logic.lockColorToQml("#ff4444"), "#ff4444", "already-QML input is not accepted, but degrades to the default")
+    }
+    // A frame strip's surface must land on WHOLE device pixels, or the `no_screen_share` blanking
+    // box — floored origin, truncated size — misses one device line of it and the frame leaks into
+    // the capture. This picks the smallest surface at least one logical px thicker than the paint
+    // whose device size is integral. Distinguishes: no snapping at all (always thickness + 1, which
+    // is 8.75 device px at scale 1.25), a search that stops at the first candidate without checking
+    // the product, and one that never gives up (an irrational-ish scale must fall back rather than
+    // grow the frame without bound).
+    function test_lockFrameSurfaceSize() {
+        compare(Logic.lockFrameSurfaceSize(6, 1.25), 8, "7*1.25 = 8.75 is fractional; 8*1.25 = 10 is not")
+        compare(Logic.lockFrameSurfaceSize(6, 1), 7, "scale 1: thickness + 1 is already whole")
+        compare(Logic.lockFrameSurfaceSize(6, 1.5), 8, "7*1.5 = 10.5 fractional, 8*1.5 = 12 whole")
+        compare(Logic.lockFrameSurfaceSize(6, 2), 7, "any integer scale takes the smallest surface")
+        compare(Logic.lockFrameSurfaceSize(7, 1.25), 8, "the search starts at thickness + 1, not at a fixed size")
+        compare(Logic.lockFrameSurfaceSize(6, 1.2), 10, "needs 4 more px than the minimum")
+        compare(Logic.lockFrameSurfaceSize(6, 1.6), 10)
+        compare(Logic.lockFrameSurfaceSize(6, 1.666667), 9, "a rounded 5/3 counts as whole within the tolerance")
+        compare(Logic.lockFrameSurfaceSize(6, 1.333333), 9, "same for a rounded 4/3")
+        compare(Logic.lockFrameSurfaceSize(6, NaN), 7, "a nonsense scale degrades to thickness + 1")
+        compare(Logic.lockFrameSurfaceSize(6, 0), 7, "and so does a zero scale, which would divide the world by zero")
+    }
 }

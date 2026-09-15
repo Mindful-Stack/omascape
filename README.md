@@ -37,6 +37,21 @@ removed `walker`.
 - **Scratchpad:** `Ctrl+S` shows Omarchy's scratchpad as its own row below the workspaces
   (hidden on every open). `Enter` or a click on it brings the scratchpad up; drop a window on it
   to send it there silently; find covers its windows while the row is shown.
+- **Lock for screen sharing:** `Ctrl+L` arms the selected workspace: its windows are black in
+  every screen capture from then on (shares, recordings, screenshots), it carries a lock badge,
+  and its box shows icons instead of thumbnails (the compositor denies their export); while a
+  share is running the box shows a placeholder instead. Press again to disarm. The set is kept
+  in `~/.config/omarchy/omyview-locks.json`. Arming is per workspace: the overview still shows
+  every other workspace's live thumbnails to a share viewer, and even an armed box only hides
+  its own app icons and window names behind the lock glyph while sharing — arm every workspace
+  you don't want seen. While a share is running, any monitor showing an armed workspace gets a
+  thin coloured frame around its edges as a local reminder (`lockBorder`/`lockBorderSize` below) —
+  that frame is for you only: it is blanked in every capture, so a viewer just sees the plain
+  black box and never your windows. It follows whatever that monitor is showing,
+  the scratchpad included, and it is click-through and reserves no space. The frame (and the
+  placeholder in the overview) can lag a few seconds behind the end of a share: the compositor
+  signals sharing per captured frame, so omyview waits out a short grace period before believing a
+  share is over, rather than flickering whenever the frames pause.
 - **Theme-aware.** Pulls the active Omarchy theme's colors and fonts, so it matches the bar
   and re-themes automatically.
 - **Zero idle cost.** The component stays loaded with the shell so open and close can animate,
@@ -122,6 +137,7 @@ Press **SUPER+P**. The overlay opens on your focused monitor.
 | **Ctrl+S**                          | Show / hide the scratchpad row                        |
 | **Enter / click the empty row** (scratchpad) | Bring the scratchpad up and close           |
 | **click a tile in the row** (scratchpad) | Focus that window, raised above its siblings   |
+| **Ctrl+L**               | Arm / disarm the selected workspace for screen sharing     |
 | **Esc / click-out**      | Close                                                     |
 
 Digits jump to a workspace only while the query is empty; once you've typed a letter, digits
@@ -162,7 +178,9 @@ Optional user settings live in `~/.config/omarchy/omyview.json` (watched; edits 
   "scrim": true,
   "hint": true,
   "workspaces": 10,
-  "motion": "auto"
+  "motion": "auto",
+  "lockBorder": "rgb(ff4444)",
+  "lockBorderSize": 6
 }
 ```
 
@@ -176,6 +194,18 @@ Optional user settings live in `~/.config/omarchy/omyview.json` (watched; edits 
   follows. `0` shows only what Hyprland reports.
 - `motion` — `"auto"` (default) animates only when Hyprland's `animations:enabled` is on;
   `"full"` always animates; `"off"` never does (every duration is 0).
+- `lockBorder` — colour of the share-time reminder frame drawn around a monitor showing an armed
+  workspace (default `"rgb(ff4444)"`); only the `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are
+  accepted (Hyprland's own colour syntax), anything else falls back to the default. The alpha of
+  `rgba(...)` is honoured, so e.g. `"rgba(ff444480)"` is a half-transparent red.
+- `lockBorderSize` — thickness of that frame in pixels, `0`–`20` (default `6`); `0` turns the
+  reminder off. The frame is drawn flush against all four screen edges and is a local reminder
+  only — it is blanked in every capture, so a viewer sees a plain black box, never your windows and
+  never the frame. (Under the paint each strip claims a slightly larger, invisible surface, sized
+  so that it lands on whole device pixels at your monitor's scale — that is what keeps the frame
+  out of the recording. On an exotic scale where no such size exists within 12 px, a single
+  device-pixel hairline of the frame colour can show in a capture; it reveals that a frame is
+  there, never what is behind it.)
 
 ### Blurred scrim (optional, Hyprland side)
 

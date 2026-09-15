@@ -12,6 +12,8 @@ floating move, guarded chunk cleanup + error reporting, dwindle guard, event-flo
 refresh, selection by workspace id, Lua behaviour suite in CI. Find (2026-09-11): type-ahead
 fuzzy window search, see docs/specs/2026-09-11-find-design.md. Scratchpad row (2026-09-12):
 Ctrl+S shows special:scratchpad as a trailing row, see docs/specs/2026-09-12-scratchpad-design.md.
+Workspace lock (2026-09-12): Ctrl+L arms a workspace's windows black in every screen capture,
+see docs/specs/2026-09-12-lock-design.md.
 
 ## Next steps
 
@@ -60,6 +62,10 @@ Type any letter to fuzzy-filter windows by class and title; see
 ### 8. ~~Scratchpad row~~ ✅ done (2026-09-12)
 `Ctrl+S` shows `special:scratchpad` as a trailing row; see
 `docs/specs/2026-09-12-scratchpad-design.md`.
+
+### 9. ~~Workspace lock~~ ✅ done (2026-09-12)
+`Ctrl+L` arms the selected workspace for screen sharing; see
+`docs/specs/2026-09-12-lock-design.md`.
 
 ## Maintenance gotchas (verified in-session)
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell
