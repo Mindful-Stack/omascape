@@ -10,6 +10,8 @@ removed `walker`.
 
 ![Omyview open over omarchy.org: two monitor groups, live thumbnails of every window](preview.webp)
 
+![Open, drag windows between workspaces, jump, and the scratchpad row](docs/screenshots/demo.gif)
+
 ## Features
 
 - **Live window previews.** Each window is a real, live thumbnail of its contents (via
