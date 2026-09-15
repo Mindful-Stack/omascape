@@ -8,7 +8,7 @@ workspace, or **drag a window onto another workspace** to move it there.
 Built to replace the dead `walker`-based `workspace-picker.sh` after Omarchy Quattro
 removed `walker`.
 
-![Omyview open over omarchy.org: two monitor groups, live thumbnails of every window](preview.png)
+![Omyview open over omarchy.org: two monitor groups, live thumbnails of every window](preview.webp)
 
 ## Features
 
@@ -84,9 +84,9 @@ thumbnails; their windows are black in every capture.
 
 ![Five workspaces armed with the lock badge](docs/screenshots/lock.webp)
 
-**Follows your theme.** Rosé Pine, Osaka Jade and Matte Black, no configuration.
+**Follows your theme.** Tokyo Night, Rosé Pine, Osaka Jade and Matte Black, no configuration.
 
-![The overview under three Omarchy themes](docs/screenshots/themes.webp)
+![The overview under four Omarchy themes](docs/screenshots/themes.webp)
 
 ---
 
