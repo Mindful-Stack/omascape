@@ -36,6 +36,9 @@ TestCase {
         console.log("CHUNK TILED_INSERT " + Logic.tiledInsertLua("0xabc", 3, { anchor: "0xdef", side: "left", x: 1, y: 2 }))
         console.log("CHUNK TILED_INSERT_NO_ANCHOR " + Logic.tiledInsertLua("0xabc", 3, { anchor: "", side: "", x: 10, y: 20 }))
         console.log("CHUNK FLOATING_MOVE " + Logic.floatingMoveLua("0xabc", 3, { x: 200, y: 1600 }))
+        console.log("CHUNK FLOATING_MOVE_SCRATCH " + Logic.floatingMoveLua("0xabc", Logic.SCRATCHPAD_ID, { x: 200, y: 1600 }))
+        console.log("CHUNK SCRATCHPAD_SHOW " + Logic.scratchpadShowLua())
+        console.log("CHUNK SCRATCHPAD_FOCUS " + Logic.scratchpadFocusLua("0xabc"))
     }
 }
 EOF
@@ -51,8 +54,8 @@ QT_QPA_PLATFORMTHEME=generic QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1
 sed -n 's/^.*CHUNK //p' "$fixture/qml.out" > "$fixture/chunks.txt"
 
 count=$(grep -c . "$fixture/chunks.txt" || true)
-if [ "$qml_status" -ne 0 ] || [ "$count" -lt 4 ]; then
-  echo "FAIL: $RUNNER exited $qml_status; expected 4 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
+if [ "$qml_status" -ne 0 ] || [ "$count" -lt 7 ]; then
+  echo "FAIL: $RUNNER exited $qml_status; expected 7 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
   echo "--- raw qml output:" >&2; cat "$fixture/qml.out" >&2
   exit 1
 fi

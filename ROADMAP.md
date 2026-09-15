@@ -10,7 +10,8 @@ states (2026-09-10): fullscreen windows drawn in their recovered slot with an un
 badge; floating tiles stack above tiled. Hardening (2026-09-10, review follow-up): atomic
 floating move, guarded chunk cleanup + error reporting, dwindle guard, event-flood-safe
 refresh, selection by workspace id, Lua behaviour suite in CI. Find (2026-09-11): type-ahead
-fuzzy window search, see docs/specs/2026-09-11-find-design.md.
+fuzzy window search, see docs/specs/2026-09-11-find-design.md. Scratchpad row (2026-09-12):
+Ctrl+S shows special:scratchpad as a trailing row, see docs/specs/2026-09-12-scratchpad-design.md.
 
 ## Next steps
 
@@ -55,6 +56,10 @@ consumer-side install + SUPER+P bind.
 ### 7. ~~Find — type-ahead window search~~ ✅ done (2026-09-11)
 Type any letter to fuzzy-filter windows by class and title; see
 `docs/specs/2026-09-11-find-design.md`.
+
+### 8. ~~Scratchpad row~~ ✅ done (2026-09-12)
+`Ctrl+S` shows `special:scratchpad` as a trailing row; see
+`docs/specs/2026-09-12-scratchpad-design.md`.
 
 ## Maintenance gotchas (verified in-session)
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell

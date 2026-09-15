@@ -788,4 +788,80 @@ TestCase {
         compare(tilesByAddr(legacy, "0xL").fullscreen, 2)
     }
 
+    function scratchInput(extra) {
+        var wss = [ { id: 1, monitorName: "eDP-1", focused: true, occupied: true },
+                    { id: 2, monitorName: "eDP-1", focused: false, occupied: false },
+                    { id: Logic.SCRATCHPAD_ID, monitorName: "eDP-1", special: "scratchpad",
+                      focused: false, occupied: true } ]
+        return { monitors: [edp()], workspaces: wss, windows: extra || [],
+                 focusedMonitorName: "eDP-1", availW: 1632, params: params }
+    }
+    // Distinguishes: the scratchpad laid out inside the monitor group (a third cell on the
+    // row), or without its own header band in single-monitor mode.
+    function test_scratchpad_group_is_appended_below_with_a_header() {
+        var r = Logic.layout(scratchInput())
+        compare(r.groups.length, 2)
+        compare(r.groups[0].headerH, 0, "single-monitor group keeps no band")
+        compare(r.groups[1].special, "scratchpad")
+        compare(r.groups[1].headerH, 22, "the scratchpad row always has a band")
+        compare(r.groups[1].focused, false)
+        verify(r.groups[1].y >= r.groups[0].y + r.groups[0].h + params.rowSpacing - 0.5, "below the last group")
+        var s = boxById(r, Logic.SCRATCHPAD_ID)
+        verify(s !== null, "one box for the scratchpad")
+        compare(s.special, "scratchpad")
+        compare(s.w, r.cell.w); compare(s.h, boxById(r, 1).h, "same monitor, same cell height")
+        fuzzyCompare(s.x + s.w / 2, r.canvasSize.w / 2, 1, "centred in the row")
+        compare(r.groups[1].w, r.canvasSize.w, "the row spans the canvas")
+        compare(s.y, r.groups[1].y + 22, "under the band")
+        fuzzyCompare(r.canvasSize.h, s.y + s.h, 0.5)
+    }
+    // Distinguishes: the row height taken from the focused monitor instead of the scratchpad's.
+    function test_scratchpad_box_height_follows_its_own_monitor() {
+        var input = scratchInput()
+        input.monitors = [edp(), hdmi()]
+        input.workspaces.push({ id: 6, monitorName: "HDMI-A-1", focused: false, occupied: false })
+        input.workspaces[2].monitorName = "HDMI-A-1"
+        var r = Logic.layout(input)
+        compare(boxById(r, Logic.SCRATCHPAD_ID).h, boxById(r, 6).h)
+        verify(boxById(r, Logic.SCRATCHPAD_ID).h !== boxById(r, 1).h)
+        compare(r.groups.length, 3); compare(r.groups[2].special, "scratchpad")
+    }
+    // Distinguishes: a special group that appears even when no special workspace is in the input.
+    function test_no_scratchpad_group_without_a_special_workspace() {
+        var input = scratchInput(); input.workspaces.pop()
+        var r = Logic.layout(input)
+        compare(r.groups.length, 1); compare(boxById(r, Logic.SCRATCHPAD_ID), null)
+    }
+    // Distinguishes: a tiled scratchpad window dropped or drawn as floating (layer 2).
+    function test_tiled_window_on_the_scratchpad_renders_as_a_tiled_tile() {
+        var r = Logic.layout(scratchInput([
+            { address: "0xT", cls: "x", ax: 0, ay: 26, sw: 1024, sh: 1254, workspaceId: Logic.SCRATCHPAD_ID,
+              floating: false, fullscreen: 0 }]))
+        var t = null
+        for (var i = 0; i < r.tiles.length; i++) if (r.tiles[i].address === "0xT") t = r.tiles[i]
+        verify(t !== null); compare(t.layer, 1); compare(t.workspaceId, Logic.SCRATCHPAD_ID)
+    }
+    // Distinguishes: `hasWs` written as `>= 0` (rejects -2) or as `!== undefined` (accepts -1).
+    function test_hasWs_accepts_the_scratchpad_and_rejects_none() {
+        verify(Logic.hasWs(Logic.SCRATCHPAD_ID)); verify(Logic.hasWs(1)); verify(Logic.hasWs(10))
+        verify(!Logic.hasWs(-1)); verify(!Logic.hasWs(undefined)); verify(!Logic.hasWs(null)); verify(!Logic.hasWs(NaN))
+    }
+    // Distinguishes: dispatching the scratchpad by id (Hyprland's id is dynamic) instead of by name.
+    function test_wsSelector_names_the_scratchpad() {
+        compare(Logic.wsSelector(Logic.SCRATCHPAD_ID), "special:scratchpad")
+        compare(Logic.wsSelector(3), "3")
+        verify(Logic.isScratchpad(Logic.SCRATCHPAD_ID)); verify(!Logic.isScratchpad(2)); verify(!Logic.isScratchpad(-1))
+        compare(Logic.wsSelector(undefined), ""); compare(Logic.wsSelector(NaN), "")
+    }
+    // Distinguishes: floatingMoveLua emitting a numeric target for the scratchpad ("-2" is not a
+    // workspace Hyprland knows) or comparing "same workspace" by id.
+    function test_floating_move_to_the_scratchpad_uses_the_name() {
+        var lua = Logic.floatingMoveLua("0xabc", Logic.SCRATCHPAD_ID, { x: 10, y: 20 })
+        verify(lua.indexOf('workspace = "special:scratchpad"') >= 0)
+        verify(lua.indexOf('w.workspace.name == "special:scratchpad"') >= 0)
+        verify(lua.indexOf('"-2"') < 0)
+        var normal = Logic.floatingMoveLua("0xabc", 3, { x: 10, y: 20 })
+        verify(normal.indexOf('workspace = "3"') >= 0); verify(normal.indexOf('w.workspace.id == 3') >= 0)
+    }
+
 }

@@ -19,6 +19,8 @@ function M.new(opts)
   hl.__workspaces = opts.workspaces or {}
   hl.__active_window = opts.active_window or nil
   hl.__cursor = { x = 5, y = 6 }
+  hl.__active_special = opts.active_special or nil          -- { name = "special:…" } or nil
+  function hl.get_active_special_workspace() return hl.__active_special end
 
   local function byAddress(sel)
     local a = sel:match("^address:(.+)$")
@@ -48,7 +50,9 @@ function M.new(opts)
   hl.dsp = {
     focus = d("focus"),
     cursor = { move = d("cursor.move") },
-    window = { float = d("window.float"), move = d("window.move"), fullscreen = d("window.fullscreen") },
+    window = { float = d("window.float"), move = d("window.move"), fullscreen = d("window.fullscreen"),
+               bring_to_top = d("window.bring_to_top"), alter_zorder = d("window.alter_zorder") },
+    workspace = { toggle_special = d("workspace.toggle_special") },
   }
   function hl.dispatch(desc)
     hl.__log[#hl.__log + 1] = desc
@@ -58,17 +62,32 @@ function M.new(opts)
     end
     local a = desc.args or {}
     local w = a.window and byAddress(a.window) or nil
-    if desc.name == "window.float" and w then
+    if desc.name == "focus" then
+      hl.__active_window = w or hl.__active_window
+    elseif desc.name == "window.float" and w then
       w.floating = not w.floating
     elseif desc.name == "window.move" and w then
-      if a.workspace then w.workspace = { id = tonumber(a.workspace) } end
+      if a.workspace then
+        local n = tonumber(a.workspace)
+        w.workspace = n and { id = n } or { id = -99, name = a.workspace }
+      end
       if a.x and a.y then w.at = { x = tonumber(a.x), y = tonumber(a.y) } end
     elseif desc.name == "window.fullscreen" and w then
       -- Hyprland's toggle rule: asking for the mode the window has turns it off, otherwise switches.
       local want = (a.mode == "maximized") and 1 or 2
       w.fullscreen = (w.fullscreen == want) and 0 or want
+    elseif desc.name == "window.bring_to_top" then
+      -- No window arg (it acts on whatever is currently focused): record it, never a no-op.
+      hl.__top = hl.__active_window
+    elseif desc.name == "window.alter_zorder" then
+      -- Targets a window by selector; mode "top" raises it. Recorded, never a no-op.
+      if a.mode == "top" then hl.__top = w end
     elseif desc.name == "cursor.move" then
       hl.__cursor = { x = a.x, y = a.y }
+    elseif desc.name == "workspace.toggle_special" then
+      local name = "special:" .. tostring(desc.args)
+      if hl.__active_special and hl.__active_special.name == name then hl.__active_special = nil
+      else hl.__active_special = { name = name } end
     end
     return { ok = true, pass_event = false }
   end

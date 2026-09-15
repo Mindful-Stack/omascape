@@ -142,10 +142,10 @@ TestCase {
         type("sl"); keyClick(Qt.Key_Space)
         compare(view.query, "sl ")
     }
-    // Distinguishes: bare-letter handling swallowing chords. Ctrl+S is reserved: it must
+    // Distinguishes: bare-letter handling swallowing chords. Ctrl+K is reserved: it must
     // neither type nor act.
     function test_ctrl_chords_are_ignored() {
-        keyClick("s", Qt.ControlModifier)
+        keyClick("k", Qt.ControlModifier)
         compare(view.query, "")
         compare(view.compositor.commands.length, 0)
         compare(view.opened, true)

@@ -34,6 +34,9 @@ removed `walker`.
   the way they normally move between workspaces, `Tab`/`Shift+Tab` cycle matches by rank,
   `Enter` focuses the selected window, `Esc` clears the query (a second `Esc` closes).
   Digits jump while the query is empty and type once it is not. Ctrl+letter chords are reserved.
+- **Scratchpad:** `Ctrl+S` shows Omarchy's scratchpad as its own row below the workspaces
+  (hidden on every open). `Enter` or a click on it brings the scratchpad up; drop a window on it
+  to send it there silently; find covers its windows while the row is shown.
 - **Theme-aware.** Pulls the active Omarchy theme's colors and fonts, so it matches the bar
   and re-themes automatically.
 - **Zero idle cost.** The component stays loaded with the shell so open and close can animate,
@@ -116,6 +119,9 @@ Press **SUPER+P**. The overlay opens on your focused monitor.
 | **↑ ↓ ← →** (query active)         | Move spatially among workspaces that hold a match |
 | **Enter** (query active) | Focus the selected match and close                        |
 | **Esc** (query active)   | Clear the query                                            |
+| **Ctrl+S**                          | Show / hide the scratchpad row                        |
+| **Enter / click the empty row** (scratchpad) | Bring the scratchpad up and close           |
+| **click a tile in the row** (scratchpad) | Focus that window, raised above its siblings   |
 | **Esc / click-out**      | Close                                                     |
 
 Digits jump to a workspace only while the query is empty; once you've typed a letter, digits
