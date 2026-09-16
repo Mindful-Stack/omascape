@@ -1632,14 +1632,8 @@ Item {
                     spacing: Math.round(Style.space(12))
                     Repeater {
                         id: hintKeys
-                        // ctrl+s/ctrl+l stay in the primary tier (not moved to hint2): Lock and
-                        // Scratchpad's UI suites scan testHintModel — an alias onto THIS model —
-                        // for those two entries, so removing them here would break both suites.
-                        // Only the keys this task newly documents (tab/ctrl+w/right-click) move
-                        // to the second tier.
                         model: [ { k: "1–0", l: "jump" }, { k: "↑ ↓ ← →", l: "move" }, { k: "↵", l: "select" },
                                  { k: "drag", l: "move window" }, { k: "type", l: "find" },
-                                 { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" },
                                  { k: "esc", l: "close" },
                                  { k: "?", l: root.hintsExpanded ? "less" : "more" } ]
                         HintCap { foreground: root.foreground; fill: root.wellColor
@@ -1654,7 +1648,8 @@ Item {
                     Repeater {
                         id: hintKeys2
                         model: [ { k: "tab", l: "window" }, { k: "ctrl+w / mid-click", l: "close" },
-                                 { k: "right-click", l: "menu" } ]
+                                 { k: "right-click", l: "menu" },
+                                 { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" } ]
                         HintCap { foreground: root.foreground; fill: root.wellColor
                                   fontFamily: root.fontFamily; fontSize: root.captionSize }
                     }

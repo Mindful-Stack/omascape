@@ -218,9 +218,10 @@ TestCase {
         compare(childNamed(boxItemOf(7), "wsNumeral").visible, false,
                 "an empty armed box shows the glyph alone, never the numeral under it")
     }
-    // Distinguishes: the hint not advertising the key.
+    // Distinguishes: the hint not advertising the key. ctrl+l lives in the second tier
+    // (testHintModel2) — the advanced keys `?` reveals — not the primary row.
     function test_hint_mentions_ctrl_l() {
-        var hints = view.testHintModel, found = false
+        var hints = view.testHintModel2, found = false
         for (var i = 0; i < hints.length; i++) if (hints[i].k === "ctrl+l") found = true
         verify(found)
     }
