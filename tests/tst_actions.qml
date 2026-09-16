@@ -66,6 +66,12 @@ TestCase {
         var t = Logic.target(input({ matchAddress: "0xM", cursorAddress: "0xC" }))
         compare(t.address, "0xC")
     }
+    // Distinguishes: a query active but with no match yet (matchAddress empty). The function
+    // must fall through to the cursor, not stay on an absent match.
+    function test_target_query_without_match_falls_to_cursor() {
+        var t = Logic.target(input({ query: "xyz", matchAddress: "", cursorAddress: "0xC" }))
+        compare(t.address, "0xC")
+    }
 
     function tile(addr, ws, x, y) { return { address: addr, wsid: ws, x: x, y: y } }
 
@@ -102,6 +108,12 @@ TestCase {
     function test_cycleWindows_foreign_current_restarts() {
         compare(Logic.cycleWindows(rows, 1, "z", 1, null), "a")
     }
+    // Distinguishes: wrap arithmetic that fails when step magnitude exceeds the list length.
+    // With a three-item list, step = -5 must use normalized modulo, not the naive form.
+    function test_cycleWindows_wrap_arithmetic_with_large_step() {
+        compare(Logic.cycleWindows(rows, 1, "a", 5, null), "c")   // Forward wrap with large step
+        compare(Logic.cycleWindows(rows, 1, "a", -5, null), "b")  // Backward wrap with large step
+    }
 
     // Distinguishes: a menu highlight that does not wrap, or that starts anywhere but the ends.
     function test_menuNavigate() {
@@ -110,5 +122,11 @@ TestCase {
         compare(Logic.menuNavigate(3, 2, 1), 0)
         compare(Logic.menuNavigate(3, 0, -1), 2)
         compare(Logic.menuNavigate(0, -1, 1), -1)
+    }
+    // Distinguishes: wrap arithmetic that fails when step magnitude exceeds the count.
+    // With a three-item menu, step = -5 must use normalized modulo, not the naive form.
+    function test_menuNavigate_wrap_arithmetic_with_large_step() {
+        compare(Logic.menuNavigate(3, 0, 5), 2)   // Forward wrap with large step
+        compare(Logic.menuNavigate(3, 0, -5), 1)  // Backward wrap with large step
     }
 }

@@ -810,9 +810,11 @@ function navigateMatches(boxes, matchWs, current, dir) {
 // Address of the drawn tile under (px, py), or "". `candidates` are the DISPLAYED rects
 // ({ address, x, y, w, h, z }) the view collects from the delegates — scale already folded in,
 // so a hovered tile hit-tests at the size it is painted. Highest `z` wins; a tie goes to the
-// later candidate, which is the one the Repeater paints on top. Unlike `hitWorkspace`/
-// `tiledDropPlan` there is no nearest-rect fallback: an action must never reach a tile the
-// pointer is not actually over.
+// later candidate, which is the one the Repeater paints on top. The hit test is inclusive on
+// all four edges, so a pointer exactly on the shared border of two abutting tiles counts as
+// inside both and the z-tie rule picks the later one. Unlike `hitWorkspace`/`tiledDropPlan`
+// there is no nearest-rect fallback: an action must never reach a tile the pointer is not
+// actually over.
 function tileAt(candidates, px, py) {
     var best = null
     for (var i = 0; i < candidates.length; i++) {
@@ -842,8 +844,9 @@ function target(input) {
 }
 
 // Next/previous window of workspace `wsId` in reading order (y, then x, then address so the
-// order can never depend on model insertion). `tiles` are the model rows as
-// { address, wsid, x, y }; `skip` is an address→true map of windows with an outstanding close
+// order can never depend on model insertion). `tiles` must be pre-mapped into the shape
+// { address, wsid, x, y } (from raw model rows with wx/wy) so a row cannot collide with a
+// QML delegate's own x/y. `skip` is an address→true map of windows with an outstanding close
 // request — they are not cycle stops, which is what stops a repeated Ctrl+W from landing back on
 // a window it already asked to close. Returns "" when the workspace has no eligible window.
 function cycleWindows(tiles, wsId, current, step, skip) {
@@ -861,14 +864,14 @@ function cycleWindows(tiles, wsId, current, step, skip) {
     var idx = -1
     for (var j = 0; j < list.length; j++) if (list[j].address === current) { idx = j; break }
     if (idx < 0) return (step > 0 ? list[0] : list[list.length - 1]).address
-    return list[(idx + step + list.length) % list.length].address
+    return list[((idx + step) % list.length + list.length) % list.length].address
 }
 
 // Menu highlight movement: wrapping, and from "none" onto the first (down) or last (up) row.
 function menuNavigate(count, index, step) {
     if (!(count > 0)) return -1
     if (index < 0) return step > 0 ? 0 : count - 1
-    return (index + step + count) % count
+    return ((index + step) % count + count) % count
 }
 
 // ---- Scratchpad (docs/specs/2026-09-12-scratchpad-design.md) ---------------------------
