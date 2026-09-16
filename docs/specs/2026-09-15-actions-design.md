@@ -428,3 +428,45 @@ window onto the floated window**, so "restores focus" has something to restore.
   `swap_monitors` leaves each monitor showing the workspace it received; close-all on a workspace
   with a floating and a tiled window empties it; floating a fullscreen window leaves it floating
   and fullscreen; and the overview still receives keys after each.
+
+## Verified facts (live, 2026-09-16)
+
+Probed on this machine (Hyprland 0.56.2, single monitor `eDP-1`) with
+`tests/integration/actions-probe.sh`. Verbatim output:
+
+```
+FACT get_windows: table n=1 first=0x556cc8c60760
+FACT hyprctl client count on ws 10: 1
+FACT float on→true on-again→true off→false
+SKIP: cases 3 (workspace.move) and 4 (swap_monitors) need two monitors; run them on the nested rig
+```
+
+- **`HL.Workspace:get_windows()` returns a one-based Lua table** of `HL.Window` objects: `#t`
+  equalled hyprctl's own client count for the workspace (1 = 1) rather than off by one, and
+  `t[1].address` was non-nil. **Addresses carry the `0x` prefix** (`0x556cc8c60760`), matching
+  what `hyprctl -j clients` reports and what `restoreFocusLua` already normalizes for.
+- **`hl.dsp.window.float({ action = "on" | "off" })` is an absolute state, not a toggle.** A
+  second `action = "on"` on an already-floating window stayed floating (`on-again→true`); a
+  toggle implementation would have flipped it back to tiled and the assertion is written so that
+  exact failure mode fails it (`[ "$F2" = true ]`). `action = "off"` then tiled it
+  (`off→false`). All three reads came from a fresh `hyprctl -j clients` lookup taken after each
+  dispatch, never from a value the script passed in.
+- **Cases 3 (`workspace.move`) and 4 (`swap_monitors`) are NOT verified on this machine** — it
+  has one monitor (`eDP-1`) and the probe SKIPs both by design rather than fabricating a
+  two-monitor result. The move/swap semantics described above under "Move to ‹monitor›" and "Swap
+  with ‹monitor›" remain **design-time claims from reading the 0.56.2 source**
+  (`CWorkspacePlacementController`), not facts observed live; whether the moved-and-active-on-the-
+  focused-monitor case actually warps the cursor, and whether `swap_monitors` really leaves each
+  monitor showing what it received, are left for the plan's Task 13/14 live checks on the nested
+  rig (`tests/integration/lib.sh`), which can bring up two monitors.
+- **Tooling note, not a compositor fact:** `hyprctl eval <code>` does not print a Lua chunk's
+  return value — only `ok` on success or `error: ...` on failure (confirmed against `hyprctl
+  --help`'s own description of the two subcommands, and by direct test: `hyprctl eval "return
+  42"` → `ok`, `hyprctl repl "return 42"` → `42`). `hyprctl repl <code>` is the subcommand that
+  evaluates a one-shot Lua string and prints its result, and is what `actions-probe.sh`'s `ev()`
+  helper uses to read `get_windows()`'s shape back out. This is a deviation from the brief's script
+  text (which used `eval` in `ev()`); every other call in the probe is either an `hyprctl dispatch`
+  (fire-and-forget, verified by a subsequent fresh `-j` read) or a plain `-j` read, so this affects
+  only how a *test script* recovers a Lua return value, not any dispatcher contract the real
+  plugin chunks rely on — but any later probe or Tier 2 live check that wants a Lua expression's
+  value back, rather than just its side effect, needs `repl`, not `eval`.
