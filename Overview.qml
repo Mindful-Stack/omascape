@@ -849,6 +849,14 @@ Item {
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind()
+        // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
+        // event) must hand the target to the keyboard until the pointer actually moves again —
+        // "most recent input device wins" means the device that summoned the overview, not
+        // wherever the mouse was left resting the last time it closed. Only the flag resets:
+        // pointerSceneX/Y are left alone, so if the real pointer has not moved at all since the
+        // last close, the next onPointChanged/notePointerMove sees the SAME position and does not
+        // spuriously flip liveness back on (see notePointerMove's early-return guard).
+        pointerLive = false
         _showVisuals(true)                         // before the first rebuild: layout motion is gated on it
         rebuild()          // instant paint from current data
         flick.contentX = 0; flick.contentY = 0   // fresh scroll every open (kept-loaded state would otherwise leak the last offset)

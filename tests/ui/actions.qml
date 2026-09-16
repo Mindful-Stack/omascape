@@ -38,15 +38,20 @@ TestCase {
         ] }
     }
     function init() {
-        // QtQuickTest runs this file's test functions in alphabetical order, not declaration
-        // order, and the real synthetic cursor lives on the shared TestCase window, not on the
-        // (fresh, per-test) `view`. Without this, a test earlier in that alphabetical order that
-        // ends with the pointer resting over a tile (e.g. test_a_lone_modifier_press_changes_nothing)
-        // leaves the OS-level cursor there; the next test's freshly-created Overview lays its own
-        // tile out at the identical screen position, and Qt's normal hover reconciliation on the
-        // new item fires the HoverHandler immediately — before that test has done anything of its
-        // own. Parking off any tile first is test-isolation only: it changes nothing the suite
-        // asserts about liveness, only when the *previous* test's mouse motion is allowed to count.
+        // Compensates for a gap between this fixture and the real (kept-loaded) shell: every test
+        // gets a BRAND NEW Overview instance (createTemporaryObject), so pointerSceneX/Y start at
+        // their (0, 0) declared default rather than carrying over the real scene position the way
+        // a single kept-loaded instance would across a close/reopen. QtQuickTest also runs this
+        // file's functions in ALPHABETICAL order, not declaration order, so a test earlier in that
+        // order that ends with the real synthetic cursor resting over a tile (e.g.
+        // test_a_lone_modifier_press_changes_nothing) leaves it there on the one real QQuickWindow
+        // this whole file shares. The next test's fresh instance then sees its very first
+        // onPointChanged report a position that differs from ITS OWN (0, 0) default — even though
+        // the real pointer never moved during that test — and notePointerMove reads that as motion.
+        // open()'s own `pointerLive = false` (production fix for the same-instance case) cannot
+        // help here: it runs before that first onPointChanged arrives. Parking the real cursor off
+        // any tile before each test is what actually breaks the chain; it changes nothing the
+        // suite asserts about liveness, only which stray motion is allowed to count.
         mouseMove(tc, -50, -50)
         view = createTemporaryObject(overview, tc)
         verify(view !== null)
@@ -91,6 +96,22 @@ TestCase {
     // this only pins that the fixture's delegate geometry matches the rows the other tests use.
     function test_tile_candidates_match_the_model_rows() {
         compare(view.tileCandidates().length, view.testModel.count)
+    }
+    // Distinguishes: open() failing to drop a stale liveness from the PREVIOUS summon. On a real
+    // desktop the overview is kept loaded between summons, and SUPER+P is a compositor keybind it
+    // never sees as a key event — closing with the pointer resting on a tile and reopening with
+    // the keyboard, mouse untouched, must hand the target to the keyboard, not replay the old
+    // hover. Reuses the SAME `view` across close/open (unlike every other test's fresh instance
+    // per test), to match that kept-loaded scenario exactly.
+    function test_reopening_drops_a_stale_pointer_liveness() {
+        hoverTile("0xA")
+        compare(view.pointerLive, true)
+        view.close()
+        view.open()
+        wait(400)
+        compare(view.pointerLive, false, "a keyboard re-summon must not inherit the old hover")
+        var t = view.resolveTarget()
+        compare(t.kind, "workspace"); compare(t.id, 1)
     }
 
     // ---- key classes ---------------------------------------------------------------------
