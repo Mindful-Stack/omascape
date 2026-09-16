@@ -309,6 +309,60 @@ Item {
     property string dropTargetSide: ""   // "left"|"right"|"top"|"bottom" while a tiled drag hovers a tile
     property real dragViewportX: 0
     property real dragViewportY: 0
+    // ---- Actions: pointer liveness and target resolution ---------------------------------
+    // "Most recent input device wins." Liveness is tracked in SCENE coordinates, never canvas
+    // ones: an edge/wheel scroll, a card resize or the entrance scale all move the canvas under a
+    // stationary pointer, and none of those is the user pointing at something new.
+    property bool pointerLive: false
+    property real pointerSceneX: 0
+    property real pointerSceneY: 0
+    function notePointerMove(sp) {
+        if (sp.x === pointerSceneX && sp.y === pointerSceneY) return
+        pointerSceneX = sp.x; pointerSceneY = sp.y
+        pointerLive = true
+    }
+    // The pointer in canvas coordinates, derived only here and only at resolve time.
+    function pointerPoint() {
+        var p = flick.mapFromItem(null, pointerSceneX, pointerSceneY)
+        return { x: p.x + flick.contentX, y: p.y + flick.contentY,
+                 inView: p.x >= 0 && p.y >= 0 && p.x <= flick.width && p.y <= flick.height }
+    }
+    // Displayed tile rects for the hit test: each delegate's own geometry expanded about its
+    // centre by `scale`, so the hovered tile's 1.03 lift and an in-flight appear animation are
+    // hit-tested at the size they are painted. The drag ghost's separate Scale transform is not
+    // folded in because actions are ignored while a drag is in flight.
+    function tileCandidates() {
+        var out = []
+        for (var i = 0; i < tileRepeater.count; i++) {
+            var t = tileRepeater.itemAt(i)
+            if (!t) continue
+            var s = t.scale
+            out.push({ address: t.tileAddress, z: t.z,
+                       x: t.x + t.width * (1 - s) / 2, y: t.y + t.height * (1 - s) / 2,
+                       w: t.width * s, h: t.height * s })
+        }
+        return out
+    }
+    function resolveTarget() {
+        var live = false, tileAddr = "", wsId = -1
+        if (pointerLive) {
+            var p = pointerPoint()
+            if (p.inView) {
+                live = true
+                tileAddr = Logic.tileAt(tileCandidates(), p.x, p.y)
+                if (!tileAddr) {
+                    var hit = Logic.hitWorkspace(boxes, p.x, p.y)
+                    wsId = hit === null ? -1 : hit
+                }
+            }
+        }
+        return Logic.target({ pointerLive: live, pointerTileAddress: tileAddr,
+                              pointerWorkspaceId: wsId, query: root.query,
+                              matchAddress: root.selectedMatchAddress,
+                              cursorAddress: root.cursorAddress, selectedId: root.selectedId })
+    }
+    // Placeholder until Task 4; declared here so resolveTarget compiles.
+    property string cursorAddress: ""
     Timer {
         id: reconcileTimer
         interval: 120; repeat: true
@@ -1031,13 +1085,16 @@ Item {
                 focus: true
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function (e) {
-                    var finding = root.query.length > 0
-                    var chord = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
                     e.accepted = true
-                    // Chords first: the only one with a meaning is Ctrl+Backspace (clear the
-                    // query). Every other Ctrl/Alt/Meta combination is reserved for future
-                    // actions and must reach no action below — a modified digit, Enter, Tab or
-                    // arrow does nothing.
+                    // Lone modifiers belong to no class (see Logic.isModifierKey).
+                    if (Logic.isModifierKey(e.key)) return
+
+                    var chord = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+                    var finding = root.query.length > 0
+                    // Action keys read pointer liveness; everything else is keyboard intent and
+                    // clears it BEFORE any resolve below can see it.
+                    if (!Logic.isActionKey(e.key, chord, Qt.ControlModifier)) root.pointerLive = false
+
                     if (chord) {
                         if (chord === Qt.ControlModifier && e.key === Qt.Key_Backspace && finding) root.setQuery("")
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_S) root.toggleScratchpad()
@@ -1102,6 +1159,15 @@ Item {
                 // scrolled past the new end.
                 onContentWidthChanged: flick.contentX = Math.max(0, Math.min(flick.contentX, flick.contentWidth - flick.width))
                 onContentHeightChanged: flick.contentY = Math.max(0, Math.min(flick.contentY, flick.contentHeight - flick.height))
+
+                // Pointer liveness. A HoverHandler, not a hoverEnabled MouseArea: handlers do not
+                // block one another (`blocking` defaults to false), so the tiles' own hover zoom
+                // and title label keep working underneath this one.
+                HoverHandler {
+                    id: pointerWatch
+                    onPointChanged: root.notePointerMove(point.scenePosition)
+                    onHoveredChanged: if (!hovered) root.pointerLive = false
+                }
 
                 Item {
                     id: canvas
@@ -1208,6 +1274,7 @@ Item {
 
                     // tiles layer (siblings, above boxes)
                     Repeater {
+                        id: tileRepeater
                         model: tilesModel
                         WindowTile {
                             required property var model
@@ -1229,6 +1296,7 @@ Item {
                             Behavior on targetY { enabled: root.layoutMotion && !windowTile.dragging
                                 NumberAnimation { duration: root.motion.normal; easing.type: root.motion.move } }
                             cls: model.cls
+                            readonly property string tileAddress: model.address
                             tileLayer: model.layer
                             fullscreen: model.fullscreen
                             fullscreenPending: model.fsPending

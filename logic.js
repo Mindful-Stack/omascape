@@ -874,6 +874,27 @@ function menuNavigate(count, index, step) {
     return ((index + step) % count + count) % count
 }
 
+// A press of a modifier key ALONE. It belongs to no class: it must not drive the menu (Ctrl then
+// W would otherwise dismiss and then close a window) and must not clear pointer liveness (hover +
+// Ctrl+W could never work, because the Ctrl press would go stale before the W arrived).
+function isModifierKey(key) {
+    return key === 0x01000020 ||   // Qt.Key_Shift
+           key === 0x01000021 ||   // Qt.Key_Control
+           key === 0x01000023 ||   // Qt.Key_Alt
+           key === 0x01000022 ||   // Qt.Key_Meta
+           key === 0x01000024      // Qt.Key_AltGr
+}
+
+// An ACTION key reads pointer liveness and leaves it unchanged — "do this to what I am pointing
+// at", not "I am on the keyboard now" — so a second Ctrl+W cannot silently switch from the
+// hovered window to the Tab cursor. Everything else is navigation or query intent and clears
+// liveness on entry. `chord` is the event's Ctrl/Alt/Meta mask.
+function isActionKey(key, chord, ctrlMask) {
+    if (chord === ctrlMask && key === 0x57) return true            // Ctrl+W (Qt.Key_W)
+    if (chord) return false
+    return key === 0x01000004 || key === 0x01000005                // Return, Enter
+}
+
 // ---- Scratchpad (docs/specs/2026-09-12-scratchpad-design.md) ---------------------------
 // Hyprland allocates special-workspace ids dynamically (the next free id below -99), so the
 // overview never uses the reported id: buildInput() identifies the scratchpad by name and remaps
