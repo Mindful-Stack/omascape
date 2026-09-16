@@ -896,7 +896,7 @@ TestCase {
     // the first Hyprland probe hasn't answered, open() places the card at its final values with
     // no entrance; once the probe resolves, only the *next* transition animates — a late
     // resolution does not retroactively start an entrance for the one already placed.
-    // Red before change C: the fixture's OmyviewConfig has no motionResolved (TypeError), or
+    // Red before change C: the fixture's OmascapeConfig has no motionResolved (TypeError), or
     // once the stub carries one but Overview.qml does not gate on it (opacity < 1 while
     // unresolved).
     function test_motion_waits_for_the_first_probe() {

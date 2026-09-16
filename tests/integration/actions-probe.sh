@@ -70,9 +70,9 @@ trap cleanup EXIT
 # cancel cases 3-4 below, which are independent of it.
 SCRATCH_OK=0
 if command -v foot >/dev/null; then
-  foot -T omyview-probe-window -e sh -c 'sleep 60' >/dev/null 2>&1 &
+  foot -T omascape-probe-window -e sh -c 'sleep 60' >/dev/null 2>&1 &
   sleep 1.2
-  A=$(hyprctl -j clients | jq -r '.[] | select(.title=="omyview-probe-window") | .address' | head -n1)
+  A=$(hyprctl -j clients | jq -r '.[] | select(.title=="omascape-probe-window") | .address' | head -n1)
   if [ -n "$A" ]; then
     SCRATCH_OK=1
   else

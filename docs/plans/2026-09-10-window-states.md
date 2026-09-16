@@ -1,4 +1,4 @@
-# Omyview — Window States (fullscreen + floating) Implementation Plan
+# Omascape — Window States (fullscreen + floating) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -22,7 +22,7 @@
 
 **Live-test loop (QML tasks):** copy changed files into the installed clone and restart the shell (QML edits need a full restart, not a rescan):
 ```bash
-LIVE="$HOME/.config/omarchy/plugins/se.mindfulstack.omyview"
+LIVE="$HOME/.config/omarchy/plugins/se.mindfulstack.omascape"
 cp logic.js WindowTile.qml Overview.qml "$LIVE"/ && omarchy restart shell
 ```
 Then SUPER+P. Workspace 8 on the dev machine currently holds a fullscreen Chrome over a tiled Teams — a ready-made live case.

@@ -35,8 +35,8 @@ status=0
 cleanup() {
   local rc=$?; [ "$status" -ne 0 ] && rc=$status
   local out
-  if ! out=$(hyprctl eval "if _G.omyview_probe_rule then _G.omyview_probe_rule:set_enabled(false) end; _G.omyview_probe_rule = nil"); then
-    echo "WARNING: could not disable the probe rule — run: hyprctl eval '_G.omyview_probe_rule:set_enabled(false)'  ($out)" >&2; rc=1
+  if ! out=$(hyprctl eval "if _G.omascape_probe_rule then _G.omascape_probe_rule:set_enabled(false) end; _G.omascape_probe_rule = nil"); then
+    echo "WARNING: could not disable the probe rule — run: hyprctl eval '_G.omascape_probe_rule:set_enabled(false)'  ($out)" >&2; rc=1
   fi
   [ -n "${ORIG_WS:-}" ] && hyprctl dispatch "hl.dsp.focus({ workspace = \"$ORIG_WS\" })" >/dev/null 2>&1 || echo "WARNING: could not restore workspace $ORIG_WS" >&2
   rm -rf "$tmp"
@@ -65,7 +65,7 @@ switch_and_wait() {
 # switch to the workspace so its windows are on screen for the capture
 switch_and_wait "$WS"
 grim -o "$OUT" "$tmp/base.png";    B=$(mean "$tmp/base.png")
-ev "_G.omyview_probe_rule = hl.window_rule({ name = 'omyview-probe', match = { workspace = '$WS' }, no_screen_share = true, enabled = true })"; sleep 0.4
+ev "_G.omascape_probe_rule = hl.window_rule({ name = 'omascape-probe', match = { workspace = '$WS' }, no_screen_share = true, enabled = true })"; sleep 0.4
 grim -o "$OUT" "$tmp/on.png";      ON=$(mean "$tmp/on.png")
 
 # Scoping check: the rule must be scoped to $WS, not leak to the rest of the output.
@@ -79,9 +79,9 @@ else
   echo "SKIP-SCOPING: no other workspace with windows on $OUT"
 fi
 
-ev "_G.omyview_probe_rule:set_enabled(false)"; sleep 0.4
+ev "_G.omascape_probe_rule:set_enabled(false)"; sleep 0.4
 grim -o "$OUT" "$tmp/off.png";     OFF=$(mean "$tmp/off.png")
-ev "_G.omyview_probe_rule:set_enabled(true)"; sleep 0.4
+ev "_G.omascape_probe_rule:set_enabled(true)"; sleep 0.4
 grim -o "$OUT" "$tmp/on2.png";     ON2=$(mean "$tmp/on2.png")
 echo "base=$B on=$ON off=$OFF on2=$ON2 other=$OTHER"
 awk -v b="$B" -v on="$ON" -v off="$OFF" -v on2="$ON2" -v other="$OTHER" 'BEGIN {

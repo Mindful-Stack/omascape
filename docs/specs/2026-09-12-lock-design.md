@@ -1,4 +1,4 @@
-# Omyview — workspace lock for screen sharing (design)
+# Omascape — workspace lock for screen sharing (design)
 
 Date: 2026-09-12 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on find (merged) and the scratchpad row (PR #13, branch `scratchpad`).
@@ -58,7 +58,7 @@ the first frame after a *Hyprland config reload* (see Edge cases).
   the overview's own thumbnails produce this type; monitor and region shares both count as real
   shares, or every overview open would bump the counter and flip armed boxes to the placeholder
   for no real share at all.
-- `hl.layer_rule({ match = { namespace = "omyview" }, no_screen_share = true })` is the layer form.
+- `hl.layer_rule({ match = { namespace = "omascape" }, no_screen_share = true })` is the layer form.
 - **A `no_screen_share` layer rule is NOT used on the overview's own layer**, despite the API
   existing for it: verified from source (`ScreenshareFrame.cpp`) that Hyprland renders such a
   layer as an opaque black rect over the *whole* layer box while it is mapped. The overview's
@@ -75,7 +75,7 @@ the first frame after a *Hyprland config reload* (see Edge cases).
   dispatched-chunk globals** (probed 2026-09-12: a global set before `hyprctl reload` is gone
   after it), so rules and the observer created by chunks vanish on every reload and must be
   re-installed.
-- omyview's config is `~/.config/omarchy/omyview.json`, read through a watched `FileView`.
+- omascape's config is `~/.config/omarchy/omascape.json`, read through a watched `FileView`.
 
 ## Decisions
 
@@ -90,13 +90,13 @@ the first frame after a *Hyprland config reload* (see Edge cases).
   can expose to a viewer is the armed workspace's app identity — icons, names, a find count —
   until the placeholder lands.
 - **No navigation blocking.**
-- **Persisted** in `~/.config/omarchy/omyview-locks.json` (`{ "armed": ["3", "special:scratchpad"] }`),
-  written atomically by omyview (temp file + rename), re-applied at shell start, on
+- **Persisted** in `~/.config/omarchy/omascape-locks.json` (`{ "armed": ["3", "special:scratchpad"] }`),
+  written atomically by omascape (temp file + rename), re-applied at shell start, on
   `configreloaded`, and on every open.
 - **One sync chunk reconciles the whole set.** `lockSyncLua(armed)` creates or enables one
   named rule per armed selector and disables every other rule the table knows. There is no
   separate arm/disarm; every change re-sends the full set. Idempotent by construction.
-- **Named rules, one retained handle per selector.** `name = "omyview-lock-" .. sel`; a disarmed
+- **Named rules, one retained handle per selector.** `name = "omascape-lock-" .. sel`; a disarmed
   rule is disabled and its handle kept, so re-arming re-enables it. No accumulation.
 - **Install at shell start, not first at open.** The install + sync run when the kept-loaded
   component is created, again on `configreloaded`, and again in `open()` (belt and braces).
@@ -104,8 +104,8 @@ the first frame after a *Hyprland config reload* (see Edge cases).
   capture, and a lock glyph fills the well. Otherwise an armed box shows its windows as app icons
   (the compositor denies toplevel export for windows under the rule) plus the lock badge; during
   a share it shows the placeholder.
-- **Two files, one owner each.** omyview owns the locks file. The compositor observer owns
-  `$XDG_RUNTIME_DIR/omyview/share-state`, written atomically; content `1`/`0`.
+- **Two files, one owner each.** omascape owns the locks file. The compositor observer owns
+  `$XDG_RUNTIME_DIR/omascape/share-state`, written atomically; content `1`/`0`.
 - **Intent vs enforcement.** The badge shows the *armed* intent from the file. Enforcement
   failures (rule creation or enabling throwing) are reported through the existing chunk report
   path (compositor log + notification); the overview does not claim "protected" beyond the
@@ -129,7 +129,7 @@ per workspace, and the user chose to move it).
 All single-line guarded chunks in the existing style (`dispatchGuardLua`, `reportLua`), built in
 `logic.js`, parse- and behaviour-tested by `tests/lua-check.sh`.
 
-**`lockInstallLua()`** — idempotent. It creates the `omyview-lockframe` LAYER rule (the
+**`lockInstallLua()`** — idempotent. It creates the `omascape-lockframe` LAYER rule (the
 share-time reminder frame's own strips, addendum below) but still no layer rule for the
 *overview's* namespace (see Verified facts: a `no_screen_share` layer is an opaque black rect over
 that surface's whole box, which for the overview means the whole screen — and it is unnecessary,
@@ -141,11 +141,11 @@ rules themselves. The verify-dir-and-publish step runs in its own inner `pcall` 
 on failure, so the outer `ok, err` (what `reportLua` reports) carries the filesystem failure
 while the subscription created above it is left standing:
 ```lua
-local L = _G.omyview_lock
+local L = _G.omascape_lock
 if not L then
   L = { rules = {}, sharing = 0, effective = false, grace = nil, sub = nil, subVer = nil,
         dir = nil, frameRule = nil }
-  _G.omyview_lock = L
+  _G.omascape_lock = L
 end
 if L.effective == nil then L.effective = L.sharing > 0 end   -- an _G table from a pre-hysteresis build
 if L.borders then                                            -- round-3 leftovers: window-border rules
@@ -154,14 +154,14 @@ if L.borders then                                            -- round-3 leftover
 end
 function L.ensureDir()                                         -- probe first; called on EVERY install, see below
   local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end
-  local dir = base .. "/omyview"
-  local probe = io.open(dir .. "/.omyview-probe", "w")         -- verify the directory directly, first
+  local dir = base .. "/omascape"
+  local probe = io.open(dir .. "/.omascape-probe", "w")         -- verify the directory directly, first
   if not probe then
     os.execute("mkdir -p '" .. dir .. "'")                     -- only on a failed probe: see below
-    probe = io.open(dir .. "/.omyview-probe", "w")
+    probe = io.open(dir .. "/.omascape-probe", "w")
     if not probe then error("runtime dir unavailable: " .. dir) end
   end
-  probe:close(); os.remove(dir .. "/.omyview-probe")
+  probe:close(); os.remove(dir .. "/.omascape-probe")
   L.dir = dir
 end
 function L.publish()                                          -- defined unconditionally; reads L.dir at call time
@@ -208,17 +208,17 @@ if not (L.sub and L.sub:is_active()) then
             local gok, gerr = pcall(function()
               if L.sharing == 0 and L.effective then L.effective = false; L.apply() end
             end)
-            if not gok then print("omyview: share grace timer failed: " .. tostring(gerr)) end
+            if not gok then print("omascape: share grace timer failed: " .. tostring(gerr)) end
           end, { timeout = LOCK_SHARE_GRACE_MS, type = "oneshot" })
         end)
         L.grace = tok and t or nil
         if not L.grace then L.effective = false; L.apply() end -- no timer at all: degrade to the immediate off
       end
     end)
-    if not ok then print("omyview: share observer failed: " .. tostring(err)) end
+    if not ok then print("omascape: share observer failed: " .. tostring(err)) end
   end)
 end
--- Share-time reminder frame (addendum, round 4): the rule that blanks omyview's own frame strips
+-- Share-time reminder frame (addendum, round 4): the rule that blanks omascape's own frame strips
 -- in every capture. Created once and kept on L (this API can only disable a rule, never remove
 -- it, and install runs on every overview open), re-enabled if a surviving handle is disabled,
 -- and recreated after a configreloaded like everything else in _G. Its own pcall so a failure
@@ -228,8 +228,8 @@ local fok, ferr = pcall(function()
     local iok, cur = pcall(function() return L.frameRule:is_enabled() end)
     if (not iok) or cur == false then L.frameRule:set_enabled(true) end
   else
-    L.frameRule = hl.layer_rule({ name = "omyview-lockframe",
-                                  match = { namespace = "omyview-lockframe" },
+    L.frameRule = hl.layer_rule({ name = "omascape-lockframe",
+                                  match = { namespace = "omascape-lockframe" },
                                   no_screen_share = true })
   end
 end)
@@ -251,12 +251,12 @@ there) now costs one file open, not a shell-out.
 
 `L.ensureDir()` runs on **every** install, not only when `L.dir` is nil, and `L.publish()`
 retries it once on its own (recomputing `tmp`/`dst` from the possibly-changed `L.dir` before the
-retry) if `io.open` fails. `_G.omyview_lock` is compositor Lua state, and it survives a shell
+retry) if `io.open` fails. `_G.omascape_lock` is compositor Lua state, and it survives a shell
 restart — but the runtime directory does not: it can be removed by a cleaner, or is simply gone
 after a restart. Without re-verifying, a stale `L.dir` from a previous session would point at
 nothing, and `L.publish()` — called from every install *and* every share event — would fail with
 "cannot write share-state" forever, since nothing ever re-checked. Confirmed live: `L.dir` was
-set to `/run/user/1000/omyview` while the directory did not exist, after the user's first manual
+set to `/run/user/1000/omascape` while the directory did not exist, after the user's first manual
 restart.
 
 **`LOCK_OBSERVER_VERSION`** (a `logic.js` constant, currently `4` — bumped at 3 for the
@@ -265,7 +265,7 @@ share-time reminder addendum below, whose callback change was `L.publish()` → 
 BODY changed but the callback's own text did not, and every install redefines `L.apply()` on the
 shared `L` table before the version check runs) guards the subscription
 itself, not just the directory: the observer's callback is a closure created once and owned by
-the subscription object, and `_G.omyview_lock` — including that subscription — survives a shell
+the subscription object, and `_G.omascape_lock` — including that subscription — survives a shell
 restart untouched. `L.sub:is_active()` alone would stay `true` forever, so the install's own
 idempotence check (`if not (L.sub and L.sub:is_active())`) would never see a reason to replace a
 stale callback: a shell restart could deliver a new `logic.js` (and thus a changed callback body,
@@ -328,7 +328,7 @@ workspace "constantly resizing".) So:
 **`lockSyncLua(armed)`** — `armed` is the full array of selectors (`"3"`,
 `"special:scratchpad"`):
 ```lua
-local L = _G.omyview_lock; if not L then error("lock not installed") end
+local L = _G.omascape_lock; if not L then error("lock not installed") end
 local want = {}; for _, sel in ipairs(ARMED) do want[sel] = true end
 local failed = {}
 local function step(sel, f) local ok, err = pcall(f); if not ok then failed[#failed + 1] = sel .. ": " .. tostring(err) end end
@@ -336,7 +336,7 @@ for sel in pairs(want) do
   step(sel, function()
     local r = L.rules[sel]
     if not r then
-      r = hl.window_rule({ name = "omyview-lock-" .. sel, match = { workspace = sel }, no_screen_share = true, enabled = true })
+      r = hl.window_rule({ name = "omascape-lock-" .. sel, match = { workspace = sel }, no_screen_share = true, enabled = true })
       L.rules[sel] = r
     else
       local eok, eerr = pcall(function() r:set_enabled(true) end)
@@ -374,7 +374,7 @@ rules are named for that reason.
 
 ## Overview side
 
-**State.** `OmyviewLocks.qml` (new, beside `OmyviewConfig.qml`): a watched `FileView` on the
+**State.** `OmascapeLocks.qml` (new, beside `OmascapeConfig.qml`): a watched `FileView` on the
 locks file. `armed: var` is **null until the first load resolves** ("unresolved"), then an array
 of selectors. `onLoadFailed` distinguishes `FileViewError.FileNotFound` from every other error
 (permission, a directory in its place, a transient I/O failure, …) via the `FileViewError` enum
@@ -416,17 +416,17 @@ and there is no completion barrier before `open()` maps the surface (see Edge ca
 "Every accepted change" is load-bearing: `watchChanges`/an explicit `reload()` re-emit `loaded`
 even when the bytes on disk did not change (our own atomic write reading its own content back;
 a stray watcher firing) — `Logic.applyLocksTo` compares the newly parsed set against the current
-one (same selectors, same order) and reports `changed: false` for an echo, so `OmyviewLocks` does
+one (same selectors, same order) and reports `changed: false` for an echo, so `OmascapeLocks` does
 not re-emit `loadedArmed()` for it and the Overview does not re-sync or (while open) re-rebuild.
 A `null` current always counts as changed (there is nothing yet to compare against).
 
 Quickshell's `FileView` watches the file's *parent directory*, not the file itself: if that
 directory does not exist at `FileView` creation, the watch never attaches, and no `fileChanged`
 ever fires for it later even once the directory and file show up (see Edge cases, "Shell start
-before the runtime dir exists"). This only affects the state file — `$XDG_RUNTIME_DIR/omyview` is
+before the runtime dir exists"). This only affects the state file — `$XDG_RUNTIME_DIR/omascape` is
 created asynchronously by the install chunk, after the `FileView` on it already exists — never
-the locks file, whose directory (`~/.config/omarchy`) exists before omyview ever runs.
-`OmyviewLocks.refresh()` (`stateFile.reload()`) re-attaches the state-file watch; `lockInstall()`
+the locks file, whose directory (`~/.config/omarchy`) exists before omascape ever runs.
+`OmascapeLocks.refresh()` (`stateFile.reload()`) re-attaches the state-file watch; `lockInstall()`
 restarts a 400ms `Timer` that calls it, and `open()` also calls it directly (after `lockInstall();
 lockSync()`) as a belt-and-braces re-attach on every summon.
 
@@ -464,7 +464,7 @@ Approved after the first manual pass: the user wanted a local "this workspace is
 by your audience" cue, because a workspace armed for one meeting is easy to forget in the next.
 
 Rounds 1–3 implemented it as Hyprland **window-border** rules (`border_color` / `border_size` on
-every window of an armed workspace). Round 4 replaced that with a frame omyview draws itself.
+every window of an armed workspace). Round 4 replaced that with a frame omascape draws itself.
 Two facts killed the border approach:
 
 1. **The Lua rule API can only set the ACTIVE border colour.**
@@ -478,7 +478,7 @@ Two facts killed the border approach:
    relayouts the workspace, which is the flicker round 3 chased.
 
 - **Mechanism.** `LockFrame.qml` maps four thin `PanelWindow`s per screen (top, bottom, left,
-  right), `WlrLayer.Overlay`, `WlrLayershell.namespace: "omyview-lockframe"`, each
+  right), `WlrLayer.Overlay`, `WlrLayershell.namespace: "omascape-lockframe"`, each
   painting `lockBorderSize` px along its edge. Every strip spans its whole edge — the left/right
   ones the full height, the top/bottom ones the full width — and it is the top/bottom PAINT that is
   inset by the side strips' thickness, so every corner is painted exactly once (a doubled corner
@@ -509,7 +509,7 @@ Two facts killed the border approach:
   a capture — it discloses nothing. A scale that is not a positive finite number degrades the same
   way rather than throwing, since this runs in a binding.
 - **Blanking.** `lockInstallLua()` creates one named LAYER rule,
-  `hl.layer_rule({ name = "omyview-lockframe", match = { namespace = "omyview-lockframe" },
+  `hl.layer_rule({ name = "omascape-lockframe", match = { namespace = "omascape-lockframe" },
   no_screen_share = true })`, kept as `L.frameRule`. A `no_screen_share` layer renders as an
   opaque black rect over that surface's own box while mapped (`ScreenshareFrame.cpp`), so the
   strips go black in every capture: a viewer sees the plain black exclusion box, and the red frame
@@ -525,7 +525,7 @@ Two facts killed the border approach:
   rule costs the cue's blanking, a failed publish costs share DETECTION, so the frame never appears
   at all.
 - **Upgrading off round 3 (round 4b).** A compositor that has been running since round 3 still
-  holds `_G.omyview_lock.borders`, a table of `omyview-lock-border-<sel>` window rules that may
+  holds `_G.omascape_lock.borders`, a table of `omascape-lock-border-<sel>` window rules that may
   still be enabled and that nothing in round 4 touches. Since this Lua API can disable a rule but
   never remove one, they would keep rimming every window on an armed workspace until the user's
   next config reload — round 4's live check had to run `hyprctl reload` by hand for exactly this.
@@ -534,7 +534,7 @@ Two facts killed the border approach:
 - **When it shows.** A monitor's frame is visible iff `locks.sharing` **and** the workspace that
   monitor is currently SHOWING is armed. "Shown" is the monitor's special workspace when one is
   open (`lastIpcObject.specialWorkspace.name`, e.g. `special:scratchpad`), else its active
-  workspace (`lastIpcObject.activeWorkspace.id`) — exactly the selectors `omyview-locks.json`
+  workspace (`lastIpcObject.activeWorkspace.id`) — exactly the selectors `omascape-locks.json`
   holds. Hyprland reports `specialWorkspace: { id: 0, name: "" }` when none is open (verified on
   0.56.2), which is also what the `activespecialv2>>,,<mon>` payload announces, so the NAME
   decides, not the object's presence.
@@ -562,11 +562,11 @@ Two facts killed the border approach:
   resolve to black. A malformed monitor snapshot yields `null`/`false` and never throws: these run
   in bindings that re-evaluate on every monitor event, including ones landing before the first
   refresh.
-- **Config** (`~/.config/omarchy/omyview.json`, parsed by `Logic.parseConfig`): unchanged keys.
+- **Config** (`~/.config/omarchy/omascape.json`, parsed by `Logic.parseConfig`): unchanged keys.
   `lockBorder` (string, default `"rgb(ff4444)"`; only the `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex
   forms are accepted — Hyprland's own colour syntax, kept for continuity with the rest of the
   user's config — anything else falls back to the default) and `lockBorderSize` (integer 0–20,
-  default 6; **0 hides the frame**). `OmyviewConfig`'s watched `FileView` applies an edit live and
+  default 6; **0 hides the frame**). `OmascapeConfig`'s watched `FileView` applies an edit live and
   the frame binds to both directly, so no `lockSync()` round trip through the compositor is
   involved any more; the round-2 `onLockBorderChanged`/`onLockBorderSizeChanged` handlers are gone.
 - **What a viewer sees.** Effectively a black screen on an armed workspace: the exclusion box with
@@ -594,7 +594,7 @@ Two facts killed the border approach:
   missed event costs the cue, never protection. Since round 3 it also lags the *end* of a share by
   up to `LOCK_SHARE_GRACE_MS` (3 s) — same reasoning: the cue may linger, never under-report.
 - **Tests.** Lua: install creates the layer rule with `no_screen_share` on the
-  `omyview-lockframe` namespace, a second install neither duplicates it nor leaves a surviving
+  `omascape-lockframe` namespace, a second install neither duplicates it nor leaves a surviving
   disabled handle disabled, and a failing `hl.layer_rule` is reported through the install's own
   path while the observer and the publish still land. The hysteresis cases (round 3, driving the
   mock's `hl.timer`/`M.elapse`) now assert the state file through a `hl.__renames` counter — four
@@ -621,7 +621,7 @@ Two facts killed the border approach:
   7 px surfaces — so neither the snapping nor the flush paint can regress unnoticed; a monitor
   object REPLACED behind the same screen — swapped without notifying, the way
   `monitorFor()` behaves — is picked up after a refresh event. Lua: an install over a round-3
-  `_G.omyview_lock` disables its `L.borders` rules and drops the table (and survives a handle
+  `_G.omascape_lock` disables its `L.borders` rules and drops the table (and survives a handle
   whose `set_enabled` throws); an install where both the layer rule and the filesystem step fail
   reports the filesystem one, while each still reports when it fails alone.
 
@@ -632,7 +632,7 @@ Two facts killed the border approach:
 - **Arming during a share**: rule enabled immediately; viewers see black; the box switches to
   the placeholder on the same rebuild.
 - **Hyprland config reload**: Lua globals are lost, so the rules and the observer are gone until
-  omyview sees `configreloaded` and re-installs (milliseconds). A capture in that window can
+  omascape sees `configreloaded` and re-installs (milliseconds). A capture in that window can
   see armed windows. Accepted and documented; a reload is a user action (theme change, config
   edit), not something a share triggers. Probed: globals do NOT survive a reload, so this window
   is real and the `configreloaded` re-install is load-bearing, not redundant.
@@ -656,16 +656,16 @@ Two facts killed the border approach:
 - **Compositor crash leaving `share-state` = `1`**: the next install publishes `0` (counter
   resets). Until then the overview shows placeholders for armed boxes — a false positive, never
   a leak.
-- **Shell start before the runtime dir exists**: `$XDG_RUNTIME_DIR/omyview` (holding
+- **Shell start before the runtime dir exists**: `$XDG_RUNTIME_DIR/omascape` (holding
   `share-state`) does not exist until the install chunk's `mkdir -p` runs — asynchronously, after
   the `FileView` on it is already constructed. Quickshell watches a `FileView`'s *parent
   directory*; a directory that is missing at construction means the watch never attaches, so
   every later write to `share-state` (a share starting or ending) would go unseen for the rest of
   the session, with no error — nothing fails, it just silently never updates. Mitigated by
-  `OmyviewLocks.refresh()` (`stateFile.reload()`, re-attaching just that watch), called ~400ms
+  `OmascapeLocks.refresh()` (`stateFile.reload()`, re-attaching just that watch), called ~400ms
   after every `lockInstall()` (a `Timer`, giving the directory time to appear) and once more
   directly in `open()`. The locks file does not need this: its directory (`~/.config/omarchy/`)
-  is created well before omyview ever runs (Omarchy's own config layout), so its `FileView`'s
+  is created well before omascape ever runs (Omarchy's own config layout), so its `FileView`'s
   watch attaches at construction — `refresh()` deliberately leaves it alone, both because it
   needs no help and because an explicit `reload()` re-emits `loaded` even with unchanged content
   (see Sync points), which would otherwise cost a redundant sync on every refresh.
@@ -677,8 +677,8 @@ Two facts killed the border approach:
   `loaded` — or `onLoadFailed` again — without the error changing, and unlike the armed set a
   parse error has no "unchanged" case to compare against, so the guard is a simple once-per-open
   latch instead); `toggleInMemory` remains a no-op, and `lockToggleSelected()` tells the user, also once
-  per open, why Ctrl+L is doing nothing ("omyview: locks file unreadable — fix or delete
-  ~/.config/omarchy/omyview-locks.json") rather than silently swallowing the keypress.
+  per open, why Ctrl+L is doing nothing ("omascape: locks file unreadable — fix or delete
+  ~/.config/omarchy/omascape-locks.json") rather than silently swallowing the keypress.
   **Malformed, or any other read error, on a later load**: the last valid set is kept and
   enforced; reported once per open; the next successful write (the next accepted toggle)
   replaces the file with a fresh, valid one.
@@ -702,7 +702,7 @@ Two facts killed the border approach:
   each install (value `0` on a fresh state), and the counter preserved across the second
   install; every install publishes the current value even over a pre-seeded stale share-state
   file (a fresh mock's file seeded `"1"` before `LOCK_INSTALL` runs → `"0"` after); sync `["3"]`
-  → rule `omyview-lock-3` created enabled; sync `[]` → disabled,
+  → rule `omascape-lock-3` created enabled; sync `[]` → disabled,
   handle kept; sync `["3"]` again → same handle re-enabled (no second rule); sync
   `["3","special:scratchpad"]` → both enabled; share start → `1` published, rules untouched
   (already enabled); second start then one end → still `1`; last end → `0`; end without start
@@ -729,7 +729,7 @@ Two facts killed the border approach:
   `reload()` echo does not read as a real edit; `Logic.toggleSelector(armed, sel)` adds,
   removes, and returns `null` (refused) for `null` armed or an invalid selector, without
   mutating its input.
-- **Offscreen UI (`tests/ui/lock.qml`)**, with prepare.py replacing `OmyviewLocks.qml` by a
+- **Offscreen UI (`tests/ui/lock.qml`)**, with prepare.py replacing `OmascapeLocks.qml` by a
   stub (the fixture has no Quickshell.Io) whose `armed` starts null and offers `loadArmed`,
   `setSharing` and recorded `writes`/`writeAt` — real file watching and atomic writes are
   live-check items: Ctrl+L on ws 3 writes `armed: ["3"]` and dispatches install + sync

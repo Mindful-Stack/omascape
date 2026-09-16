@@ -1,4 +1,4 @@
-# Omyview — find: type-ahead window search (design)
+# Omascape — find: type-ahead window search (design)
 
 Date: 2026-09-11 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on v2 + window states + monitor groups (`main` at `17d3dec`).

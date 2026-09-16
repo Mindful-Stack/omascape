@@ -412,7 +412,7 @@ function dispatchGuardLua() {
 function reportLua(what) {
     return (
         'if not ok then\n' +
-        '  local msg = "omyview: ' + what + ' failed: " .. tostring(err)\n' +
+        '  local msg = "omascape: ' + what + ' failed: " .. tostring(err)\n' +
         '  print(msg)\n' +
         '  pcall(function() hl.notification.create({ text = msg, duration = 4000, icon = "error" }) end)\n' +
         'end'
@@ -670,7 +670,7 @@ function edgeScrollDelta(pointer, viewport, offset, content, elapsedMs) {
 // ---- motion policy and user config ----
 
 // "auto" follows Hyprland's animations:enabled; "full" / "off" override it. Unknown values
-// are "auto", so a typo in omyview.json never freezes the picker.
+// are "auto", so a typo in omascape.json never freezes the picker.
 function motionPolicy(configured, hyprAnimations) {
     if (configured === "full" || configured === "off") return configured
     return hyprAnimations ? "full" : "off"
@@ -695,7 +695,7 @@ function hyprAnimationsEnabled(json) {
 // rejects everything else, so an unvalidated string can never reach a colour property.
 var LOCK_BORDER_RE = /^rgba?\([0-9a-fA-F]{6}([0-9a-fA-F]{2})?\)$/
 
-// ~/.config/omarchy/omyview.json → a fully-defaulted settings object. Every key has a default;
+// ~/.config/omarchy/omascape.json → a fully-defaulted settings object. Every key has a default;
 // a missing file, a parse error, a wrong type or an unknown key never changes behaviour.
 function parseConfig(raw) {
     var o = {}
@@ -1020,7 +1020,7 @@ var LOCK_SELECTOR_RE = /^([1-9]\d*|special:[A-Za-z0-9_-]+)$/
 function validLockSelector(sel) { return typeof sel === "string" && LOCK_SELECTOR_RE.test(sel) }
 
 // ---- Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum) --------------
-// The cue is four thin layer-shell strips omyview draws at the monitor edges, blanked in every
+// The cue is four thin layer-shell strips omascape draws at the monitor edges, blanked in every
 // capture by a `no_screen_share` layer rule on their namespace. These four functions are the
 // whole decision: which workspace a monitor is showing, whether that earns a frame, which raw
 // events invalidate the monitor snapshot, and how the configured colour becomes a QML one.
@@ -1108,7 +1108,7 @@ function lockFrameSurfaceSize(thickness, scale) {
 }
 
 // Bump on ANY change to the observer callback's body (including which `kind` values it
-// ignores). `_G.omyview_lock` is compositor Lua state that survives a shell restart, and the
+// ignores). `_G.omascape_lock` is compositor Lua state that survives a shell restart, and the
 // callback lives in a closure owned by the old subscription — `L.sub:is_active()` stays true
 // across a restart, so without a version check the install's own idempotence guard
 // (`if not (L.sub and L.sub:is_active())`) would keep the STALE callback forever; a shell
@@ -1148,7 +1148,7 @@ var LOCK_OBSERVER_VERSION = 4
 var LOCK_SHARE_GRACE_MS = 3000
 
 // Install the compositor-side lock state: one table in _G, the share observer that publishes 1/0
-// to $XDG_RUNTIME_DIR/omyview/share-state, and the `no_screen_share` LAYER rule that blanks the
+// to $XDG_RUNTIME_DIR/omascape/share-state, and the `no_screen_share` LAYER rule that blanks the
 // reminder frame's own strips in every capture (see the frame-rule block below). No such rule for
 // the overview's own namespace: a `no_screen_share` layer renders as an opaque black rect over
 // that surface's whole box while mapped (ScreenshareFrame.cpp), which for the overview would mean
@@ -1169,7 +1169,7 @@ var LOCK_SHARE_GRACE_MS = 3000
 // re-raised (`error(perr, 0)`) so the outer pcall's own `ok, err` — which reportLua reads —
 // carries the filesystem failure while the subscription it already created is left standing on
 // `L`, unaffected by the raised error.
-// `L.ensureDir()` runs on EVERY install, not only when `L.dir` is nil: `_G.omyview_lock` is
+// `L.ensureDir()` runs on EVERY install, not only when `L.dir` is nil: `_G.omascape_lock` is
 // compositor Lua state that survives a shell restart, so a previous install's `L.dir` can point
 // at a runtime directory that no longer exists (removed by a cleaner, or just gone —
 // live-confirmed after the user's first manual restart: `L.dir` stayed set to a directory that
@@ -1190,16 +1190,16 @@ function lockInstallLua() {
     return (
         'function()\n' +
         '  local ok, err = pcall(function()\n' +
-        '    local L = _G.omyview_lock\n' +
-        '    if not L then L = { rules = {}, sharing = 0, effective = false, grace = nil, sub = nil, subVer = nil, dir = nil, frameRule = nil }; _G.omyview_lock = L end\n' +
+        '    local L = _G.omascape_lock\n' +
+        '    if not L then L = { rules = {}, sharing = 0, effective = false, grace = nil, sub = nil, subVer = nil, dir = nil, frameRule = nil }; _G.omascape_lock = L end\n' +
         // `L.sharing` is the raw balanced counter; `L.effective` is the debounced view of it that
         // the state file follows (see LOCK_SHARE_GRACE_MS). Seeded from the
-        // counter — and only when unset — so an install landing on an `_G.omyview_lock` from a
+        // counter — and only when unset — so an install landing on an `_G.omascape_lock` from a
         // pre-hysteresis build starts out agreeing with whatever is actually running, and a later
         // re-install never resets a live `false` grace decision back to `true`.
         '    if L.effective == nil then L.effective = L.sharing > 0 end\n' +
         // Upgrade off round 3: a compositor that has been running since then still holds an
-        // `L.borders` table of `omyview-lock-border-<sel>` window rules — possibly enabled — that
+        // `L.borders` table of `omascape-lock-border-<sel>` window rules — possibly enabled — that
         // nothing in round 4 touches any more. This Lua API can disable a rule but never remove
         // one, so without this sweep those rims would keep colouring every window on an armed
         // workspace until the user's next config reload. Disabled once (each guarded on its own:
@@ -1211,14 +1211,14 @@ function lockInstallLua() {
         '    end\n' +
         '    function L.ensureDir()\n' +
         '      local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end\n' +
-        '      local dir = base .. "/omyview"\n' +
-        '      local probe = io.open(dir .. "/.omyview-probe", "w")\n' +
+        '      local dir = base .. "/omascape"\n' +
+        '      local probe = io.open(dir .. "/.omascape-probe", "w")\n' +
         '      if not probe then\n' +
         '        os.execute("mkdir -p \'" .. dir .. "\'")\n' +
-        '        probe = io.open(dir .. "/.omyview-probe", "w")\n' +
+        '        probe = io.open(dir .. "/.omascape-probe", "w")\n' +
         '        if not probe then error("runtime dir unavailable: " .. dir) end\n' +
         '      end\n' +
-        '      probe:close(); os.remove(dir .. "/.omyview-probe")\n' +
+        '      probe:close(); os.remove(dir .. "/.omascape-probe")\n' +
         '      L.dir = dir\n' +
         '    end\n' +
         '    function L.publish()\n' +
@@ -1260,7 +1260,7 @@ function lockInstallLua() {
         // set_enabled(false) BEFORE it fires cancels it for good. The timer callback carries its
         // own pcall + print: it runs on the compositor's clock, outside the pcall below, and
         // L.apply() can raise (a publish failure) — an unguarded error there would surface as a
-        // bare Lua error inside the compositor rather than an omyview log line.
+        // bare Lua error inside the compositor rather than an omascape log line.
         '      L.sub = hl.on("screenshare.state", function(active, kind)\n' +
         '        if kind == 1 then return end\n' +
         '        local sok, serr = pcall(function()\n' +
@@ -1281,17 +1281,17 @@ function lockInstallLua() {
         '                local gok, gerr = pcall(function()\n' +
         '                  if L.sharing == 0 and L.effective then L.effective = false; L.apply() end\n' +
         '                end)\n' +
-        '                if not gok then print("omyview: share grace timer failed: " .. tostring(gerr)) end\n' +
+        '                if not gok then print("omascape: share grace timer failed: " .. tostring(gerr)) end\n' +
         '              end, { timeout = ' + LOCK_SHARE_GRACE_MS + ', type = "oneshot" })\n' +
         '            end)\n' +
         '            L.grace = tok and t or nil\n' +
         '            if not L.grace then L.effective = false; L.apply() end\n' +
         '          end\n' +
         '        end)\n' +
-        '        if not sok then print("omyview: share observer failed: " .. tostring(serr)) end\n' +
+        '        if not sok then print("omascape: share observer failed: " .. tostring(serr)) end\n' +
         '      end)\n' +
         '    end\n' +
-        // Share-time reminder frame (addendum, round 4): the strips omyview maps at the monitor
+        // Share-time reminder frame (addendum, round 4): the strips omascape maps at the monitor
         // edges are its own layer surfaces, and this rule is what keeps them out of every capture
         // — a `no_screen_share` LAYER renders as an opaque black rect over that surface's own box
         // while mapped (ScreenshareFrame.cpp), so the frame's four thin strips go black in the
@@ -1310,7 +1310,7 @@ function lockInstallLua() {
         '        local iok, cur = pcall(function() return L.frameRule:is_enabled() end)\n' +
         '        if (not iok) or cur == false then L.frameRule:set_enabled(true) end\n' +
         '      else\n' +
-        '        L.frameRule = hl.layer_rule({ name = "omyview-lockframe", match = { namespace = "omyview-lockframe" }, no_screen_share = true })\n' +
+        '        L.frameRule = hl.layer_rule({ name = "omascape-lockframe", match = { namespace = "omascape-lockframe" }, no_screen_share = true })\n' +
         '      end\n' +
         '    end)\n' +
         '    local pok, perr = pcall(function()\n' +
@@ -1349,7 +1349,7 @@ function lockSyncLua(armed) {
     return (
         'function()\n' +
         '  local ARMED = {' + sels.join(', ') + '}\n' +
-        '  local L = _G.omyview_lock\n' +
+        '  local L = _G.omascape_lock\n' +
         '  local ok, err = L ~= nil, "lock not installed"\n' +
         '  if L then\n' +
         '    local want = {}; for _, sel in ipairs(ARMED) do want[sel] = true end\n' +
@@ -1359,7 +1359,7 @@ function lockSyncLua(armed) {
         '      step(sel, function()\n' +
         '        local r = L.rules[sel]\n' +
         '        if not r then\n' +
-        '          r = hl.window_rule({ name = "omyview-lock-" .. sel, match = { workspace = sel }, no_screen_share = true, enabled = true })\n' +
+        '          r = hl.window_rule({ name = "omascape-lock-" .. sel, match = { workspace = sel }, no_screen_share = true, enabled = true })\n' +
         '          L.rules[sel] = r\n' +
         '        else\n' +
         '          local eok, eerr = pcall(function() r:set_enabled(true) end)\n' +

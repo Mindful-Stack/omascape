@@ -1,4 +1,4 @@
-# Omyview — window states: fullscreen and floating (design)
+# Omascape — window states: fullscreen and floating (design)
 
 Date: 2026-09-10 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on v2 + Milestone A + the tiled-drop work on `drag-ghost`.

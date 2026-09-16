@@ -1,4 +1,4 @@
-# Omyview v3 Milestone A — design
+# Omascape v3 Milestone A — design
 
 Date: 2026-09-09 · Target: Omarchy Quattro, Hyprland 0.56.2, Quickshell 0.3.1 · builds on v2.
 Status: **approved design, pre-implementation.** Ideas/priority: `docs/roadmap-v3-ideas.md`.

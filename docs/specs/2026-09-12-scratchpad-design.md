@@ -1,4 +1,4 @@
-# Omyview — scratchpad row (design)
+# Omascape — scratchpad row (design)
 
 Date: 2026-09-12 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on find (`main` at `4382847`).

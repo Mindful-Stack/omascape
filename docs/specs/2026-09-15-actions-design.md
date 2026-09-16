@@ -1,4 +1,4 @@
-# Omyview — actions: target, window cursor, close, context menu (design)
+# Omascape — actions: target, window cursor, close, context menu (design)
 
 Date: 2026-09-15 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on find, the scratchpad row and the workspace lock (`main` at `26c6c11`).
