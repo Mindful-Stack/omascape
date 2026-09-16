@@ -240,7 +240,11 @@ function layout(input) {
                 var box = { workspaceId: chunk[c].id, monitorName: name, monFocused: focusedGroup,
                             special: "", x: inset + c * (cw + gap), y: y, w: cw, h: gch,
                             focused: !!chunk[c].focused, occupied: !!chunk[c].occupied,
-                            armed: !!chunk[c].armed, placeholder: !!chunk[c].placeholder }
+                            armed: !!chunk[c].armed, placeholder: !!chunk[c].placeholder,
+                            // Menu eligibility (docs/specs/2026-09-15-actions-design.md): Move and
+                            // Swap need a workspace the compositor actually has, and Swap needs it
+                            // to be the one its monitor is showing.
+                            synthetic: !!chunk[c].synthetic, active: !!chunk[c].active }
                 boxes.push(box); boxByWs[box.workspaceId] = box
             }
             var rowW = chunk.length * cw + (chunk.length - 1) * gap
@@ -274,7 +278,10 @@ function layout(input) {
                      special: sws.special, x: inset + Math.round((rowW - 2 * inset - cw) / 2), y: y, w: cw,
                      h: cellHeightFor(monByName[sws.monitorName]),
                      focused: !!sws.focused, occupied: !!sws.occupied,
-                     armed: !!sws.armed, placeholder: !!sws.placeholder }
+                     armed: !!sws.armed, placeholder: !!sws.placeholder,
+                     // A special workspace is never a monitor's `activeWorkspace` (it is reported
+                     // separately as `specialWorkspace`), and it is never a pad slot.
+                     synthetic: false, active: false }
         boxes.push(sbox); boxByWs[sbox.workspaceId] = sbox
         y += sbox.h + inset
         sgroup.w = rowW; sgroup.h = y - sgroup.y

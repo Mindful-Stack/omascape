@@ -496,4 +496,12 @@ TestCase {
         view.close(); view.open(); wait(120)
         compare(view.hintsExpanded, true)
     }
+
+    // Distinguishes: the flags stopping anywhere between the compositor snapshot and the box —
+    // the Tier 1 test pins layout() alone, this pins buildInput() and the seed together.
+    function test_boxes_get_active_from_the_monitor_snapshot() {
+        compare(view.boxForWs(1).active, true, "the seed's monitor shows workspace 1")
+        compare(view.boxForWs(2).active, false)
+        compare(view.boxForWs(1).synthetic, false)
+    }
 }

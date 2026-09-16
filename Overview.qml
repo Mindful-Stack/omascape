@@ -225,11 +225,17 @@ Item {
 
     function buildInput() {
         var mons = [], hmons = Hyprland.monitors ? Hyprland.monitors.values : []
+        var activeByMon = {}
         for (var i = 0; i < hmons.length; i++) {
             var m = hmons[i]
             mons.push({ name: m.name, x: m.x, y: m.y, width: m.width, height: m.height,
                         scale: m.scale, reserved: m.lastIpcObject ? m.lastIpcObject.reserved : [0,0,0,0],
                         transform: m.lastIpcObject ? m.lastIpcObject.transform : 0 })
+            // Which workspace each monitor is SHOWING — the same snapshot field the lock frame
+            // reads, refreshed by the same events (Logic.lockFrameRefreshEvent).
+            activeByMon[m.name] = (m.lastIpcObject && m.lastIpcObject.activeWorkspace &&
+                                   typeof m.lastIpcObject.activeWorkspace.id === "number")
+                                  ? m.lastIpcObject.activeWorkspace.id : -1
         }
         var monNames = {}
         for (var mi0 = 0; mi0 < mons.length; mi0++) monNames[mons[mi0].name] = true
@@ -258,7 +264,10 @@ Item {
             wss.push({ id: wsId, monitorName: monName, special: special,
                        focused: ws.id === focusedWsId,
                        occupied: ws.toplevels && ws.toplevels.values.length > 0,
-                       armed: wsArmed, placeholder: wsPlaceholder })
+                       armed: wsArmed, placeholder: wsPlaceholder,
+                       // Compared against the REAL id, before the scratchpad remap: a special
+                       // workspace is reported as `specialWorkspace`, never `activeWorkspace`.
+                       active: !special && activeByMon[monName] === ws.id })
             var tls = ws.toplevels ? ws.toplevels.values : []
             for (var t = 0; t < tls.length; t++) {
                 var o = tls[t] ? tls[t].lastIpcObject : null
@@ -278,7 +287,7 @@ Item {
             wsSel = Logic.wsSelector(Logic.SCRATCHPAD_ID)
             wss.push({ id: Logic.SCRATCHPAD_ID, monitorName: focusedMonitorName, special: "scratchpad",
                        focused: false, occupied: false,
-                       armed: locks.isArmed(wsSel), placeholder: locks.placeholder(wsSel) })
+                       armed: locks.isArmed(wsSel), placeholder: locks.placeholder(wsSel), active: false })
         }
         // padWorkspaces() fills gaps with synthetic (empty) records that carry no armed/
         // placeholder flags: without this, arming an empty workspace shows no badge, and a
@@ -290,6 +299,7 @@ Item {
             if (pw.armed === undefined) {
                 var pwSel = Logic.wsSelector(pw.id)
                 pw.armed = locks.isArmed(pwSel); pw.placeholder = locks.placeholder(pwSel)
+                pw.active = false           // a workspace Hyprland has not created shows nowhere
             }
         }
         return { monitors: mons, workspaces: padded, windows: wins,
@@ -836,6 +846,7 @@ Item {
             var row = { workspaceId: b.workspaceId, bx: b.x, by: b.y, bw: b.w, bh: b.h,
                         focused: !!b.focused, occupied: !!b.occupied,
                         armed: !!b.armed, placeholder: !!b.placeholder,
+                        synthetic: !!b.synthetic, active: !!b.active,
                         // Not read by the overview yet.
                         special: b.special || "" }
             seen[b.workspaceId] = true
