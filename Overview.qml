@@ -361,8 +361,58 @@ Item {
                               matchAddress: root.selectedMatchAddress,
                               cursorAddress: root.cursorAddress, selectedId: root.selectedId })
     }
-    // Placeholder until Task 4; declared here so resolveTarget compiles.
+    // ---- Actions: the Tab window cursor ---------------------------------------------------
+    // The keyboard's window target inside the selected workspace. "" = none. Mirrored into the
+    // tiles model as the `cursor` role so the ring is a binding, not an imperative repaint.
     property string cursorAddress: ""
+    function setCursor(addr) {
+        if (cursorAddress === addr) return
+        cursorAddress = addr
+        applyCursorRole()
+    }
+    function applyCursorRole() {
+        for (var i = 0; i < tilesModel.count; i++) {
+            var cur = tilesModel.get(i)
+            var next = { cursor: cur.address === root.cursorAddress }
+            if (rowDiffers(cur, next)) tilesModel.set(i, next)
+        }
+    }
+    // The model rows as cycleWindows wants them. Canvas coordinates, so a fullscreen window's
+    // recovered slot and a floating window's real position both sort where they are drawn.
+    function tileRows() {
+        var out = []
+        for (var i = 0; i < tilesModel.count; i++) {
+            var t = tilesModel.get(i)
+            out.push({ address: t.address, wsid: t.wsid, x: t.wx, y: t.wy })
+        }
+        return out
+    }
+    function closeSkipSet() {
+        var skip = {}
+        for (var a in pendingCloses) skip[a] = true
+        return skip
+    }
+    function cycleCursor(step) {
+        if (!Logic.hasWs(selectedId)) return
+        setCursor(Logic.cycleWindows(tileRows(), selectedId, cursorAddress, step, closeSkipSet()))
+    }
+    // Focus one window and leave: the tile-click path, including the scratchpad raise (focus alone
+    // leaves a scratchpad window under whichever floating sibling was last on top).
+    function focusWindow(addr) {
+        var win = _windowByAddress[addr]
+        if (win && Logic.isScratchpad(win.workspaceId)) Hyprland.dispatch(Logic.scratchpadFocusLua(addr))
+        else Hyprland.dispatch('hl.dsp.focus({ window = "address:' + addr + '" })')
+        close()
+    }
+    // Enter: whatever the target rule names.
+    function activateTarget() {
+        var t = resolveTarget()
+        if (!t) return
+        if (t.kind === "workspace") jump(t.id)
+        else focusWindow(t.address)
+    }
+    // Placeholder until Task 5; declared here so closeSkipSet compiles.
+    property var pendingCloses: ({})
     Timer {
         id: reconcileTimer
         interval: 120; repeat: true
@@ -376,6 +426,7 @@ Item {
     // Query edit: the best match for the *new* query is always the selection (a window that
     // won for "s" must not stay selected once "slack" ranks another first).
     function setQuery(q) {
+        if (q.length) setCursor("")      // find and the cursor are the same intent; never both
         if (!query.length && q.length) preQuerySelectedId = selectedId
         query = q
         if (!q.length) {
@@ -465,10 +516,7 @@ Item {
         selectedIndex = idx
         ensureSelectedVisible()
     }
-    function acceptMatch() {
-        var addr = selectedMatchAddress; if (!addr) return
-        Hyprland.dispatch('hl.dsp.focus({ window = "address:' + addr + '" })'); root.close()
-    }
+    function acceptMatch() { if (selectedMatchAddress) focusWindow(selectedMatchAddress) }
     // open(): forget any query from the previous summon, without touching the selection
     // (open() resets that itself).
     function resetFind() {
@@ -697,7 +745,8 @@ Item {
                                 cls: clsFor(t.address), title: titleFor(t.address),
                                 wsid: t.workspaceId, floating: floatingFor(t.address),
                                 layer: t.layer, fullscreen: t.fullscreen, fsPending: false,
-                                matched: false, selectedMatch: false })
+                                matched: false, selectedMatch: false,
+                                cursor: t.address === root.cursorAddress, closing: false })
         }
         for (var u = 0; u < d.updates.length; u++) {
             var tu = d.updates[u]
@@ -816,6 +865,13 @@ Item {
             if (idx < 0) idx = 0
         }
         root.selectedIndex = idx
+        // The cursor survives only while its window is still on the selected workspace. No
+        // successor rule (unlike find): nothing was typed here that a successor would preserve.
+        if (cursorAddress) {
+            var cw = wmap[cursorAddress]
+            if (!cw || cw.workspaceId !== root.selectedId) cursorAddress = ""
+        }
+        applyCursorRole()
         rematchAfterRebuild()   // a query survives rebuilds; windows may have come or gone
     }
 
@@ -848,7 +904,7 @@ Item {
         targetScreen = focusedScreen(); hideScratchpad(); selectedIndex = -1; opened = true
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
-        resetFind()
+        resetFind(); setCursor("")
         // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
         // "most recent input device wins" means the device that summoned the overview, not
@@ -1109,16 +1165,17 @@ Item {
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_L) root.lockToggleSelected()
                         return
                     }
-                    if (e.key === Qt.Key_Escape) { if (finding) root.setQuery(""); else root.close(); return }
+                    if (e.key === Qt.Key_Escape) {
+                        if (root.cursorAddress) root.setCursor("")
+                        else if (finding) root.setQuery("")
+                        else root.close()
+                        return
+                    }
                     if (e.key === Qt.Key_Backspace) {
                         if (finding) root.setQuery(root.query.slice(0, -1))
                         return
                     }
-                    if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
-                        if (finding) root.acceptMatch()
-                        else if (Logic.hasWs(root.selectedId)) root.jump(root.selectedId)
-                        return
-                    }
+                    if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { root.activateTarget(); return }
                     if (finding) {
                         if (e.key === Qt.Key_Tab) { root.cycleMatch(1); return }
                         if (e.key === Qt.Key_Backtab) { root.cycleMatch(-1); return }
@@ -1127,12 +1184,14 @@ Item {
                         if (e.key === Qt.Key_Up) { root.navigateMatch("up"); return }
                         if (e.key === Qt.Key_Down) { root.navigateMatch("down"); return }
                     } else {
-                        if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) { root.jump(e.key - Qt.Key_0); return }
-                        if (e.key === Qt.Key_0) { root.jump(10); return }
-                        if (e.key === Qt.Key_Left) { root.selectByNav("left"); return }
-                        if (e.key === Qt.Key_Right) { root.selectByNav("right"); return }
-                        if (e.key === Qt.Key_Up) { root.selectByNav("up"); return }
-                        if (e.key === Qt.Key_Down) { root.selectByNav("down"); return }
+                        if (e.key === Qt.Key_Tab) { root.cycleCursor(1); return }
+                        if (e.key === Qt.Key_Backtab) { root.cycleCursor(-1); return }
+                        if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) { root.setCursor(""); root.jump(e.key - Qt.Key_0); return }
+                        if (e.key === Qt.Key_0) { root.setCursor(""); root.jump(10); return }
+                        if (e.key === Qt.Key_Left) { root.setCursor(""); root.selectByNav("left"); return }
+                        if (e.key === Qt.Key_Right) { root.setCursor(""); root.selectByNav("right"); return }
+                        if (e.key === Qt.Key_Up) { root.setCursor(""); root.selectByNav("up"); return }
+                        if (e.key === Qt.Key_Down) { root.setCursor(""); root.selectByNav("down"); return }
                     }
                     var next = Logic.appendQueryText(root.query, e.text)
                     if (next !== root.query) root.setQuery(next)
@@ -1311,6 +1370,7 @@ Item {
                             title: model.title
                             matched: model.matched
                             selectedMatch: model.selectedMatch
+                            cursorTarget: model.cursor
                             dimmed: root.query.length > 0 && !model.matched && root.dropTargetAddress !== model.address
                             accent: root.accent
                             dragging: root.draggingAddress === model.address

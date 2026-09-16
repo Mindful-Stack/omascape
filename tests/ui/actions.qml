@@ -178,4 +178,100 @@ TestCase {
         compare(view.pointerLive, false)
         compare(view.query, "a")
     }
+
+    // ---- the Tab window cursor ------------------------------------------------------------
+    function ringed() {
+        var out = []
+        for (var i = 0; i < view.testModel.count; i++) {
+            var r = view.testModel.get(i)
+            if (r.cursor) out.push(r.address)
+        }
+        return out
+    }
+
+    // Distinguishes: a cursor that follows model order rather than reading order. 0xA is the
+    // left-hand window; a model-order implementation would also answer 0xA here, so the second
+    // Tab is what discriminates — it must reach 0xB, the window to its right.
+    function test_tab_walks_the_selected_workspace_in_reading_order() {
+        compare(view.cursorAddress, "")
+        keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xA")
+        compare(ringed(), ["0xA"], "exactly one tile carries the ring")
+        keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xB")
+        keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xA", "wraps")
+    }
+    // Distinguishes: Shift+Tab treated as Tab. From nothing it must take the LAST window.
+    function test_shift_tab_walks_backwards() {
+        keyClick(Qt.Key_Backtab)
+        compare(view.cursorAddress, "0xB")
+        keyClick(Qt.Key_Backtab)
+        compare(view.cursorAddress, "0xA")
+    }
+    // Distinguishes: a cursor that survives navigation, which would leave a ring on a workspace
+    // the user has navigated away from and make Enter focus a window they cannot see.
+    function test_an_arrow_clears_the_cursor() {
+        keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xA")
+        keyClick(Qt.Key_Right)
+        compare(view.cursorAddress, "")
+        compare(ringed(), [])
+    }
+    // Distinguishes: Esc collapsing two levels at once. The first Esc must consume only the
+    // cursor and leave the overview open.
+    function test_escape_unwinds_the_cursor_before_closing() {
+        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Escape)
+        compare(view.cursorAddress, "")
+        compare(view.opened, true, "the first Escape spends itself on the cursor")
+        keyClick(Qt.Key_Escape)
+        compare(view.opened, false)
+    }
+    // Distinguishes: Enter jumping to the workspace instead of focusing the cursor's window.
+    function test_enter_focuses_the_cursor_window() {
+        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Return)
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf('address:0xA') >= 0)
+        verify(view.compositor.commands[0].indexOf('focus') >= 0)
+    }
+    // Distinguishes: Enter ignoring a live pointer — the target rule must apply to Enter too, so
+    // a hovered tile beats the cursor.
+    function test_enter_prefers_a_hovered_tile_over_the_cursor() {
+        keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xA")
+        hoverTile("0xB")
+        keyClick(Qt.Key_Return)
+        verify(view.compositor.commands[0].indexOf('address:0xB') >= 0)
+    }
+    // Distinguishes: a cursor kept alive after its window left the selected workspace, which
+    // would leave Ctrl+W pointing at a window drawn somewhere else entirely.
+    function test_the_cursor_clears_when_its_window_leaves_the_workspace() {
+        keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xA")
+        view.compositor.workspaces = { values: [
+            wsRow(1, [client("0xB", "bravo", 900)]),
+            wsRow(2, [client("0xC", "charlie", 100), client("0xA", "alpha", 900)])
+        ] }
+        view.rebuild()
+        compare(view.cursorAddress, "")
+    }
+    // Distinguishes: find and the cursor coexisting, which would give two rings and an ambiguous
+    // Enter.
+    function test_a_query_clears_the_cursor() {
+        keyClick(Qt.Key_Tab)
+        keyClick("a")
+        compare(view.cursorAddress, "")
+        verify(view.query.length > 0)
+    }
+    // Distinguishes: a cursor that leaks across summons on the kept-loaded component.
+    function test_open_clears_the_cursor() {
+        keyClick(Qt.Key_Tab)
+        view.close()
+        view.open()
+        wait(120)
+        compare(view.cursorAddress, "")
+    }
 }

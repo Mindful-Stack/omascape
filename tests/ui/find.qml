@@ -121,8 +121,8 @@ TestCase {
                "a digit with an empty query jumps")
         compare(view.opened, false)
     }
-    // Distinguishes: Enter jumping to the workspace (spec: it must focus the *window*), and
-    // Enter with a query but no match doing something.
+    // Distinguishes: Enter jumping to the workspace (spec: it must focus the *window*) when a
+    // match exists.
     function test_enter_focuses_the_selected_window() {
         type("foot")
         keyClick(Qt.Key_Return)
@@ -131,12 +131,20 @@ TestCase {
                "Enter must dispatch a window focus, got: " + view.compositor.commands[0])
         compare(view.opened, false)
     }
-    function test_enter_with_no_match_does_nothing() {
+    // Distinguishes: Enter with a query but no match staying inert instead of resolving through
+    // the shared target rule (Logic.target, docs/specs/2026-09-15-actions-design.md) like every
+    // other Enter press. An absent match falls through to the cursor, then the selected
+    // workspace (see tst_actions.qml: test_target_query_without_match_falls_to_cursor) — with no
+    // cursor set here, that is the pre-query selected workspace, "1".
+    function test_enter_with_no_match_falls_through_to_the_workspace() {
         type("zzz")
         compare(view.matches.length, 0)
         keyClick(Qt.Key_Return)
-        compare(view.compositor.commands.length, 0)
-        compare(view.opened, true)
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf('workspace = "1"') >= 0,
+               "Enter with no match must fall through to the selected workspace, got: " +
+               view.compositor.commands[0])
+        compare(view.opened, false)
     }
     // Distinguishes: a space starting a query (would set query " " and dim everything).
     function test_space_does_not_start_a_query() {
