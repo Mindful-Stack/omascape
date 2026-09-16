@@ -803,6 +803,74 @@ function navigateMatches(boxes, matchWs, current, dir) {
     return current
 }
 
+// ---- Actions (docs/specs/2026-09-15-actions-design.md) -----------------------------------
+// The subject of an action. Pure: the view resolves the pointer to a tile/well and hands the
+// result in, so this file never touches a delegate or a coordinate system.
+
+// Address of the drawn tile under (px, py), or "". `candidates` are the DISPLAYED rects
+// ({ address, x, y, w, h, z }) the view collects from the delegates — scale already folded in,
+// so a hovered tile hit-tests at the size it is painted. Highest `z` wins; a tie goes to the
+// later candidate, which is the one the Repeater paints on top. Unlike `hitWorkspace`/
+// `tiledDropPlan` there is no nearest-rect fallback: an action must never reach a tile the
+// pointer is not actually over.
+function tileAt(candidates, px, py) {
+    var best = null
+    for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i]
+        if (px < c.x || px > c.x + c.w || py < c.y || py > c.y + c.h) continue
+        if (!best || c.z >= best.z) best = c
+    }
+    return best ? best.address : ""
+}
+
+// "Most recent input device wins." A live pointer (see Overview.pointerLive) names what it is
+// over and nothing else — over empty canvas an action has NO target, deliberately: silently
+// falling back to the keyboard would make Ctrl+W close a window the user is not looking at.
+// Otherwise the keyboard: the find match while a query is active, then the Tab cursor, then the
+// selected workspace.
+function target(input) {
+    if (input.pointerLive) {
+        if (input.pointerTileAddress) return { kind: "window", address: input.pointerTileAddress }
+        if (hasWs(input.pointerWorkspaceId)) return { kind: "workspace", id: input.pointerWorkspaceId }
+        return null
+    }
+    if (input.query && input.query.length && input.matchAddress)
+        return { kind: "window", address: input.matchAddress }
+    if (input.cursorAddress) return { kind: "window", address: input.cursorAddress }
+    if (hasWs(input.selectedId)) return { kind: "workspace", id: input.selectedId }
+    return null
+}
+
+// Next/previous window of workspace `wsId` in reading order (y, then x, then address so the
+// order can never depend on model insertion). `tiles` are the model rows as
+// { address, wsid, x, y }; `skip` is an address→true map of windows with an outstanding close
+// request — they are not cycle stops, which is what stops a repeated Ctrl+W from landing back on
+// a window it already asked to close. Returns "" when the workspace has no eligible window.
+function cycleWindows(tiles, wsId, current, step, skip) {
+    var list = []
+    for (var i = 0; i < tiles.length; i++) {
+        var t = tiles[i]
+        if (t.wsid !== wsId) continue
+        if (skip && skip[t.address]) continue
+        list.push(t)
+    }
+    if (!list.length) return ""
+    list.sort(function (a, b) {
+        return (a.y - b.y) || (a.x - b.x) || (a.address < b.address ? -1 : a.address > b.address ? 1 : 0)
+    })
+    var idx = -1
+    for (var j = 0; j < list.length; j++) if (list[j].address === current) { idx = j; break }
+    if (idx < 0) return (step > 0 ? list[0] : list[list.length - 1]).address
+    return list[(idx + step + list.length) % list.length].address
+}
+
+// Menu highlight movement: wrapping, and from "none" onto the first (down) or last (up) row.
+function menuNavigate(count, index, step) {
+    if (!(count > 0)) return -1
+    if (index < 0) return step > 0 ? 0 : count - 1
+    return (index + step + count) % count
+}
+
 // ---- Scratchpad (docs/specs/2026-09-12-scratchpad-design.md) ---------------------------
 // Hyprland allocates special-workspace ids dynamically (the next free id below -99), so the
 // overview never uses the reported id: buildInput() identifies the scratchpad by name and remaps
