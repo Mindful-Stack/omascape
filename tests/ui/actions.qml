@@ -349,15 +349,13 @@ TestCase {
         ctrlW()
         compare(view.compositor.commands.length, 0)
     }
-    // Distinguishes: auto-repeat closing a whole workspace from one held chord.
-    function test_ctrl_w_ignores_auto_repeat() {
-        keyClick(Qt.Key_Tab)
-        ctrlW()
-        var n = view.compositor.commands.length
-        view.testKeys.Keys.pressed({ key: Qt.Key_W, modifiers: Qt.ControlModifier, isAutoRepeat: true,
-                                     text: "", accepted: false })
-        compare(view.compositor.commands.length, n)
-    }
+    // The `!e.isAutoRepeat` guard (auto-repeat closing a whole workspace from one held chord) has
+    // no offscreen test here: QtTest's QML key-event API has no way to set isAutoRepeat, and a
+    // hand-built event object thrown at Keys.pressed() directly fails to convert to a
+    // QQuickKeyEvent* and throws before the handler body runs — a test built on that would pass
+    // identically whether or not the guard exists. Covered instead by a live check: holding
+    // Ctrl+W on a workspace with several windows must dispatch exactly one close, not one per
+    // repeat.
     // Distinguishes: the parked-mouse rule for a destructive key. The pointer sat over 0xB the
     // whole time; only the key press that came AFTER the move may let it decide.
     function test_ctrl_w_follows_the_most_recent_input_device() {
