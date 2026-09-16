@@ -828,16 +828,22 @@ function tileAt(candidates, px, py) {
 // "Most recent input device wins." A live pointer (see Overview.pointerLive) names what it is
 // over and nothing else — over empty canvas an action has NO target, deliberately: silently
 // falling back to the keyboard would make Ctrl+W close a window the user is not looking at.
-// Otherwise the keyboard: the find match while a query is active, then the Tab cursor, then the
-// selected workspace.
+// Otherwise the keyboard: while a query is active the target is the find match and nothing
+// else — a query with no match is a TERMINAL "no target", not a fall-through to the cursor or
+// the selected workspace. Without that, a mistyped search plus Enter would jump to whatever
+// workspace happens to be selected: worse than inert. (Query and cursor cannot both be active
+// in the running overview — setQuery() clears the cursor — so this branch never actually needs
+// to choose between them; it is written terminal anyway so a future refactor cannot reopen the
+// fall-through by "simplifying" it back in.) With no query, the Tab cursor, then the selected
+// workspace.
 function target(input) {
     if (input.pointerLive) {
         if (input.pointerTileAddress) return { kind: "window", address: input.pointerTileAddress }
         if (hasWs(input.pointerWorkspaceId)) return { kind: "workspace", id: input.pointerWorkspaceId }
         return null
     }
-    if (input.query && input.query.length && input.matchAddress)
-        return { kind: "window", address: input.matchAddress }
+    if (input.query && input.query.length)
+        return input.matchAddress ? { kind: "window", address: input.matchAddress } : null
     if (input.cursorAddress) return { kind: "window", address: input.cursorAddress }
     if (hasWs(input.selectedId)) return { kind: "workspace", id: input.selectedId }
     return null

@@ -66,11 +66,21 @@ TestCase {
         var t = Logic.target(input({ matchAddress: "0xM", cursorAddress: "0xC" }))
         compare(t.address, "0xC")
     }
-    // Distinguishes: a query active but with no match yet (matchAddress empty). The function
-    // must fall through to the cursor, not stay on an absent match.
-    function test_target_query_without_match_falls_to_cursor() {
-        var t = Logic.target(input({ query: "xyz", matchAddress: "", cursorAddress: "0xC" }))
-        compare(t.address, "0xC")
+    // Distinguishes: a query active but with no match yet (matchAddress empty) falling through
+    // to the cursor or the selected workspace instead of staying "no target". A query with no
+    // match must be terminal: falling through would make a failed search plus Enter jump
+    // somewhere the user did not ask to go (a mistyped search teleporting to whatever workspace
+    // happens to be selected is worse than doing nothing). Query and cursor can never both be
+    // active in the running overview (setQuery() clears the cursor), but the branch is written
+    // terminal anyway, not "unreachable so it doesn't matter" — see the next test.
+    function test_target_query_without_match_has_no_target() {
+        compare(Logic.target(input({ query: "xyz", matchAddress: "", cursorAddress: "0xC" })), null)
+    }
+    // Distinguishes: the terminal branch regressing back into a fall-through — the case a future
+    // "simplification" would most plausibly reintroduce. A query with no match and a plainly
+    // selectable workspace must still answer null, not the workspace.
+    function test_target_query_without_match_ignores_the_selected_workspace() {
+        compare(Logic.target(input({ query: "xyz", matchAddress: "", selectedId: 3 })), null)
     }
 
     function tile(addr, ws, x, y) { return { address: addr, wsid: ws, x: x, y: y } }
