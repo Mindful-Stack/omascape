@@ -516,7 +516,6 @@ Item {
         selectedIndex = idx
         ensureSelectedVisible()
     }
-    function acceptMatch() { if (selectedMatchAddress) focusWindow(selectedMatchAddress) }
     // open(): forget any query from the previous summon, without touching the selection
     // (open() resets that itself).
     function resetFind() {
@@ -1468,16 +1467,7 @@ Item {
                                     if (wasMoved && Logic.hasWs(targetWs))
                                         root.submitDrop(addr, targetWs, dropX, dropY, ptr.x, ptr.y)
                                     root.endDrag()
-                                    if (!wasMoved) {
-                                        // A tile in the scratchpad row: focus alone raises the special
-                                        // workspace but leaves the window under whichever floating
-                                        // sibling was last on top (see Logic.scratchpadFocusLua).
-                                        if (model.wsid === Logic.SCRATCHPAD_ID)
-                                            Hyprland.dispatch(Logic.scratchpadFocusLua(addr))
-                                        else
-                                            Hyprland.dispatch('hl.dsp.focus({ window = "address:' + addr + '" })')
-                                        root.close()
-                                    }
+                                    if (!wasMoved) { root.focusWindow(addr) }
                                 }
                             }
                         }

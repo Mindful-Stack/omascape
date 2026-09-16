@@ -25,6 +25,15 @@ TestCase {
         return { id: id, monitor: mon,
                  toplevels: { values: clients.map(function (c) { return { lastIpcObject: c } }) } }
     }
+    // A floating scratchpad window (real scratchpad contents are floating, per
+    // tests/ui/scratchpad.qml) on Hyprland's own special-workspace id, named so buildInput()
+    // remaps it onto Logic.SCRATCHPAD_ID.
+    function scratchRow(hyprId, addr, cls) {
+        return { id: hyprId, name: "special:scratchpad", monitor: mon,
+                 toplevels: { values: [{ lastIpcObject: { address: addr, at: [900, 1500], size: [400, 400],
+                                                           floating: true, title: cls, "class": cls,
+                                                           fullscreen: 0 } }] } }
+    }
     function seed(v) {
         mon = { name: "TEST", x: 0, y: 1440, width: 1920, height: 1080, scale: 1,
                 lastIpcObject: { reserved: [0, 26, 0, 0], transform: 0,
@@ -273,5 +282,32 @@ TestCase {
         view.open()
         wait(120)
         compare(view.cursorAddress, "")
+    }
+    // Distinguishes: a focusWindow() that lost its scratchpad branch and always sent a plain
+    // focus. Every other test in this file uses ordinary workspaces, so none of them can tell a
+    // raise from a plain focus — this is the one path a stripped-down focusWindow (just
+    // `Hyprland.dispatch('hl.dsp.focus...')`, no scratchpad check) would still pass every other
+    // test while shipping the exact bug the user hit before this work started: a scratchpad
+    // window matched by the overview got focused but stayed buried under a floating sibling.
+    function test_enter_raises_a_cursor_on_a_scratchpad_window() {
+        view.compositor.workspaces = { values: [
+            wsRow(1, [client("0xA", "alpha", 100), client("0xB", "bravo", 900)]),
+            wsRow(2, [client("0xC", "charlie", 100)]),
+            scratchRow(-73, "0xS", "vault")
+        ] }
+        keyClick("s", Qt.ControlModifier)   // reveal the scratchpad row (Ctrl+S)
+        var idx = -1
+        for (var i = 0; i < view.boxes.length; i++) if (view.boxes[i].workspaceId === -2) { idx = i; break }
+        verify(idx >= 0, "the scratchpad box must appear once shown")
+        view.selectedIndex = idx
+        keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xS")
+        keyClick(Qt.Key_Return)
+        compare(view.compositor.commands.length, 1)
+        var cmd = view.compositor.commands[0]
+        verify(cmd.indexOf('address:0xS') >= 0)
+        verify(cmd.indexOf('alter_zorder({ mode = "top", window = sel })') >= 0,
+               "a cursor on a scratchpad window must raise it, not just focus it, got: " + cmd)
+        compare(view.opened, false)
     }
 }
