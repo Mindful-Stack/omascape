@@ -149,9 +149,11 @@ Inputs: `items` (`[{ id, label, glyph? }]`), `index` (keyboard highlight, -1 non
 `motion`. Signals: `activated(id)`, `dismissed()`. Display-only: no key handling, no focus — the key
 catcher stays the single focus item.
 
-**Placement.** In the canvas layer above the drag ghost (`z` above 99999), at the press point in
-canvas coordinates, nudged left/up so it stays fully inside the Flickable viewport. It does not
-scroll with the canvas: a wheel/edge scroll while open dismisses it.
+**Placement.** At **panel level**, above the dismissal catcher, positioned in panel coordinates
+from the press point and nudged left/up so it stays fully inside the panel. Not in the canvas:
+the Flickable has `clip: true`, so a canvas-level menu opened near the viewport's bottom edge
+would be cut off. It does not scroll with the canvas either — a wheel/edge scroll while open
+dismisses it.
 
 **Opening.** A right press on a tile opens the window menu for that tile's address. A right press
 on a well's empty area (the box `MouseArea`) or ✎ **on the workspace number badge** opens the
@@ -357,8 +359,10 @@ only while a query is active.
 ## Tests
 
 ✎ **Harness changes named up front:** `tests/ui/run.sh` enumerates suites and `tests/ui/prepare.py`
-copies components explicitly — `tests/ui/actions.qml` and `ContextMenu.qml` must be registered in
-both, and `tests/run.sh` must list `tests/tst_actions.qml`. The mock `hl` gains
+copies components explicitly — `tests/ui/actions.qml`, `ContextMenu.qml` and `HintCap.qml` must be
+registered in both. `tests/run.sh` needs no change for a Tier 1 file: it passes the `tests/`
+directory to `qmltestrunner`, which discovers every `tst_*.qml` itself. The chunk-count guard in
+`tests/lua-check.sh` must be raised once per new chunk. The mock `hl` gains
 `hl.dsp.window.close`, `hl.dsp.workspace.move`, `hl.dsp.workspace.swap_monitors`,
 `hl.get_workspace(sel).monitor` and `HL.Workspace:get_windows()`, applied in `hl.dispatch`, never
 no-ops; its existing `window.float` (which only flips a boolean) is extended to **move the active
