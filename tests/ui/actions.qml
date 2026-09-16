@@ -412,12 +412,41 @@ TestCase {
         verify(closed("0xA"))
         compare(view.pendingMoves["0xA"], undefined)
     }
-    // Distinguishes: pendingCloses leaking across summons on the kept-loaded component, which
-    // would leave a tile dimmed and un-cyclable on the next open.
-    function test_open_clears_pending_closes() {
+    // Distinguishes: open() wiping pendingCloses wholesale. Neither pendingMoves nor
+    // pendingFullscreen is ever reset that way — all three decay on their own 1.8 s deadline via
+    // the reconcile timer, which keeps running after close() for exactly this reason. Without
+    // this a Ctrl+W, Escape, quick re-summon would present the window as ordinary and cyclable,
+    // and a second Ctrl+W would dispatch a duplicate close.
+    function test_pending_closes_survive_a_quick_reopen() {
         keyClick(Qt.Key_Tab)
         ctrlW()
+        verify(view.pendingCloses["0xA"] !== undefined)
         view.close(); view.open(); wait(120)
-        compare(Object.keys(view.pendingCloses).length, 0)
+        verify(view.pendingCloses["0xA"] !== undefined, "pending state must not be wiped on reopen")
+    }
+    // Distinguishes: closeWindow advancing the cursor regardless of `advanceCursor`. The shared
+    // two-window fixture can't tell an ignored flag from a correct one — skipping the closed
+    // window from two leaves only one candidate either way. Seeded locally (three windows on one
+    // workspace) so the shared fixture is untouched for every other test.
+    //
+    // The cursor is parked on the THIRD (rightmost) window, not the first: closeWindow always
+    // excludes the address it is closing from the ring before it ever looks at `advanceCursor`
+    // (pendingCloses[addr] is set first, and closeSkipSet() reads it), so a broken implementation
+    // that cycles unconditionally hands cycleWindows a `current` that is never IN the ring and
+    // falls back to the ring's first entry — the leftmost surviving window. With the cursor
+    // parked on the first window already, that fallback (0xA) coincides with the correct answer
+    // (unchanged) and the bug goes unnoticed; parking it on the last window instead means the
+    // fallback (0xA) and the correct answer (0xC, unchanged) can never coincide.
+    function test_closing_a_non_cursor_window_leaves_the_cursor_in_place() {
+        view.compositor.workspaces = { values: [
+            wsRow(1, [client("0xA", "alpha", 100), client("0xB", "bravo", 500), client("0xC", "charlie", 900)])
+        ] }
+        view.rebuild()
+        keyClick(Qt.Key_Tab); keyClick(Qt.Key_Tab); keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xC", "cursor on the third window")
+        var p = tileCentre("0xB")
+        mouseClick(view, p.x, p.y, Qt.MiddleButton)   // closes the second, not the cursor's window
+        verify(closed("0xB"))
+        compare(view.cursorAddress, "0xC", "the cursor must not move for a window it wasn't on")
     }
 }

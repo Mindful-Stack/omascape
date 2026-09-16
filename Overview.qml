@@ -430,7 +430,8 @@ Item {
         delete pendingFullscreen[addr]
         setTileRoles(addr, { fsPending: false })
     }
-    // The one close path: Ctrl+W, the middle click and the menu's Close all land here.
+    // The one close path: Ctrl+W and the middle click land here today; a future menu Close would
+    // too.
     function closeWindow(addr, advanceCursor) {
         if (!addr || pendingCloses[addr]) return
         supersedePending(addr)
@@ -448,11 +449,14 @@ Item {
         if (!t || t.kind !== "window") return
         closeWindow(t.address, t.address === cursorAddress)
     }
-    function reconcileCloses(windows) {
-        var present = {}
-        for (var i = 0; i < windows.length; i++) present[windows[i].address] = true
+    // As conservative as reconcileMoves: absence from `windows` alone never clears an entry. A
+    // window on a workspace that just became a lock placeholder is ALSO absent (find/drag never
+    // see a placeholder's windows — see buildInput), and is not gone; treating that absence as
+    // "the close went through" would drop the tracking and let a second Ctrl+W fire a duplicate
+    // the moment the placeholder clears. Only the deadline decides.
+    function reconcileCloses() {
         for (var addr in pendingCloses)
-            if (!present[addr] || Date.now() >= pendingCloses[addr]) delete pendingCloses[addr]
+            if (Date.now() >= pendingCloses[addr]) delete pendingCloses[addr]
         applyClosingRoles()
     }
     Timer {
@@ -882,7 +886,7 @@ Item {
         if (draggingAddress && !wmap[draggingAddress]) endDrag()
         reconcileMoves(input.windows)
         reconcileFullscreen(input.windows)
-        reconcileCloses(input.windows)
+        reconcileCloses()
         if (!Object.keys(pendingMoves).length && !Object.keys(pendingFullscreen).length &&
             !Object.keys(pendingCloses).length) reconcileTimer.stop()
         root._clsByAddress = cmap
@@ -947,7 +951,7 @@ Item {
         targetScreen = focusedScreen(); hideScratchpad(); selectedIndex = -1; opened = true
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
-        resetFind(); setCursor(""); pendingCloses = ({})
+        resetFind(); setCursor("")
         // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
         // "most recent input device wins" means the device that summoned the overview, not
@@ -967,8 +971,8 @@ Item {
         if (!opened) return                        // a click on the scrim mid-fade is not a second close
         endDrag()
         // settleTimer is open-only; reconcileTimer keeps running (bounded by the 1.8 s
-        // deadlines): it clears optimistic display state (pendingMoves / fsPending) so a
-        // re-summon inside that window shows authoritative geometry, and with keepLoaded the
+        // deadlines): it clears optimistic display state (pendingMoves / fsPending / pendingCloses)
+        // so a re-summon inside that window shows authoritative state, and with keepLoaded the
         // component is alive to do it. No compositor operation depends on it — each one is a
         // single atomic chunk (logic.js).
         settleTimer.stop()
@@ -1500,7 +1504,8 @@ Item {
                                 onCanceled: if (root.dragTile === windowTile) root.endDrag()
                                 onReleased: function (m) {
                                     if (m.button === Qt.MiddleButton) {
-                                        root.closeWindow(model.address, model.address === root.cursorAddress)
+                                        if (root.dragTile === null)   // a drag owns the pointer; actions wait
+                                            root.closeWindow(model.address, model.address === root.cursorAddress)
                                         return
                                     }
                                     if (root.dragTile !== windowTile) return
