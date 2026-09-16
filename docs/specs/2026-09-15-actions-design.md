@@ -432,25 +432,39 @@ window onto the floated window**, so "restores focus" has something to restore.
 ## Verified facts (live, 2026-09-16)
 
 Probed on this machine (Hyprland 0.56.2, single monitor `eDP-1`) with
-`tests/integration/actions-probe.sh`. Verbatim output:
+`tests/integration/actions-probe.sh`. Verbatim output (fix round 1: case 1 now asserts against a
+scratch window it creates, rather than reading and eyeballing whatever the active workspace
+happened to hold):
 
 ```
-FACT get_windows: table n=1 first=0x556cc8c60760
-FACT hyprctl client count on ws 10: 1
-FACT float on→true on-again→true off→false
+FACT get_windows: table n=2 first=0x556cc8db1f80 all=0x556cc8db1f80,0x556cc8d5f9d0
+FACT hyprctl client count on ws 2: 2
+FACT float base→false on→true on-again→true off→false
 SKIP: cases 3 (workspace.move) and 4 (swap_monitors) need two monitors; run them on the nested rig
 ```
 
-- **`HL.Workspace:get_windows()` returns a one-based Lua table** of `HL.Window` objects: `#t`
-  equalled hyprctl's own client count for the workspace (1 = 1) rather than off by one, and
-  `t[1].address` was non-nil. **Addresses carry the `0x` prefix** (`0x556cc8c60760`), matching
-  what `hyprctl -j clients` reports and what `restoreFocusLua` already normalizes for.
+- **`HL.Workspace:get_windows()` returns a one-based Lua table**: `#t` equalled hyprctl's own
+  client count for the probed workspace (2 = 2, guaranteed non-zero because the probed workspace
+  is the scratch window's own) rather than off by one, and `t[1].address` was non-nil. Whether the
+  table's elements are specifically `HL.Window` objects (as opposed to, say, plain address
+  strings) is **read from the type stubs** (`/usr/share/hypr/stubs/hl.meta.lua`), not observed —
+  the probe only calls `tostring(win.address)` on each element and never inspects the object's
+  type or other fields.
+- **Addresses carry the `0x` prefix, measured by direct comparison, not inferred from one
+  sample.** The scratch window's address was read independently from `hyprctl -j clients`
+  (`0x556cc8db1f80`) and found verbatim inside the comma-joined list of addresses
+  `get_windows()` returned (`all=0x556cc8db1f80,0x556cc8d5f9d0`) — i.e. Lua's own string form of
+  the address matches hyprctl's `0x...` form exactly, character for character. The probe fails
+  loudly (`FAIL: get_windows() addresses ... did not include the scratch window's address ...
+  verbatim`) if the two representations ever diverge (e.g. a build that reports addresses without
+  the prefix), rather than only checking `t[1]` and hoping the scratch window sorted first.
 - **`hl.dsp.window.float({ action = "on" | "off" })` is an absolute state, not a toggle.** A
   second `action = "on"` on an already-floating window stayed floating (`on-again→true`); a
   toggle implementation would have flipped it back to tiled and the assertion is written so that
   exact failure mode fails it (`[ "$F2" = true ]`). `action = "off"` then tiled it
-  (`off→false`). All three reads came from a fresh `hyprctl -j clients` lookup taken after each
-  dispatch, never from a value the script passed in.
+  (`off→false`). The probe now also records the pre-dispatch baseline (`base→false`) so the FACT
+  line is self-documenting about the window's starting state. All four reads came from a fresh
+  `hyprctl -j clients` lookup taken after each dispatch, never from a value the script passed in.
 - **Cases 3 (`workspace.move`) and 4 (`swap_monitors`) are NOT verified on this machine** — it
   has one monitor (`eDP-1`) and the probe SKIPs both by design rather than fabricating a
   two-monitor result. The move/swap semantics described above under "Move to ‹monitor›" and "Swap
@@ -458,7 +472,13 @@ SKIP: cases 3 (workspace.move) and 4 (swap_monitors) need two monitors; run them
   (`CWorkspacePlacementController`), not facts observed live; whether the moved-and-active-on-the-
   focused-monitor case actually warps the cursor, and whether `swap_monitors` really leaves each
   monitor showing what it received, are left for the plan's Task 13/14 live checks on the nested
-  rig (`tests/integration/lib.sh`), which can bring up two monitors.
+  rig (`tests/integration/lib.sh`), which can bring up two monitors. When those checks run, note
+  that the move sub-case the probe exercises (and the only one it safely can, without disturbing
+  the user's own view) is specifically the **hidden-workspace** case: it now excludes the target
+  monitor's own active workspace when picking a candidate to move, and records
+  `active-on-<monitor>-before=false` explicitly in the FACT line, so "no cursor warp" (expected
+  here) is never printed in a form indistinguishable from a genuine failure to warp in the
+  active-on-the-focused-monitor case, which is not exercised live by this probe at all.
 - **Tooling note, not a compositor fact:** `hyprctl eval <code>` does not print a Lua chunk's
   return value — only `ok` on success or `error: ...` on failure (confirmed against `hyprctl
   --help`'s own description of the two subcommands, and by direct test: `hyprctl eval "return
@@ -469,4 +489,10 @@ SKIP: cases 3 (workspace.move) and 4 (swap_monitors) need two monitors; run them
   (fire-and-forget, verified by a subsequent fresh `-j` read) or a plain `-j` read, so this affects
   only how a *test script* recovers a Lua return value, not any dispatcher contract the real
   plugin chunks rely on — but any later probe or Tier 2 live check that wants a Lua expression's
-  value back, rather than just its side effect, needs `repl`, not `eval`.
+  value back, rather than just its side effect, needs `repl`, not `eval`. A second tooling note
+  from the fix round: `hyprctl <unknown-subcommand>` prints `unknown request` and **exits 0** on
+  this build, so `ev()` additionally proves `repl` itself is available and returns a value
+  (`hyprctl repl 'return 1' | grep -qx 1`) before relying on it, and checks `hyprctl repl`'s exit
+  status directly rather than through a pipe — a Lua error there exits 7, which is only visible to
+  `set -e`/`pipefail` if the failing command is not laundered through `sed` or a second pipeline
+  stage first.
