@@ -1173,8 +1173,18 @@ Item {
             // for the other on the first keystroke never resizes the card by the few pixels
             // their implicitHeights happen to differ by. Zero only when both are absent.
             readonly property bool findActive: root.query.length > 0
-            readonly property real hintSpace:
-                (findActive || config.hint) ? Math.max(findBar.implicitHeight, hintBox.implicitHeight) + 8 : 0
+            readonly property real hintSpace: {
+                // The larger of what is actually shown: the hint tiers only when hints are
+                // enabled, the find bar only while a query is active. An invisible item keeps
+                // its implicitHeight in QML, so the tiers must be excluded by the config flag
+                // rather than by their own visibility — otherwise a leftover expanded second
+                // tier (hintsExpanded true from an earlier `?`) keeps inflating the budget after
+                // config.hint turns off, even though nothing on screen explains the extra space.
+                var hints = config.hint ? hintBox.implicitHeight : 0
+                var bar = findActive ? findBar.implicitHeight : 0
+                var h = Math.max(hints, bar)
+                return h > 0 ? h + 8 : 0
+            }
             // Cap the card to the screen so the Flickable viewport can be smaller than the
             // content (`availCanvasW` already keeps canvas width <= this, minus the degenerate
             // narrow-screen case, which is expected to 2-D scroll per the spec).
@@ -1245,8 +1255,9 @@ Item {
                         if (e.key === Qt.Key_Down) { root.setCursor(""); root.selectByNav("down"); return }
                     }
                     // `?` is the hint toggle only while there is no query to append to — the
-                    // same rule digits already follow.
-                    if (!finding && e.text === "?") { root.hintsExpanded = !root.hintsExpanded; return }
+                    // same rule digits already follow — and only while hints are enabled at all;
+                    // otherwise it would flip a tier nobody can see.
+                    if (!finding && config.hint && e.text === "?") { root.hintsExpanded = !root.hintsExpanded; return }
                     var next = Logic.appendQueryText(root.query, e.text)
                     if (next !== root.query) root.setQuery(next)
                 }
