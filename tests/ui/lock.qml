@@ -72,10 +72,10 @@ TestCase {
     }
     function cleanup() { view.close() }
     function cmds() { return view.compositor.commands }
-    // "omyview_lock" appears in both the install and sync chunks (both touch the shared _G
+    // "omascape_lock" appears in both the install and sync chunks (both touch the shared _G
     // table); "local ARMED" is unique to sync, so excluding it isolates the install dispatches.
     function installs() {
-        return cmds().filter(function (c) { return c.indexOf("omyview_lock") >= 0 && c.indexOf("local ARMED") < 0 }).length
+        return cmds().filter(function (c) { return c.indexOf("omascape_lock") >= 0 && c.indexOf("local ARMED") < 0 }).length
     }
     function syncs() { return cmds().filter(function (c) { return c.indexOf("local ARMED = {") >= 0 }) }
     function lastSync() { var s = syncs(); return s.length ? s[s.length - 1] : "" }
@@ -104,7 +104,7 @@ TestCase {
         var c = v.compositor.commands
         var installIdx = -1, syncIdx = -1, installs = 0, syncs = 0
         for (var i = 0; i < c.length; i++) {
-            if (c[i].indexOf("omyview_lock") >= 0 && c[i].indexOf("local ARMED") < 0) { installs++; if (installIdx < 0) installIdx = i }
+            if (c[i].indexOf("omascape_lock") >= 0 && c[i].indexOf("local ARMED") < 0) { installs++; if (installIdx < 0) installIdx = i }
             if (c[i].indexOf("local ARMED = {") >= 0) { syncs++; if (syncIdx < 0) syncIdx = i }
         }
         compare(installs, 1, "open() installs exactly once")
@@ -120,7 +120,7 @@ TestCase {
         v.open(); wait(400)
         var s = v.compositor.commands.filter(function (c) { return c.indexOf("local ARMED = {") >= 0 })
         compare(s.length, 0, "no sync while armed is unresolved")
-        verify(v.compositor.commands.some(function (c) { return c.indexOf("omyview_lock") >= 0 && c.indexOf("local ARMED") < 0 }),
+        verify(v.compositor.commands.some(function (c) { return c.indexOf("omascape_lock") >= 0 && c.indexOf("local ARMED") < 0 }),
                "but install did run")
         // ctrlL() dispatches through whichever view last forced keyboard focus, which is `v`
         // here (its own open() ran a Qt.callLater(forceActiveFocus) after `view`'s did).

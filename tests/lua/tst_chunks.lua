@@ -29,7 +29,7 @@ local function run(name, hl)
   fn()
 end
 -- The private `_G` a chunk will see, materialised BEFORE the first run: lets a case seed the
--- compositor state an older build left behind (`_G.omyview_lock` from round 3) and then install
+-- compositor state an older build left behind (`_G.omascape_lock` from round 3) and then install
 -- over it, which is the upgrade path itself — not something a run can be made to produce.
 local function globals(hl)
   hl.__env = hl.__env or envFor(hl)
@@ -234,8 +234,8 @@ end)
 -- the mock's fake clock by the real constant, so changing it in logic.js can never leave them
 -- elapsing a stale number.
 local GRACE = assert(tonumber(chunks["LOCK_SHARE_GRACE_MS"]), "no LOCK_SHARE_GRACE_MS rendered")
-local function state(hl) return hl.__files[hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state"] end
-local function statePath(hl) return hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state" end
+local function state(hl) return hl.__files[hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omascape/share-state"] end
+local function statePath(hl) return hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omascape/share-state" end
 -- Mock.ruleNamed returns the FIRST rule matching `name` in hl.__window_rules (a flat log that
 -- keeps every rule ever created, including dead handles a failed re-enable dropped from
 -- L.rules). A dropped handle is recreated under the SAME name, so this returns the LAST match
@@ -259,13 +259,13 @@ case("lock install is idempotent and publishes 0", function()
   eq(#hl.__notifications, 0)
 end)
 -- Distinguishes: a running compositor whose old subscription's callback closes over stale
--- behaviour surviving a shell restart. `_G.omyview_lock` is compositor Lua state, so
+-- behaviour surviving a shell restart. `_G.omascape_lock` is compositor Lua state, so
 -- `L.sub:is_active()` stays true across a restart — a version mismatch is the only thing that
 -- can tell a fresh install to replace it with a subscription carrying the current callback.
 case("lock install replaces a stale-version observer subscription with a fresh one", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   local oldSub = hl.__subs[1]
-  hl.__env._G.omyview_lock.subVer = nil          -- simulate a subscription installed by an older version
+  hl.__env._G.omascape_lock.subVer = nil          -- simulate a subscription installed by an older version
   run("LOCK_INSTALL", hl)
   eq(oldSub:is_active(), false, "the stale subscription was removed")
   local active = 0
@@ -280,7 +280,7 @@ end)
 case("lock install re-verifies the runtime dir on every run, recreating it if it vanished", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   eq(state(hl), "0")
-  local dir = hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview"
+  local dir = hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omascape"
   for path in pairs(hl.__files) do if path:sub(1, #dir) == dir then hl.__files[path] = nil end end
   hl.__dir_exists = false                              -- the directory itself is gone now
   run("LOCK_INSTALL", hl)
@@ -292,7 +292,7 @@ end)
 -- recovers by calling L.ensureDir() itself, within the same publish, before the next install.
 case("share observer recovers from a vanished runtime dir without waiting for a fresh install", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
-  local dir = hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview"
+  local dir = hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omascape"
   for path in pairs(hl.__files) do if path:sub(1, #dir) == dir then hl.__files[path] = nil end end
   hl.__dir_exists = false
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
@@ -342,15 +342,15 @@ case("lock install: os.execute returning nil does not fail the install (mkdir's 
   eq(state(hl), "0", "published despite os.execute returning nil")
 end)
 -- Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum, 2026-09-14, round 4).
--- The frame is omyview's own layer-shell surfaces; the layer rule is what blanks them in every
+-- The frame is omascape's own layer-shell surfaces; the layer rule is what blanks them in every
 -- capture, so a viewer sees a plain black screen instead of a red frame around one. Distinguishes:
 -- no rule at all (the frame would be IN the recording), a rule on the wrong namespace, or one
 -- without no_screen_share.
 case("lock install creates the lockframe layer rule with no_screen_share", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
-  local r = Mock.layerRuleNamed(hl, "omyview-lockframe")
+  local r = Mock.layerRuleNamed(hl, "omascape-lockframe")
   eq(r ~= nil, true, "layer rule created")
-  eq(r.spec.match.namespace, "omyview-lockframe", "matches the strips' namespace")
+  eq(r.spec.match.namespace, "omascape-lockframe", "matches the strips' namespace")
   eq(r.spec.no_screen_share, true)
   eq(r:is_enabled(), true, "created enabled")
   eq(#hl.__notifications, 0)
@@ -361,7 +361,7 @@ end)
 -- with no way back short of a config reload).
 case("a second install reuses the lockframe layer rule and re-enables a disabled one", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
-  local first = Mock.layerRuleNamed(hl, "omyview-lockframe")
+  local first = Mock.layerRuleNamed(hl, "omascape-lockframe")
   run("LOCK_INSTALL", hl)
   eq(#hl.__layer_rules, 1, "no duplicate layer rule")
   first:set_enabled(false)
@@ -380,11 +380,11 @@ case("a failing layer rule is reported but leaves the observer and the publish i
   eq(state(hl), "0", "and the state file was still published")
   hl.__fail_on = nil
   run("LOCK_INSTALL", hl)
-  eq(Mock.layerRuleNamed(hl, "omyview-lockframe") ~= nil, true, "the next install retries it")
+  eq(Mock.layerRuleNamed(hl, "omascape-lockframe") ~= nil, true, "the next install retries it")
   eq(#hl.__notifications, 1, "the clean retry reports nothing new")
 end)
--- Round 4b, the upgrade path off round 3. A compositor still holding a ROUND-3 `_G.omyview_lock`
--- has an `L.borders` table of `omyview-lock-border-*` window rules, possibly enabled, that round
+-- Round 4b, the upgrade path off round 3. A compositor still holding a ROUND-3 `_G.omascape_lock`
+-- has an `L.borders` table of `omascape-lock-border-*` window rules, possibly enabled, that round
 -- 4's code never touches: this Hyprland Lua API can disable a rule but never remove one, so those
 -- rims would keep colouring every window on an armed workspace until the user's next config
 -- reload (which is exactly what round 4's live check had to do by hand). The install disables them
@@ -393,16 +393,16 @@ end)
 -- drops the table without disabling the rules first (same rims, minus the handles to fix them).
 case("install disables and forgets a round-3 border rule table", function()
   local hl = Mock.new({})
-  local stale = hl.window_rule({ name = "omyview-lock-border-3", match = { workspace = "3" },
+  local stale = hl.window_rule({ name = "omascape-lock-border-3", match = { workspace = "3" },
                                  border_color = "rgb(ff4444)", border_size = 6, enabled = true })
   eq(stale:is_enabled(), true, "the leftover starts enabled (so the check below is not vacuous)")
   local G = globals(hl)
-  G.omyview_lock = { rules = {}, sharing = 0, effective = false, grace = nil, sub = nil,
+  G.omascape_lock = { rules = {}, sharing = 0, effective = false, grace = nil, sub = nil,
                      subVer = nil, dir = nil, borders = { ["3"] = stale },
                      borderCfg = { color = "rgb(ff4444)", size = 6 } }
   run("LOCK_INSTALL", hl)
   eq(stale:is_enabled(), false, "the round-3 rim is switched off")
-  eq(G.omyview_lock.borders, nil, "and the table is gone, so the sweep happens once")
+  eq(G.omascape_lock.borders, nil, "and the table is gone, so the sweep happens once")
   eq(#hl.__notifications, 0, "a clean upgrade reports nothing")
   eq(state(hl), "0", "the install still completed")
 end)
@@ -410,13 +410,13 @@ end)
 -- observer and the layer rule would never be installed on that upgrade.
 case("a stale border rule that cannot be disabled does not break the install", function()
   local hl = Mock.new({})
-  local stale = hl.window_rule({ name = "omyview-lock-border-3", match = { workspace = "3" }, enabled = true })
+  local stale = hl.window_rule({ name = "omascape-lock-border-3", match = { workspace = "3" }, enabled = true })
   local G = globals(hl)
-  G.omyview_lock = { rules = {}, sharing = 0, effective = false, borders = { ["3"] = stale } }
+  G.omascape_lock = { rules = {}, sharing = 0, effective = false, borders = { ["3"] = stale } }
   hl.__fail_on = "rule.set_enabled"
   run("LOCK_INSTALL", hl)
   hl.__fail_on = nil
-  eq(G.omyview_lock.borders, nil, "dropped anyway: nothing else can reach that handle")
+  eq(G.omascape_lock.borders, nil, "dropped anyway: nothing else can reach that handle")
   eq(#hl.__subs, 1, "the share observer was still installed")
   eq(state(hl), "0", "and the state file published")
 end)
@@ -460,9 +460,9 @@ case("lock sync creates one enabled named rule per selector", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   run("LOCK_SYNC_3_SCRATCH", hl)
   eq(#hl.__window_rules, 2, "exactly one rule per selector, nothing else")
-  local r3 = Mock.ruleNamed(hl, "omyview-lock-3"); eq(r3 ~= nil, true, "named rule for 3")
+  local r3 = Mock.ruleNamed(hl, "omascape-lock-3"); eq(r3 ~= nil, true, "named rule for 3")
   eq(r3:is_enabled(), true); eq(r3.spec.match.workspace, "3"); eq(r3.spec.no_screen_share, true)
-  eq(Mock.ruleNamed(hl, "omyview-lock-special:scratchpad"):is_enabled(), true)
+  eq(Mock.ruleNamed(hl, "omascape-lock-special:scratchpad"):is_enabled(), true)
   eq(#hl.__notifications, 0)
 end)
 -- Distinguishes: disarm destroying/forgetting the handle (re-arm would create a second rule),
@@ -470,10 +470,10 @@ end)
 case("lock sync disables removed selectors and reuses the handle on re-arm", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   run("LOCK_SYNC_3", hl); run("LOCK_SYNC_NONE", hl)
-  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), false, "disabled")
+  eq(Mock.ruleNamed(hl, "omascape-lock-3"):is_enabled(), false, "disabled")
   run("LOCK_SYNC_3", hl)
   eq(#hl.__window_rules, 1, "same handle re-enabled, no second rule")
-  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true)
+  eq(Mock.ruleNamed(hl, "omascape-lock-3"):is_enabled(), true)
 end)
 -- Distinguishes: the share observer touching rules (they must stay as the sync left them) or
 -- publishing the wrong value; the counter not clamping. `L.sharing` stays the raw balanced
@@ -492,15 +492,15 @@ case("share events publish 1/0 with a clamped counter and never touch rules", fu
   eq(state(hl), "0", "clamped at 0")
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
   eq(state(hl), "1", "one start after the clamp is a share again (unclamped would be 0)")
-  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true, "rules untouched by share events")
+  eq(Mock.ruleNamed(hl, "omascape-lock-3"):is_enabled(), true, "rules untouched by share events")
 end)
 -- Distinguishes: one failing selector aborting the rest (a single pcall around both loops).
 case("lock sync isolates a failing selector and still protects the others", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   hl.__fail_on = "window_rule"; hl.__fail_sel = "3"
   run("LOCK_SYNC_3_SCRATCH", hl)
-  eq(Mock.ruleNamed(hl, "omyview-lock-3"), nil, "3 failed")
-  eq(Mock.ruleNamed(hl, "omyview-lock-special:scratchpad"):is_enabled(), true, "scratchpad still protected")
+  eq(Mock.ruleNamed(hl, "omascape-lock-3"), nil, "3 failed")
+  eq(Mock.ruleNamed(hl, "omascape-lock-special:scratchpad"):is_enabled(), true, "scratchpad still protected")
   eq(#hl.__notifications, 1, "reported once"); eq(hl.__notifications[1].text:find("3:", 1, true) ~= nil, true, "names the selector")
 end)
 -- Distinguishes: a stale rule not disabled because an earlier enable threw.
@@ -511,8 +511,8 @@ case("lock sync still disables stale rules when an enable throws", function()
   eq(#hl.__notifications, 1)
   hl.__fail_on = nil
   run("LOCK_SYNC_NONE", hl)
-  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), false)
-  eq(Mock.ruleNamed(hl, "omyview-lock-special:scratchpad"):is_enabled(), false, "scratchpad also disabled")
+  eq(Mock.ruleNamed(hl, "omascape-lock-3"):is_enabled(), false)
+  eq(Mock.ruleNamed(hl, "omascape-lock-special:scratchpad"):is_enabled(), false, "scratchpad also disabled")
   eq(#hl.__notifications, 1, "the clean retry reports nothing new")
 end)
 -- Distinguishes: a dead handle left in L.rules after a failed re-enable (a later re-arm would
@@ -520,14 +520,14 @@ end)
 case("lock sync drops a dead handle after a failed re-enable, so re-arm creates a fresh rule", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   run("LOCK_SYNC_3", hl)
-  local dead = Mock.ruleNamed(hl, "omyview-lock-3")
+  local dead = Mock.ruleNamed(hl, "omascape-lock-3")
   hl.__fail_on = "rule.set_enabled"
   run("LOCK_SYNC_3", hl)
   eq(#hl.__notifications, 1, "reported")
   hl.__fail_on = nil
   run("LOCK_SYNC_3", hl)
   eq(#hl.__window_rules, 2, "the dead handle is dropped and a fresh rule created under the same name")
-  local fresh = lastRuleNamed(hl, "omyview-lock-3")
+  local fresh = lastRuleNamed(hl, "omascape-lock-3")
   eq(fresh ~= dead, true, "a distinct rule object")
   eq(fresh:is_enabled(), true, "the fresh exclusion rule is enabled")
 end)
@@ -539,7 +539,7 @@ end)
 case("install over a stale subVer = 2 subscription replaces it under the current LOCK_OBSERVER_VERSION", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   local oldSub = hl.__subs[1]
-  hl.__env._G.omyview_lock.subVer = 2
+  hl.__env._G.omascape_lock.subVer = 2
   run("LOCK_INSTALL", hl)
   eq(oldSub:is_active(), false, "the v2 subscription was removed")
   local active = 0
@@ -557,7 +557,7 @@ case("a failing publish does not fail the sync report, and rules are still recon
   hl.__fail_on = "io.open"          -- would break L.ensureDir()/L.publish() if the sync called them
   run("LOCK_SYNC_3", hl)
   eq(#hl.__notifications, 0, "publish is not this chunk's job; no error reported")
-  eq(Mock.ruleNamed(hl, "omyview-lock-3"):is_enabled(), true, "exclusion rule still enabled")
+  eq(Mock.ruleNamed(hl, "omascape-lock-3"):is_enabled(), true, "exclusion rule still enabled")
 end)
 -- Share-state hysteresis (round 3, 2026-09-14). Hyprland emits screenshare.state(true) per
 -- COPIED frame and (false) from a 500 ms frame-idle timer, so a consumer pulling frames
@@ -580,8 +580,8 @@ case("a flapping share signal inside the grace window rewrites no state", functi
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
   eq(hl.__renames, writes + 1, "four flapping edges committed no further publish")
   eq(state(hl), "1")
-  eq(hl.__env._G.omyview_lock.effective, true, "still effectively sharing")
-  eq(hl.__env._G.omyview_lock.sharing, 1, "the raw counter still tracks every edge")
+  eq(hl.__env._G.omascape_lock.effective, true, "still effectively sharing")
+  eq(hl.__env._G.omascape_lock.sharing, 1, "the raw counter still tracks every edge")
   assert(Mock.pendingTimers(hl) <= 1, "at most one grace timer pending, got " .. Mock.pendingTimers(hl))
   Mock.elapse(hl, GRACE)
   eq(hl.__renames, writes + 1, "the last false's timer was cancelled by the true that followed it")
@@ -598,7 +598,7 @@ case("a share end only takes effect once the whole grace window has passed", fun
   eq(state(hl), "1", "still on one millisecond before the grace expires")
   Mock.elapse(hl, 1)
   eq(state(hl), "0", "off once the grace expires")
-  eq(hl.__env._G.omyview_lock.effective, false)
+  eq(hl.__env._G.omascape_lock.effective, false)
   eq(Mock.pendingTimers(hl), 0, "the grace timer fired and is spent")
 end)
 -- Distinguishes: an observer that leaves L.effective stuck true when hl.timer is missing or
@@ -613,7 +613,7 @@ case("a share end still turns the cue off when the grace timer cannot be created
   hl.__fail_on = nil
   eq(#hl.__printed, 0, "a missing timer is a degraded path, not an error")
   eq(state(hl), "0", "off at once when no grace timer could be armed")
-  eq(hl.__env._G.omyview_lock.effective, false)
+  eq(hl.__env._G.omascape_lock.effective, false)
   eq(Mock.pendingTimers(hl), 0)
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
   eq(state(hl), "1", "the next share start still turns it on (effective was not stranded)")
@@ -659,7 +659,7 @@ end)
 case("install over a stale subVer = 3 (pre-hysteresis) subscription replaces it under the current LOCK_OBSERVER_VERSION", function()
   local hl = Mock.new({}); run("LOCK_INSTALL", hl)
   local oldSub = hl.__subs[1]
-  hl.__env._G.omyview_lock.subVer = 3
+  hl.__env._G.omascape_lock.subVer = 3
   run("LOCK_INSTALL", hl)
   eq(oldSub:is_active(), false, "the v3 subscription was removed")
   local active = 0
@@ -715,7 +715,7 @@ case("lock install: publish rename failure leaves state intact and is logged", f
   hl.__fail_on = "rename"
   Mock.fire(hl, "screenshare.state", true, 0, "eDP-1")
   eq(state(hl), "0", "no rename happened")
-  eq(hl.__files[hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omyview/share-state.tmp"], nil, "tmp removed on failure")
+  eq(hl.__files[hl.__os.getenv("XDG_RUNTIME_DIR") .. "/omascape/share-state.tmp"], nil, "tmp removed on failure")
   assert(hl.__printed[#hl.__printed]:find("share observer failed", 1, true), "observer failure logged")
 end)
 

@@ -1,8 +1,8 @@
-# Omyview — Hardening (review follow-up) Implementation Plan
+# Omascape — Hardening (review follow-up) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the four concrete defects and the CI gap found in the post-merge review of [omyview#8](https://github.com/Mindful-Stack/omyview/pull/8) (commit `9b6a9ac`) without the large refactor: every compositor operation becomes one atomic Lua chunk whose cleanup cannot be skipped, refresh scheduling survives event floods, keyboard selection follows the workspace rather than its position, and CI actually parses and behaviour-tests the generated Lua.
+**Goal:** Close the four concrete defects and the CI gap found in the post-merge review of [omascape#8](https://github.com/Mindful-Stack/omascape/pull/8) (commit `9b6a9ac`) without the large refactor: every compositor operation becomes one atomic Lua chunk whose cleanup cannot be skipped, refresh scheduling survives event floods, keyboard selection follows the workspace rather than its position, and CI actually parses and behaviour-tests the generated Lua.
 
 **Architecture:** All Lua generation stays in the pure `.pragma library` `logic.js` (Tier-1 unit-tested offscreen, now also executed against a mock `hl` table by a real Lua 5.4 interpreter). `Overview.qml` loses the two-phase floating move (transfer, then position after acknowledgement) — the compositor does both in one chunk, so no operation depends on the overlay staying loaded. The settle timer coalesces raw events instead of restarting on each one. `rebuild()` re-resolves the selected workspace id after layout. `tests/lua-check.sh` grows from parse-only into a behaviour suite and becomes mandatory in CI.
 
@@ -22,7 +22,7 @@
 
 **Live-test loop (QML tasks):**
 ```bash
-LIVE="$HOME/.config/omarchy/plugins/se.mindfulstack.omyview"
+LIVE="$HOME/.config/omarchy/plugins/se.mindfulstack.omascape"
 cp logic.js WindowTile.qml Overview.qml "$LIVE"/ && omarchy restart shell
 ```
 Then SUPER+P.
@@ -299,7 +299,7 @@ Add before `tiledInsertLua`:
 function reportLua(what) {
     return (
         'if not ok then\n' +
-        '  local msg = "omyview: ' + what + ' failed: " .. tostring(err)\n' +
+        '  local msg = "omascape: ' + what + ' failed: " .. tostring(err)\n' +
         '  print(msg)\n' +
         '  pcall(function() hl.notification.create({ text = msg, duration = 4000, icon = "error" }) end)\n' +
         'end'
@@ -942,7 +942,7 @@ Expected: the run's log contains `PASS: Lua chunk behaviour suite`. If it prints
   `floatingMoveLua`, `unfullscreenLua`). The shell unloads the overlay on toggle-close
   (`keepLoaded: false`), so nothing in `Overview.qml` may be required to *finish* an
   operation — `pendingMoves` is optimistic display state only. Chunk failures are printed to
-  the Hyprland log (`[Lua] omyview: … failed: …`) and shown as a notification.
+  the Hyprland log (`[Lua] omascape: … failed: …`) and shown as a notification.
 - `tests/lua-check.sh` runs the generated chunks against a mock `hl` (`tests/lua/`); a new
   dispatcher used by a chunk must be added to the mock, never stubbed as a no-op.
 ```

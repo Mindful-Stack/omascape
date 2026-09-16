@@ -1,4 +1,4 @@
-# Omyview — Scratchpad Row Implementation Plan
+# Omascape — Scratchpad Row Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -14,17 +14,17 @@
 
 ## Conventions (every task)
 
-**Branch:** `git checkout scratchpad`. Work in `~/Source/omyview`.
+**Branch:** `git checkout scratchpad`. Work in `~/Source/omascape`.
 
 **Test loop:** `mise run test` runs `tests/run.sh`: every `tests/tst_*.qml` (pure logic), then `tests/ui/run.sh` (builds an offscreen fixture from production QML with `tests/ui/prepare.py`, runs every UI file it copies), then `tests/lua-check.sh` (renders the Lua chunks through a throwaway QML test, parses each with real Lua, runs `tests/lua/tst_chunks.lua` against `tests/lua/mock_hl.lua`). One logic file: `QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/tst_layout.qml`. One UI test: `bash tests/ui/run.sh Scratchpad::test_name`. Lua only: `bash tests/lua-check.sh`.
 
-**Fixture facts:** `prepare.py` rewrites `Hyprland.` → `compositor.` (a QtObject with `monitors`, `workspaces`, `focusedWorkspace`, `focusedMonitor`, a `commands` array appended by `dispatch()`), `PanelWindow` → a 1200×800 Item, and injects `property alias test…` hooks. `OmyviewConfig` stub: `hint: true`, `workspaces: 0` (no padding — the fixture shows exactly the seeded workspaces). `buildInput()` reads `ws.id`, `ws.name`, `ws.monitor`, `ws.toplevels.values[i].lastIpcObject`. Quickshell's `HyprlandWorkspace` exposes `name` (e.g. `"special:scratchpad"`) in production.
+**Fixture facts:** `prepare.py` rewrites `Hyprland.` → `compositor.` (a QtObject with `monitors`, `workspaces`, `focusedWorkspace`, `focusedMonitor`, a `commands` array appended by `dispatch()`), `PanelWindow` → a 1200×800 Item, and injects `property alias test…` hooks. `OmascapeConfig` stub: `hint: true`, `workspaces: 0` (no padding — the fixture shows exactly the seeded workspaces). `buildInput()` reads `ws.id`, `ws.name`, `ws.monitor`, `ws.toplevels.values[i].lastIpcObject`. Quickshell's `HyprlandWorkspace` exposes `name` (e.g. `"special:scratchpad"`) in production.
 
 **Gotchas (verified on this branch's ancestors):** Qt 6.4 on CI rejects legacy reserved words (`long`, `short`, `int`, `char`, `float`, `double`, `byte`, `boolean`, `final`, `native`) as identifiers in QML/JS — never use them. `ListModel` roles are fixed at the first `append` — a new role must be in every `append` object. Every Hyprland dispatch is one single-line Lua chunk; guarded steps go through `run(`, never bare `hl.dispatch(` (lua-check enforces the shape). `Keys.onPressed` handles Ctrl/Alt/Meta chords in its FIRST branch; only Ctrl+Backspace acts today. The lua-check mock must apply every dispatcher a chunk uses — never stub one as a no-op.
 
 **Live-test loop:**
 ```bash
-LIVE="$HOME/.config/omarchy/plugins/se.mindfulstack.omyview"
+LIVE="$HOME/.config/omarchy/plugins/se.mindfulstack.omascape"
 cp logic.js WindowTile.qml FindBar.qml Overview.qml "$LIVE"/ && omarchy restart shell
 ```
 Then SUPER+P, Ctrl+S. `journalctl --user -t omarchy-shell -n 50` shows QML errors. The installed dir is a git clone on `main`; the copies make it dirty, which is expected until the PR merges.
@@ -837,7 +837,7 @@ Table rows before `Esc / click-out`:
 - [ ] **Step 3: Live check**
 
 ```bash
-LIVE="$HOME/.config/omarchy/plugins/se.mindfulstack.omyview"
+LIVE="$HOME/.config/omarchy/plugins/se.mindfulstack.omascape"
 cp logic.js WindowTile.qml FindBar.qml Overview.qml "$LIVE"/ && omarchy restart shell
 ```
 SUPER+P, Ctrl+S: a SCRATCHPAD row with the Bitwarden / extension / 1password tiles appears below the workspaces; Ctrl+S hides it; with it shown, Down from the bottom row selects it, Enter brings the scratchpad up and closes; SUPER+P again, Ctrl+S, drag a window onto it, confirm it moved (SUPER+S). `journalctl --user -t omarchy-shell -n 50` must show no QML warnings.
@@ -868,7 +868,7 @@ https://claude.ai/code/session_01TBiFEERoyvnRjSjS75WkX2
 EOF
 )"
 ```
-Then `gh pr checks <n> --repo Mindful-Stack/omyview` until CI finishes — CI runs Qt 6.4 and has failed before on things Qt 6.11 accepts.
+Then `gh pr checks <n> --repo Mindful-Stack/omascape` until CI finishes — CI runs Qt 6.4 and has failed before on things Qt 6.11 accepts.
 
 ---
 

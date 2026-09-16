@@ -1,4 +1,4 @@
-# Omyview — workspace number badge (2026-09-10)
+# Omascape — workspace number badge (2026-09-10)
 
 Branch `ws-badge`, based on `restyle`. Follow-up to the visual restyle.
 

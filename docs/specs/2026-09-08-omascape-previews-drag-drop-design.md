@@ -1,18 +1,18 @@
-# Omyview v2 — live previews + drag-and-drop (design)
+# Omascape v2 — live previews + drag-and-drop (design)
 
 Date: 2026-09-08 · Target: Omarchy Quattro (4.x), Hyprland 0.56.2, Quickshell 0.3.1
 Status: **approved design, pre-implementation**
 
 ## Goal
 
-Bring Omyview's overview closer to [end-4's dots-hyprland overview](https://github.com/end-4/dots-hyprland):
+Bring Omascape's overview closer to [end-4's dots-hyprland overview](https://github.com/end-4/dots-hyprland):
 
 1. **Live window previews** — each window drawn as a real, live thumbnail of its
    contents instead of an icon box.
 2. **Drag-and-drop between workspaces** — grab a window tile and drop it on another
    workspace to move it there (silently, without switching to that workspace).
 
-While keeping Omyview's identity: workspaces stay grouped into **one row per monitor**
+While keeping Omascape's identity: workspaces stay grouped into **one row per monitor**
 (not end-4's flat rows×columns grid), and the overlay stays a single on-demand
 `PanelWindow` on the focused monitor.
 

@@ -1,4 +1,4 @@
-# Omyview — design (v1)
+# Omascape — design (v1)
 
 Date: 2026-09-06 · Omarchy 4.0.2 (Quattro) · Hyprland 0.56.2 · Quickshell shell
 
@@ -69,11 +69,11 @@ jump to one — keyboard or mouse.
 
 ## Architecture / integration
 
-- Omarchy-shell **user plugin**: `~/.config/omarchy/plugins/se.mindfulstack.omyview/`
+- Omarchy-shell **user plugin**: `~/.config/omarchy/plugins/se.mindfulstack.omascape/`
   (`manifest.json` + `Overview.qml` + any JS helpers). Lives in the user config dir →
   survives `omarchy update`; hot-reloads on save (`omarchy-shell shell rescanPlugins`
   to force).
-- Toggled via `omarchy-shell shell toggle se.mindfulstack.omyview`, bound to **SUPER+P** in
+- Toggled via `omarchy-shell shell toggle se.mindfulstack.omascape`, bound to **SUPER+P** in
   `~/.config/hypr/bindings.lua` (replacing the walker picker line).
 - Built on the shell's shared overlay (`Ui/Panel.qml`) + Hyprland service. Data:
   `Hyprland.workspaces` (each with `.toplevels` = its windows incl. geometry + app id,
@@ -117,7 +117,7 @@ jump to one — keyboard or mouse.
 ## v2 — live previews + drag-and-drop (2026-09-09)
 
 v2 replaces the icon mini-map with live window thumbnails and adds drag-and-drop of windows
-between workspaces. See `docs/specs/2026-09-08-omyview-previews-drag-drop-design.md` (design)
+between workspaces. See `docs/specs/2026-09-08-omascape-previews-drag-drop-design.md` (design)
 and `docs/plans/2026-09-08-v2-previews-drag-drop.md` (task-by-task build).
 
 - **Shared canvas, per-monitor rows kept.** The card holds one non-clipped canvas with two
@@ -169,7 +169,7 @@ under it, which also covers hidden workspaces) and picks the side by its smart-s
 the slope of (cursor − node centre) against the node's aspect ratio gives left/right for
 shallow angles and top/bottom for steep ones.
 
-Omyview replays exactly that in **one atomic Lua chunk** (Lua-config Hyprland evaluates a
+Omascape replays exactly that in **one atomic Lua chunk** (Lua-config Hyprland evaluates a
 `dispatch` payload as `hl.dispatch(<payload>)` and accepts a function; nothing renders in
 between): float the window → move it silently to the target workspace if needed → warp the
 cursor onto the anchor → un-float → restore the cursor. Two config values are overridden for
@@ -224,7 +224,7 @@ to the drop target). The drop cue is drawn above the previews: the tiled-insert 
 anchor tile when there is one, otherwise an accent wash over the target well. Tiles rest at
 scale 1 with only a 12 % hairline. Monitor chips are plain text; `Logic.layout` lays out their
 header band only when more than one monitor has workspaces. The scrim is configurable via
-`~/.config/omarchy/omyview.json` (`OmyviewConfig.qml`).
+`~/.config/omarchy/omascape.json` (`OmascapeConfig.qml`).
 Design: `docs/specs/2026-09-10-restyle-design.md`. Motion is deferred to a follow-up spec.
 
 ## Workspace number badge (2026-09-10)
@@ -260,7 +260,7 @@ rebuild shows it. A config change to `workspaces` while open triggers an immedia
 Typography comes from the shell (`Style.font.menuFamily`, `bodySmall`, `caption`) and the card
 padding from `Style.space`, so the picker follows `omarchy display text size`. Empty wells sit one
 tone step below occupied ones; floating windows cast a small `SoftShadow`; the key hints are key
-caps with labels and can be switched off (`hint` in `~/.config/omarchy/omyview.json`). Cell gaps
+caps with labels and can be switched off (`hint` in `~/.config/omarchy/omascape.json`). Cell gaps
 tightened to 4/8. Design: `docs/specs/2026-09-10-theme-polish-design.md`.
 
 ## Window states: fullscreen and floating (2026-09-10)
@@ -324,7 +324,7 @@ One vocabulary: a `motion` block on the Overview root owns every duration (fast 
 160 ms, enter 200 ms, exit 120 ms) and easing (`OutCubic` for movement, `OutQuad` for hover and
 lift, a small-overshoot `OutBack` entrance); tiles receive it as a property. Policy: config
 `motion` is `"auto"` (follow Hyprland `animations:enabled`, probed with `hyprctl -j getoption`
-once per open, cached in `OmyviewConfig.hyprAnimations` and folded into the derived
+once per open, cached in `OmascapeConfig.hyprAnimations` and folded into the derived
 `motionEffective`), `"full"` or `"off"` (every duration 0, every Behavior disabled). Open/close
 are explicit animations; the `PanelWindow` stays mapped while `card.opacity > 0` and drops
 keyboard focus the moment `opened` clears. Layout motion is `Behavior`s on tile, box, badge and

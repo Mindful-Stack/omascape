@@ -1,4 +1,4 @@
-# Omyview — theme polish (2026-09-10)
+# Omascape — theme polish (2026-09-10)
 
 Branch `theme-polish`, based on `ws-badge`. Small style pass agreed after the restyle; motion is
 still a separate follow-up.
@@ -16,7 +16,7 @@ still a separate follow-up.
 - **Empty wells one step lower.** Empty workspaces fill at half `normalFillAlpha`; occupied ones
   keep the full step.
 - **Key caps.** The hint line is a row of small caps (well tone, radius 4) with labels, and can be
-  switched off with `"hint": false` in `~/.config/omarchy/omyview.json`. When off, the card gives
+  switched off with `"hint": false` in `~/.config/omarchy/omascape.json`. When off, the card gives
   the space back.
 - **`SoftShadow.qml`** replaces `CardShadow.qml`: same shader, now generic (`target`, `radius`,
   `blur`, `offset`, `color` overridable) so the card and tiles share it.
@@ -26,7 +26,7 @@ still a separate follow-up.
 Hyprland's Lua config can blur the picker's layer:
 
 ```lua
-hl.layer_rule({ match = { namespace = "omyview" }, blur = true, ignore_alpha = 0.3 })
+hl.layer_rule({ match = { namespace = "omascape" }, blur = true, ignore_alpha = 0.3 })
 ```
 
 This needs `decoration.blur.enabled = true` and lives in the user's Hyprland config, not the

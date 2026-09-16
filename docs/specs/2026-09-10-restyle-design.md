@@ -1,4 +1,4 @@
-# Omyview — visual restyle (2026-09-10)
+# Omascape — visual restyle (2026-09-10)
 
 Branch `restyle` (worktree), based on `drag-ghost`. Motion/animation work is deferred to a
 follow-up spec; this one only changes surfaces, radii, and what marks selection.
@@ -46,13 +46,13 @@ mirrors Hyprland `decoration:rounding` (0 on the author's machine).
 
 ## Config
 
-`~/.config/omarchy/omyview.json` (watched, optional):
+`~/.config/omarchy/omascape.json` (watched, optional):
 
 ```json
 { "scrim": true }
 ```
 
-Missing file or key = default. Loaded by `OmyviewConfig.qml`; the offscreen test fixture stubs
+Missing file or key = default. Loaded by `OmascapeConfig.qml`; the offscreen test fixture stubs
 it and `CardShadow.qml` with plain items.
 
 ## Acceptance checks

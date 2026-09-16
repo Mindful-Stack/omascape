@@ -34,7 +34,7 @@
 -- `_G`, but the directory on disk does not) — combine with deleting the relevant `hl.__files`
 -- entries so a stale in-memory file doesn't make a vanished directory look intact.
 -- `hl.__env` is a per-mock cache of that environment (see tst_chunks.lua's `envFor`) — a fresh
--- `Mock.new()` per test case is what keeps `_G` (and so `_G.omyview_lock`) from leaking between
+-- `Mock.new()` per test case is what keeps `_G` (and so `_G.omascape_lock`) from leaking between
 -- cases.
 local M = {}
 
@@ -165,7 +165,7 @@ function M.new(opts)
       if hl.__fail_on == "io.open" then return nil end
       -- Any open under the runtime dir (the install chunk's probe file, or later its
       -- share-state files) fails while the directory isn't there.
-      local dir = (hl.__runtime_dir or "/run/user/1000") .. "/omyview"
+      local dir = (hl.__runtime_dir or "/run/user/1000") .. "/omascape"
       if path:sub(1, #dir) == dir and not hl.__dir_exists then return nil end
       local buf = {}
       return { write = function(self, s) if hl.__fail_on == "io.write" then return nil end; buf[#buf + 1] = s; return self end,
@@ -261,7 +261,7 @@ function M.ruleNamed(hl, name)
   return nil
 end
 -- Same, over the LAYER rules (the share-time reminder frame's `no_screen_share` rule on the
--- omyview-lockframe namespace, created by the install chunk).
+-- omascape-lockframe namespace, created by the install chunk).
 function M.layerRuleNamed(hl, name)
   for _, r in ipairs(hl.__layer_rules) do if r.spec.name == name then return r end end
   return nil

@@ -1,4 +1,4 @@
-# Omyview — Implementation Plan (v1)
+# Omascape — Implementation Plan (v1)
 
 > **STATUS: v1 COMPLETE — 2026-09-07.** All 6 tasks built and verified in a live session
 > (single monitor). `mode: full`. Deferred verification: focused-monitor targeting when
@@ -16,8 +16,8 @@ workspaces as one boxed row each, with a spatial icon mini-map of windows, toggl
 by SUPER+P, to jump between workspaces.
 
 **Architecture:** An Omarchy-shell `overlay` plugin (`manifest.json` + `Overview.qml`)
-in `~/.config/omarchy/plugins/se.mindfulstack.omyview/`. Root `Item` with `toggle()/open()/close()`
-(the shell calls `toggle()` for `omarchy-shell shell toggle se.mindfulstack.omyview`), a
+in `~/.config/omarchy/plugins/se.mindfulstack.omascape/`. Root `Item` with `toggle()/open()/close()`
+(the shell calls `toggle()` for `omarchy-shell shell toggle se.mindfulstack.omascape`), a
 `Quickshell.Wayland` overlay surface shown when `opened`, and a focusable key-catcher
 for keyboard selection. Data from `Quickshell.Hyprland` (`Hyprland.workspaces`,
 `.toplevels`, `.focusedWorkspace/Monitor`); jump via Hyprland dispatch.
@@ -54,8 +54,8 @@ This task locks in the overlay+toggle mechanism everything else hangs off. Mirro
 `clipboard/Clipboard.qml`'s root structure exactly; only the contents differ.
 
 **Files:**
-- Create: `~/.config/omarchy/plugins/se.mindfulstack.omyview/manifest.json`
-- Create: `~/.config/omarchy/plugins/se.mindfulstack.omyview/Overview.qml`
+- Create: `~/.config/omarchy/plugins/se.mindfulstack.omascape/manifest.json`
+- Create: `~/.config/omarchy/plugins/se.mindfulstack.omascape/Overview.qml`
 - (Reference: `clipboard/manifest.json`, `clipboard/Clipboard.qml:1-60`, `Ui/Panel.qml`)
 
 - [ ] **Step 1 — Confirm the shell's log/unit** so later verify steps are real.
@@ -68,8 +68,8 @@ This task locks in the overlay+toggle mechanism everything else hangs off. Mirro
 ```json
 {
   "schemaVersion": 1,
-  "id": "se.mindfulstack.omyview",
-  "name": "Omyview",
+  "id": "se.mindfulstack.omascape",
+  "name": "Omascape",
   "version": "0.1.0",
   "author": "Mindful Stack",
   "description": "Visual overview of all workspaces, grouped by monitor",
@@ -92,7 +92,7 @@ PanelWindow {
   screen: root.targetScreen                 // focused monitor — Step 3a
   anchors { top: true; bottom: true; left: true; right: true }
   color: "transparent"
-  WlrLayershell.namespace: "omyview"
+  WlrLayershell.namespace: "omascape"
   WlrLayershell.layer: WlrLayer.Overlay
   WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
   exclusionMode: ExclusionMode.Ignore
@@ -132,15 +132,15 @@ function focusedScreen() {
 
 - [ ] **Step 3b — Enable the plugin** (new plugins default to `disabled`; enablement is
   stored in `~/.config/omarchy/shell.json` under `plugins[]`, NOT auto-on on discovery).
-  Run: `omarchy plugin validate ~/.config/omarchy/plugins/se.mindfulstack.omyview` (expect no
-  errors), then `omarchy plugin enable se.mindfulstack.omyview` (expect `Enabled se.mindfulstack.omyview`).
+  Run: `omarchy plugin validate ~/.config/omarchy/plugins/se.mindfulstack.omascape` (expect no
+  errors), then `omarchy plugin enable se.mindfulstack.omascape` (expect `Enabled se.mindfulstack.omascape`).
   Confirm: `omarchy plugin list` shows it `enabled`. Property: **without this, the shell
   discovers/loads the QML but `toggle` logs `summon: plugin not enabled` and shows nothing.**
 
 - [ ] **Step 4 — Reload + user verify.**
   Run: `omarchy-shell shell rescanPlugins`
   Then you, with focus on the **external** monitor, runs
-  `omarchy-shell shell toggle se.mindfulstack.omyview` → the overlay must appear **on the
+  `omarchy-shell shell toggle se.mindfulstack.omascape` → the overlay must appear **on the
   external**; run it again → it hides (the IPC command flips both ways — unlike the
   keybind in Task 2). Repeat with focus on the laptop → it appears on the laptop.
   While open: press **Esc** → closes; reopen and **click the scrim** (outside the card)
@@ -158,7 +158,7 @@ pointing at the removed `workspace-picker.sh`).
 - [ ] **Step 1 — Replace the picker bind.** Change the `o.bind("SUPER + P", ...)`
   line to:
 ```lua
-o.bind("SUPER + P", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omyview")
+o.bind("SUPER + P", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
 ```
   Keep the existing `hl.unbind("SUPER + P")` above it. Leave `SUPER + U` (pseudo) as-is.
 
