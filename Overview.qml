@@ -411,8 +411,50 @@ Item {
         if (t.kind === "workspace") jump(t.id)
         else focusWindow(t.address)
     }
-    // Placeholder until Task 5; declared here so closeSkipSet compiles.
+    // ---- Actions: outstanding closes -------------------------------------------------------
+    // A close is a REQUEST: the app may prompt, delay or refuse, and Hyprland keeps reporting the
+    // window until it is really gone. addr → deadline (1.8 s, like the other pending maps).
     property var pendingCloses: ({})
+    function applyClosingRoles() {
+        for (var i = 0; i < tilesModel.count; i++) {
+            var cur = tilesModel.get(i)
+            var next = { closing: !!pendingCloses[cur.address] }
+            if (rowDiffers(cur, next)) tilesModel.set(i, next)
+        }
+    }
+    // Drop every optimistic display state held for `addr`, exactly as a new grab does. Without
+    // this, applyTiles would keep a just-dropped window's row (it skips updates AND removals for
+    // an address in pendingMoves) until its deadline, outliving the action taken on it.
+    function supersedePending(addr) {
+        delete pendingMoves[addr]
+        delete pendingFullscreen[addr]
+        setTileRoles(addr, { fsPending: false })
+    }
+    // The one close path: Ctrl+W, the middle click and the menu's Close all land here.
+    function closeWindow(addr, advanceCursor) {
+        if (!addr || pendingCloses[addr]) return
+        supersedePending(addr)
+        pendingCloses[addr] = Date.now() + 1800
+        if (advanceCursor)
+            setCursor(Logic.cycleWindows(tileRows(), selectedId, addr, 1, closeSkipSet()))
+        applyClosingRoles()
+        Hyprland.dispatch('hl.dsp.window.close({ window = "address:' + addr + '" })')
+        scheduleRebuild()
+        reconcileTimer.restart()
+    }
+    function closeTarget() {
+        if (dragTile !== null) return          // a drag owns the pointer; actions wait
+        var t = resolveTarget()
+        if (!t || t.kind !== "window") return
+        closeWindow(t.address, t.address === cursorAddress)
+    }
+    function reconcileCloses(windows) {
+        var present = {}
+        for (var i = 0; i < windows.length; i++) present[windows[i].address] = true
+        for (var addr in pendingCloses)
+            if (!present[addr] || Date.now() >= pendingCloses[addr]) delete pendingCloses[addr]
+        applyClosingRoles()
+    }
     Timer {
         id: reconcileTimer
         interval: 120; repeat: true
@@ -840,7 +882,9 @@ Item {
         if (draggingAddress && !wmap[draggingAddress]) endDrag()
         reconcileMoves(input.windows)
         reconcileFullscreen(input.windows)
-        if (!Object.keys(pendingMoves).length && !Object.keys(pendingFullscreen).length) reconcileTimer.stop()
+        reconcileCloses(input.windows)
+        if (!Object.keys(pendingMoves).length && !Object.keys(pendingFullscreen).length &&
+            !Object.keys(pendingCloses).length) reconcileTimer.stop()
         root._clsByAddress = cmap
         root._titleByAddress = tmap
         root._floatingByAddress = fmap
@@ -903,7 +947,7 @@ Item {
         targetScreen = focusedScreen(); hideScratchpad(); selectedIndex = -1; opened = true
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
-        resetFind(); setCursor("")
+        resetFind(); setCursor(""); pendingCloses = ({})
         // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
         // "most recent input device wins" means the device that summoned the overview, not
@@ -1162,6 +1206,7 @@ Item {
                         if (chord === Qt.ControlModifier && e.key === Qt.Key_Backspace && finding) root.setQuery("")
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_S) root.toggleScratchpad()
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_L) root.lockToggleSelected()
+                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_W && !e.isAutoRepeat) root.closeTarget()
                         return
                     }
                     if (e.key === Qt.Key_Escape) {
@@ -1370,6 +1415,7 @@ Item {
                             matched: model.matched
                             selectedMatch: model.selectedMatch
                             cursorTarget: model.cursor
+                            closing: model.closing
                             dimmed: root.query.length > 0 && !model.matched && root.dropTargetAddress !== model.address
                             accent: root.accent
                             dragging: root.draggingAddress === model.address
@@ -1454,7 +1500,7 @@ Item {
                                 onCanceled: if (root.dragTile === windowTile) root.endDrag()
                                 onReleased: function (m) {
                                     if (m.button === Qt.MiddleButton) {
-                                        Hyprland.dispatch('hl.dsp.window.close({ window = "address:' + model.address + '" })')
+                                        root.closeWindow(model.address, model.address === root.cursorAddress)
                                         return
                                     }
                                     if (root.dragTile !== windowTile) return

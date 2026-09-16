@@ -310,4 +310,116 @@ TestCase {
                "a cursor on a scratchpad window must raise it, not just focus it, got: " + cmd)
         compare(view.opened, false)
     }
+
+    // ---- Ctrl+W, pendingCloses, pending-move supersession ---------------------------------
+    function closed(addr) {
+        for (var i = 0; i < view.compositor.commands.length; i++) {
+            var c = view.compositor.commands[i]
+            if (c.indexOf('window.close') >= 0 && c.indexOf('address:' + addr) >= 0) return true
+        }
+        return false
+    }
+    function ctrlW() { keyClick(Qt.Key_W, Qt.ControlModifier) }
+
+    // Distinguishes: Ctrl+W acting on the workspace rather than the cursor's window, and a close
+    // that does not advance — the ring must land on the OTHER window, not stay on the closed one.
+    function test_ctrl_w_closes_the_cursor_window_and_advances() {
+        keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xA")
+        ctrlW()
+        verify(closed("0xA"))
+        compare(view.cursorAddress, "0xB", "the ring moves off the window being closed")
+        verify(view.testModel.get(0).closing || view.testModel.get(1).closing, "the closing tile dims")
+    }
+    // Distinguishes: THE repeated-close bug. With both windows still reported by the compositor,
+    // a second Ctrl+W must close 0xB, and a third must close nothing — never cycle back to 0xA.
+    function test_repeated_ctrl_w_clears_the_workspace_without_repeating() {
+        keyClick(Qt.Key_Tab)
+        ctrlW(); ctrlW()
+        verify(closed("0xA")); verify(closed("0xB"))
+        compare(view.cursorAddress, "", "no eligible window is left to ring")
+        var n = view.compositor.commands.length
+        ctrlW()
+        compare(view.compositor.commands.length, n, "a third press has no target")
+    }
+    // Distinguishes: a workspace target silently closing something. Ctrl+W with no window target
+    // must dispatch nothing at all.
+    function test_ctrl_w_on_a_workspace_target_does_nothing() {
+        compare(view.cursorAddress, "")
+        ctrlW()
+        compare(view.compositor.commands.length, 0)
+    }
+    // Distinguishes: auto-repeat closing a whole workspace from one held chord.
+    function test_ctrl_w_ignores_auto_repeat() {
+        keyClick(Qt.Key_Tab)
+        ctrlW()
+        var n = view.compositor.commands.length
+        view.testKeys.Keys.pressed({ key: Qt.Key_W, modifiers: Qt.ControlModifier, isAutoRepeat: true,
+                                     text: "", accepted: false })
+        compare(view.compositor.commands.length, n)
+    }
+    // Distinguishes: the parked-mouse rule for a destructive key. The pointer sat over 0xB the
+    // whole time; only the key press that came AFTER the move may let it decide.
+    function test_ctrl_w_follows_the_most_recent_input_device() {
+        keyClick(Qt.Key_Tab)                 // cursor on 0xA, pointer not live
+        hoverTile("0xB")                     // pointer moved last
+        ctrlW()
+        verify(closed("0xB"), "the hovered tile wins")
+        verify(!closed("0xA"))
+    }
+    // Distinguishes: an action key that clears liveness. The second Ctrl+W must still resolve to
+    // the hovered window (a no-op, since its close is outstanding) and must NOT fall through to
+    // the cursor. An arrow in between is the positive control that the cursor path still works.
+    function test_consecutive_action_keys_keep_the_pointer_in_charge() {
+        keyClick(Qt.Key_Tab)                 // cursor on 0xA
+        hoverTile("0xB")
+        ctrlW()
+        var n = view.compositor.commands.length
+        ctrlW()
+        compare(view.compositor.commands.length, n, "0xB's close is already outstanding")
+        verify(!closed("0xA"))
+        keyClick(Qt.Key_Right); keyClick(Qt.Key_Left)   // navigation returns control to the keyboard
+        keyClick(Qt.Key_Tab)
+        ctrlW()
+        verify(closed("0xA"))
+    }
+    // Distinguishes: a close that leaves the drop's optimistic row in place — applyTiles skips
+    // updates and removals for an address in pendingMoves, so without supersession the tile of a
+    // just-dropped window would survive its own close until the 1.8 s deadline.
+    function test_closing_supersedes_a_pending_drop() {
+        view.pendingMoves["0xA"] = { workspaceId: 2, pos: null, deadline: Date.now() + 1800 }
+        keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xA")
+        ctrlW()
+        compare(view.pendingMoves["0xA"], undefined, "the optimistic row must not outlive the close")
+    }
+    // Distinguishes: a refused close that never lets go. Past the deadline, with the window still
+    // reported, the tile must un-dim and become cyclable again.
+    function test_a_refused_close_recovers_at_the_deadline() {
+        keyClick(Qt.Key_Tab)
+        ctrlW()
+        verify(view.pendingCloses["0xA"] !== undefined)
+        view.pendingCloses["0xA"] = Date.now() - 1      // the deadline has passed
+        view.rebuild()
+        compare(view.pendingCloses["0xA"], undefined)
+        keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xA", "cyclable again")
+    }
+    // Distinguishes: the middle click drifting from Ctrl+W. Both must go through one path, so the
+    // middle click clears pending state too.
+    function test_middle_click_shares_the_close_path() {
+        view.pendingMoves["0xA"] = { workspaceId: 2, pos: null, deadline: Date.now() + 1800 }
+        var p = tileCentre("0xA")
+        mouseClick(view, p.x, p.y, Qt.MiddleButton)
+        verify(closed("0xA"))
+        compare(view.pendingMoves["0xA"], undefined)
+    }
+    // Distinguishes: pendingCloses leaking across summons on the kept-loaded component, which
+    // would leave a tile dimmed and un-cyclable on the next open.
+    function test_open_clears_pending_closes() {
+        keyClick(Qt.Key_Tab)
+        ctrlW()
+        view.close(); view.open(); wait(120)
+        compare(Object.keys(view.pendingCloses).length, 0)
+    }
 }
