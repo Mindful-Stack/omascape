@@ -843,10 +843,13 @@ Item {
         var seen = {}
         for (var i = 0; i < boxes.length; i++) {
             var b = boxes[i]
+            // synthetic/active are not roles here: the menu reads them off root.boxes
+            // (Logic.layout()'s raw output via boxForWs()), not boxesModel, and active flips on
+            // every workspace switch — an unread role would make rowDiffers fire a model set()
+            // with no visible effect on every such switch, even off-screen.
             var row = { workspaceId: b.workspaceId, bx: b.x, by: b.y, bw: b.w, bh: b.h,
                         focused: !!b.focused, occupied: !!b.occupied,
                         armed: !!b.armed, placeholder: !!b.placeholder,
-                        synthetic: !!b.synthetic, active: !!b.active,
                         // Not read by the overview yet.
                         special: b.special || "" }
             seen[b.workspaceId] = true
