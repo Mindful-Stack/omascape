@@ -2,7 +2,8 @@
 
 Date: 2026-09-15 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on find, the scratchpad row and the workspace lock (`main` at `26c6c11`).
-Status: **approved design, pre-implementation** (revised after a codex review, 2026-09-15).
+Status: **approved design, pre-implementation** (revised after a codex review, 2026-09-15, and a
+second design review, 2026-09-16).
 Branch `actions`.
 
 ## Goal
@@ -43,9 +44,10 @@ ship (or be dropped) on their own.
   find. "What happens if the workspace has several windows?" — Tab picks one.
 - **Most recent input device wins.** A pointer parked over a tile must not hijack keyboard actions,
   and a stale Tab cursor must not hijack a mouse user; so the pointer only decides while it is
-  *live* (moved since the last substantive key press). ✎ Modifier-only presses (Ctrl, Shift, Alt,
-  Meta on their own) never change targeting, or hover + Ctrl+W could never work: the Ctrl press
-  would go stale before the W arrived.
+  *live* (moved since the last navigation or query key press). ✎ Modifier-only presses (Ctrl,
+  Shift, Alt, Meta on their own) never change targeting, or hover + Ctrl+W could never work: the
+  Ctrl press would go stale before the W arrived. ✎ Action keys (Ctrl+W, Enter) read liveness and
+  leave it alone, so a second Ctrl+W cannot silently switch from the hovered window to the cursor.
 - **Hints in two tiers**, toggled by `?`: the primary row stays short; the advanced keys live on a
   second line shown on demand.
 - ✎ **Swap uses the native `workspace.swap_monitors`, and is offered only for a workspace that is
@@ -80,9 +82,18 @@ pointer is live once that position has changed since the last substantive key pr
 the point is inside the viewport's clipped area. ✎ Canvas coordinates shift under a stationary
 pointer (edge/wheel scroll, a card resize, the entrance scale), so they cannot stand in for "the
 user moved the mouse"; they are derived from the scene point only at resolve time, via
-`flick.mapFromItem`. Cleared on every substantive key press (anything but a lone modifier) and when
-the point leaves the viewport. The right-click menu does not consult it — a right press *is* the
-pointer being live — and records its target explicitly when it opens.
+`flick.mapFromItem`. The right-click menu does not consult it — a right press *is* the pointer
+being live — and records its target explicitly when it opens.
+
+✎ **Which keys clear it, and when.** Keys fall in two classes. *Navigation and query keys* —
+arrows, digits, Tab/Shift+Tab, Esc, Backspace, printable text, Ctrl+S, Ctrl+L, `?` — express
+keyboard intent and **clear liveness on entry**, before anything else they do. *Action keys* —
+Ctrl+W, Enter, and later Space — **resolve the target against liveness as it stands at event
+entry and leave it unchanged**: an action does not say "I am on the keyboard now", it says "do
+this to what I am pointing at". So with a window hovered, Ctrl+W twice closes it (the second press
+finds it pending and is a no-op, see below) rather than silently switching to the Tab cursor, and
+Enter after a hover focuses the hovered window. A lone modifier press belongs to neither class and
+touches nothing. Liveness is also cleared when the point leaves the viewport.
 
 **Tile under the pointer** ✎ is resolved against what is *drawn*, not the model: the view collects
 each tile delegate's displayed rect (`x`, `y`, `width`, `height`, `scale` — so the hovered tile's
@@ -195,7 +206,7 @@ cannot hide a missing field.
 | Enter                     | activate the highlighted item (none → nothing)                |
 | Esc                       | dismiss                                                       |
 | ✎ lone modifier press     | nothing — consumed, the menu stays; otherwise Ctrl (dismiss) then W (close a window) would let a chord act outside the menu |
-| any other key             | dismiss and swallow — the substantive key of a chord included, and auto-repeats |
+| any other key             | dismiss and swallow — the substantive key of a chord included. ✎ The key that dismissed is remembered (`menuDismissKey`) until its real release (`Keys.onReleased` with `isAutoRepeat` false), and every auto-repeat of it in between is swallowed too, so holding a letter down through a dismissal cannot start a query; a *different* key after the dismissal is ordinary input |
 | press inside the menu     | activate that row                                             |
 | press anywhere else on the overview's screen | dismiss and swallow — ✎ a **panel-sized** transparent `MouseArea` (all buttons) below the menu and above the scrim's own click-to-close area, visible only while `menuOpen`, so a stray click on the scrim can never both dismiss the menu and close the overview; a press on **another monitor** closes the overview as it does today (the menu goes with it — the user asked to leave) |
 | hover a row               | highlight follows the pointer (same `index`)                  |
@@ -253,12 +264,17 @@ chunk.
   the previous window would drag monitor focus back to a workspace the user just moved away). The
   overview only rebuilds; groups key on the lowest workspace id per monitor, so they may reorder,
   and layout motion glides it.
-- **Swap with ‹monitor›** — `workspaceSwapLua(monitorA, monitorB)`:
-  `run(hl.dsp.workspace.swap_monitors({ monitor1 = "<A>", monitor2 = "<B>" }))` where A is the
-  target's own monitor (from the box) and B the chosen one, then the cursor restored as for Move.
-  Offered only for a workspace active on its monitor, so the compositor's semantics apply exactly:
-  each monitor shows the workspace it received, focus goes to the last focused window on the
-  workspace that arrived on the focused monitor. A single dispatcher, so nothing can half-fail.
+- **Swap with ‹monitor›** — `workspaceSwapLua(wsId, monitorA, monitorB)`, where A is the
+  target's own monitor (from the box) and B the chosen one. ✎ The chunk carries the *workspace*
+  identity, not just the monitors: `swap_monitors` acts on whatever is active on A at dispatch
+  time, and A may have switched workspaces since the rebuild the menu was drawn from. So the chunk
+  first reads `hl.get_active_workspace("<A>")` and **raises unless its id is `wsId`** ("workspace
+  ‹id› is no longer active on ‹A›", reported through the usual path, nothing dispatched); only then
+  `run(hl.dsp.workspace.swap_monitors({ monitor1 = "<A>", monitor2 = "<B>" }))`, then the cursor
+  restored as for Move. Offered only for a workspace active on its monitor, so the compositor's
+  semantics apply exactly: each monitor shows the workspace it received, focus goes to the last
+  focused window on the workspace that arrived on the focused monitor. A single dispatcher, so
+  nothing can half-fail.
 - **Close all windows** — `closeAllLua(wsId)`: Lua reads the workspace's own window list
   (`ws:get_windows()` — ✎ verified in `LuaWorkspace.cpp`: a one-based table of `HL.Window`
   objects) and dispatches one `window.close` per address, each step guarded on its own so one
@@ -280,9 +296,11 @@ No new optimistic *geometry*. Every action produces compositor events (`closewin
 care, closing or floating a window right after dropping it would leave its stale tile on screen
 until the deadline. So every window action (Ctrl+W, middle-click, any window menu item) first
 **supersedes that address's pending visual state** exactly as a new grab does: delete its
-`pendingMoves` and `pendingFullscreen` entries and clear `fsPending`. Move and Swap do the same for
-every pending entry whose target or source workspace is the moved one (their coordinates are
-meaningless on another monitor).
+`pendingMoves` and `pendingFullscreen` entries and clear `fsPending`. ✎ **Close all** does it for
+every address whose model row sits on that workspace *or* whose pending move targets it (a window
+dropped there a moment ago is on the compositor's list too, and the chunk closes it; its optimistic
+row must not outlive it). Move and Swap do the same for every pending entry whose target or source
+workspace is the moved one (their coordinates are meaningless on another monitor).
 
 **Drags.** Window actions are ignored while a drag is in flight (`root.dragTile !== null`): Ctrl+W
 does nothing, right presses open nothing. A cursor window that is dragged elsewhere is no longer on
@@ -290,7 +308,7 @@ the selected workspace after the drop, so the cursor clears on the rebuild.
 
 `Overview` gains: `pointerLive: bool`, `pointerSceneX/Y: real`, `cursorAddress: string`,
 `pendingCloses: var`, `menuOpen: bool`, `menuTarget: var`, `menuItems: var`, `menuIndex: int`,
-`menuX/Y: real`, `hintsExpanded: bool`. `open()` resets everything but `hintsExpanded`.
+`menuX/Y: real`, `menuDismissKey: int`, `hintsExpanded: bool`. `open()` resets everything but `hintsExpanded`.
 
 ## Hints — two tiers
 
@@ -313,8 +331,10 @@ only while a query is active.
 ## Edge cases
 
 - **Pointer parked over a tile, keyboard in use**: `pointerLive` is false after the first
-  substantive key, so Ctrl+W, Enter and (later) Space act on the keyboard target. Moving the mouse
-  makes it live again. A lone Ctrl press changes nothing, so hover + Ctrl+W acts on the hovered tile.
+  navigation or query key, so Ctrl+W, Enter and (later) Space act on the keyboard target. Moving
+  the mouse makes it live again. A lone Ctrl press changes nothing, so hover + Ctrl+W acts on the
+  hovered tile, and so does a second Ctrl+W (a no-op on the now-pending window), since action keys
+  never clear liveness.
 - **Tab cursor set, then the mouse moves over another tile**: the pointer is live, so Ctrl+W acts
   on the hovered tile; the ring stays where it was (it shows the *keyboard* target, which is still
   valid the moment the keyboard is used again).
@@ -361,7 +381,8 @@ window onto the floated window**, so "restores focus" has something to restore.
   on a maximized one ends 0, either on an already-matching window dispatches nothing;
   `workspaceMoveLua` dispatches one move with the right monitor and workspace strings and restores
   the cursor but not focus; `workspaceSwapLua` dispatches exactly one `swap_monitors` with the two
-  monitors in order; `closeAllLua` closes every window the workspace lists (including one the input
+  monitors in order when `wsId` is active on A, and **dispatches nothing and reports** when A's
+  active workspace is another id; `closeAllLua` closes every window the workspace lists (including one the input
   never showed) and a refused close still lets the others run, reported once; every chunk parses.
 - **Tier 1, offscreen UI (`tests/ui/actions.qml`)**: Tab rings the first window in reading order,
   Tab again the second, Shift+Tab wraps; an arrow clears the ring; Enter with a cursor dispatches
@@ -374,7 +395,10 @@ window onto the floated window**, so "restores focus" has something to restore.
   the tile; **parked-mouse rule**: a synthetic pointer move over a tile then a key press → Ctrl+W
   acts on the keyboard target; a pointer move after the key → Ctrl+W acts on the hovered tile; a
   lone Ctrl press then W with the pointer parked over a tile since the last move → the hovered
-  tile; a scroll under a stationary pointer does not make it live; right press on a tile opens the
+  tile; **consecutive action keys**: with window H hovered (pointer live) and a Tab cursor on
+  window C, Ctrl+W then Ctrl+W dispatches one close for H and none for C, and Enter after a
+  hover focuses H not C, while an arrow in between makes the next Ctrl+W act on C; a scroll under
+  a stationary pointer does not make it live; right press on a tile opens the
   window menu with Close/Float/Fullscreen and does not start a drag; a right press and release
   *during* a left drag neither drops nor opens, and the drag still completes on the left release;
   right press on a well opens the workspace menu, and so does a right press on the number badge of
@@ -385,7 +409,11 @@ window onto the floated window**, so "restores focus" has something to restore.
   dismisses and the overview stays open (positive control: the same press with no menu closes it);
   a rebuild that floats the target window relabels Float → Tile with the highlight kept, and one
   that removes it dismisses; typing a letter with the menu open dismisses it and does not start a
-  query; middle-click still dispatches `close` and clears the address's pending state; `?` toggles
+  query, **and holding that letter** (auto-repeat presses after the dismissal, then a real release,
+  then the same letter again) starts a query only from the press after the release; middle-click
+  still dispatches `close` and clears the address's pending state; Close all from the menu right
+  after a drop into that workspace removes the dropped address's `pendingMoves` entry so the next
+  rebuild drops its tile; `?` toggles
   the second hint line and the card's hint space, typing with expanded hints does not move the
   card, and `?` with a query active appends instead; `open()` clears cursor, menu and
   `pendingCloses` but keeps `hintsExpanded`.
