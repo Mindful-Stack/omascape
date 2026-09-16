@@ -449,4 +449,51 @@ TestCase {
         verify(closed("0xB"))
         compare(view.cursorAddress, "0xC", "the cursor must not move for a window it wasn't on")
     }
+
+    // Distinguishes: `?` typed into the query instead of toggling the tier, and a second line
+    // that is always visible.
+    function test_question_mark_toggles_the_second_hint_tier() {
+        compare(view.hintsExpanded, false)
+        compare(view.query, "")
+        keyClick("?")
+        compare(view.hintsExpanded, true)
+        compare(view.query, "", "? must not start a query")
+        keyClick("?")
+        compare(view.hintsExpanded, false)
+    }
+    // Distinguishes: a fixed hint budget that ignores the second tier, which would clip it.
+    // wait() after the toggle: hintBox is a Column, and a Positioner only re-includes a child
+    // that just became visible (hint2) on its next layout polish, not synchronously within the
+    // same key event — reading hintSpace immediately would see the stale, pre-toggle size.
+    function test_expanding_the_hints_grows_the_card_budget() {
+        var before = view.testCard.hintSpace
+        keyClick("?")
+        wait(20)
+        verify(view.testCard.hintSpace > before, "two tiers need more room than one")
+    }
+    // Distinguishes: the find bar resizing the card when the hints are expanded — the height
+    // budget must already reserve the larger of the two, as it does for one tier today.
+    function test_typing_does_not_move_the_card_with_hints_expanded() {
+        keyClick("?")
+        wait(20)   // let hintBox's Column settle on the expanded size before taking the budget
+        var budget = view.testCard.hintSpace
+        keyClick("a")
+        verify(view.query.length > 0)
+        compare(view.testCard.hintSpace, budget, "same budget for hints and the find bar")
+    }
+    // Distinguishes: `?` swallowed as a toggle while a query is active, which would make it
+    // impossible to search for a title containing one.
+    function test_question_mark_appends_while_a_query_is_active() {
+        keyClick("a")
+        keyClick("?")
+        compare(view.query, "a?")
+        compare(view.hintsExpanded, false)
+    }
+    // Distinguishes: the tier preference being reset by open(), which the spec keeps deliberately
+    // (it is the one piece of state that survives a summon).
+    function test_open_keeps_the_hint_tier() {
+        keyClick("?")
+        view.close(); view.open(); wait(120)
+        compare(view.hintsExpanded, true)
+    }
 }

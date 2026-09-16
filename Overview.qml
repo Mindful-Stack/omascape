@@ -468,6 +468,9 @@ Item {
         for (var i = 0; i < tilesModel.count; i++)
             if (tilesModel.get(i).address === addr) { tilesModel.set(i, roles); return }
     }
+    // Hint tiers. Kept on the component (keepLoaded), so the preference survives a summon but
+    // not a shell restart; deliberately not written to config — it is a transient affordance.
+    property bool hintsExpanded: false
     // ---- Find -------------------------------------------------------------------------
     // Query edit: the best match for the *new* query is always the selection (a window that
     // won for "s" must not stay selected once "slack" ranks another first).
@@ -1171,7 +1174,7 @@ Item {
             // their implicitHeights happen to differ by. Zero only when both are absent.
             readonly property bool findActive: root.query.length > 0
             readonly property real hintSpace:
-                (findActive || config.hint) ? Math.max(findBar.implicitHeight, hint.implicitHeight) + 8 : 0
+                (findActive || config.hint) ? Math.max(findBar.implicitHeight, hintBox.implicitHeight) + 8 : 0
             // Cap the card to the screen so the Flickable viewport can be smaller than the
             // content (`availCanvasW` already keeps canvas width <= this, minus the degenerate
             // narrow-screen case, which is expected to 2-D scroll per the spec).
@@ -1180,7 +1183,7 @@ Item {
             // The hint row never widens past the screen (maxCardW still caps it), but it does
             // widen a narrow card: a layout with few/narrow workspaces must not clip the eight
             // key hints against the card edge.
-            implicitWidth: Math.min(Math.max(canvas.implicitWidth, config.hint ? hint.implicitWidth : 0) + pad * 2, maxCardW)
+            implicitWidth: Math.min(Math.max(canvas.implicitWidth, config.hint ? hintBox.implicitWidth : 0) + pad * 2, maxCardW)
             implicitHeight: Math.min(canvas.implicitHeight + pad * 2 + hintSpace, maxCardH)
             // Card resize (workspaces added/removed, columns change) glides; the Flickable
             // viewport follows card.width, the canvas content is already at its new size.
@@ -1241,6 +1244,9 @@ Item {
                         if (e.key === Qt.Key_Up) { root.setCursor(""); root.selectByNav("up"); return }
                         if (e.key === Qt.Key_Down) { root.setCursor(""); root.selectByNav("down"); return }
                     }
+                    // `?` is the hint toggle only while there is no query to append to — the
+                    // same rule digits already follow.
+                    if (!finding && e.text === "?") { root.hintsExpanded = !root.hintsExpanded; return }
                     var next = Logic.appendQueryText(root.query, e.text)
                     if (next !== root.query) root.setQuery(next)
                 }
@@ -1613,39 +1619,44 @@ Item {
                 }
             }
 
-            // key hints: each binding as a small key cap plus a label; off via config.hint
-            Row {
-                id: hint
+            // key hints: two tiers. The primary row is what a new user needs; `?` reveals the
+            // advanced keys, which would otherwise crowd it past the card width on a laptop.
+            Column {
+                id: hintBox
                 visible: config.hint && !card.findActive
                 anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 8 }
-                spacing: Math.round(Style.space(12))
-                Repeater {
-                    id: hintKeys
-                    model: [ { k: "1–0", l: "jump" }, { k: "↑ ↓ ← →", l: "move" }, { k: "↵", l: "select" },
-                             { k: "drag", l: "move window" }, { k: "type", l: "find" },
-                             { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" }, { k: "esc", l: "close" } ]
-                    Row {
-                        required property var modelData
-                        spacing: 5
-                        Rectangle {
-                            radius: 4
-                            color: root.wellColor
-                            height: capText.implicitHeight + 4
-                            width: capText.implicitWidth + 10
-                            Text {
-                                id: capText; anchors.centerIn: parent
-                                text: modelData.k
-                                color: root.foreground; opacity: 0.75
-                                font.family: root.fontFamily; font.pixelSize: root.captionSize
-                                font.weight: Font.DemiBold
-                            }
-                        }
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: modelData.l
-                            color: root.foreground; opacity: 0.45
-                            font.family: root.fontFamily; font.pixelSize: root.captionSize
-                        }
+                spacing: 4
+                Row {
+                    id: hint
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: Math.round(Style.space(12))
+                    Repeater {
+                        id: hintKeys
+                        // ctrl+s/ctrl+l stay in the primary tier (not moved to hint2): Lock and
+                        // Scratchpad's UI suites scan testHintModel — an alias onto THIS model —
+                        // for those two entries, so removing them here would break both suites.
+                        // Only the keys this task newly documents (tab/ctrl+w/right-click) move
+                        // to the second tier.
+                        model: [ { k: "1–0", l: "jump" }, { k: "↑ ↓ ← →", l: "move" }, { k: "↵", l: "select" },
+                                 { k: "drag", l: "move window" }, { k: "type", l: "find" },
+                                 { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" },
+                                 { k: "esc", l: "close" },
+                                 { k: "?", l: root.hintsExpanded ? "less" : "more" } ]
+                        HintCap { foreground: root.foreground; fill: root.wellColor
+                                  fontFamily: root.fontFamily; fontSize: root.captionSize }
+                    }
+                }
+                Row {
+                    id: hint2
+                    visible: root.hintsExpanded
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: Math.round(Style.space(12))
+                    Repeater {
+                        id: hintKeys2
+                        model: [ { k: "tab", l: "window" }, { k: "ctrl+w / mid-click", l: "close" },
+                                 { k: "right-click", l: "menu" } ]
+                        HintCap { foreground: root.foreground; fill: root.wellColor
+                                  fontFamily: root.fontFamily; fontSize: root.captionSize }
                     }
                 }
             }

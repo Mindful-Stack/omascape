@@ -172,6 +172,7 @@ for edge in ('left', 'right'):
 ''' + fill_v(edge), 'LockFrame %s strip anchors + surface + paint' % edge)
 (dest / 'LockFrame.qml').write_text(frame)
 (dest / 'FindBar.qml').write_text((source / 'FindBar.qml').read_text())   # no shell imports: verbatim
+(dest / 'HintCap.qml').write_text((source / 'HintCap.qml').read_text())   # no shell imports: verbatim
 # Shell-only helpers: the config loader needs Quickshell.Io, the shadow a GPU shader.
 # `motionEffective` is writable here so tests can flip the policy without a compositor.
 # `workspaces` defaults to 0 (no padding) so the fixture shows exactly the compositor's
