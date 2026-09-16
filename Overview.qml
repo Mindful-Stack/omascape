@@ -193,9 +193,7 @@ Item {
     // Backdrop behind the focused monitor's group: a whisper of accent, so which screen is
     // live reads peripherally without touching the three well shades.
     readonly property color groupBackdropColor: Qt.rgba(accent.r, accent.g, accent.b, 0.08)
-    // Nerd Font glyphs (nf-md-laptop / nf-md-monitor); Omarchy's menu font carries them.
-    // Internal panels are eDP/LVDS/DSI connectors, everything else is an external screen.
-    function monitorIcon(name) { return /^(eDP|LVDS|DSI)/i.test(name) ? "\u{F0322}" : "\u{F0379}" }
+    function monitorIcon(name) { return Logic.monitorGlyph(name) }
 
     property var groups: []
     // Monitor chips and the focused-group backdrop key on how many *monitor* groups there are;

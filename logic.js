@@ -887,6 +887,59 @@ function menuNavigate(count, index, step) {
     return ((index + step) % count + count) % count
 }
 
+// Monitor names are interpolated into quoted Lua strings inside the move/swap chunks. Anything
+// outside this alphabet is refused here, in JavaScript, before it can reach a chunk at all —
+// the same defence `validLockSelector` gives the lock chunks.
+var MONITOR_NAME_RE = /^[A-Za-z0-9._-]+$/
+function validMonitorName(name) { return typeof name === "string" && MONITOR_NAME_RE.test(name) }
+
+// Nerd Font glyphs (nf-md-laptop / nf-md-monitor). Internal panels are eDP/LVDS/DSI connectors,
+// everything else is an external screen. Lives here rather than in Overview so `menuItems` can
+// stay pure and the monitor chips and the menu can never disagree about which glyph a monitor gets.
+function monitorGlyph(name) { return /^(eDP|LVDS|DSI)/i.test(name) ? "\u{F0322}" : "\u{F0379}" }
+
+// The rows a context menu shows for `tgt`. Pure: `ctx` carries the window record
+// (`_windowByAddress`), the box record (`layout()`'s own output) and the monitor list, all
+// re-read on every rebuild, so an open menu follows the compositor rather than a snapshot.
+// Anything that does not apply is HIDDEN, never greyed, and every id names the state it will
+// set — never a toggle, so a stale activation is at worst a no-op inside the compositor.
+function menuItems(tgt, ctx) {
+    if (!tgt || !ctx) return []
+    var out = []
+    if (tgt.kind === "window") {
+        var w = ctx.win
+        if (!w) return []                               // gone: the caller dismisses on an empty list
+        out.push({ id: "close", label: "Close" })
+        out.push(w.floating ? { id: "tile", label: "Tile" } : { id: "float", label: "Float" })
+        out.push(fullscreenMode(w) > 0 ? { id: "unfullscreen", label: "Exit fullscreen" }
+                                       : { id: "fullscreen", label: "Fullscreen" })
+        return out
+    }
+    var b = ctx.box
+    if (!b) return []
+    out.push(b.armed ? { id: "unlock", label: "Unlock" } : { id: "lock", label: "Lock" })
+    // Monitor operations need a workspace the compositor actually has, on a machine with
+    // somewhere to send it. The scratchpad has no monitor of its own to move between.
+    var others = []
+    if (!b.special && !b.synthetic) {
+        var mons = ctx.monitors || []
+        for (var i = 0; i < mons.length; i++) {
+            var n = mons[i] ? mons[i].name : null
+            if (!validMonitorName(n) || n === b.monitorName) continue
+            others.push(n)
+        }
+    }
+    for (var m = 0; m < others.length; m++)
+        out.push({ id: "move:" + others[m], label: "Move to " + others[m], glyph: monitorGlyph(others[m]) })
+    // Swap exchanges the two monitors' ACTIVE workspaces (swapActiveWorkspaces, 0.56.2), so it is
+    // only offered for a workspace its monitor is actually showing.
+    if (b.active)
+        for (var s = 0; s < others.length; s++)
+            out.push({ id: "swap:" + others[s], label: "Swap with " + others[s], glyph: monitorGlyph(others[s]) })
+    if (b.occupied) out.push({ id: "closeAll", label: "Close all windows" })
+    return out
+}
+
 // A press of a modifier key ALONE. It belongs to no class: it must not drive the menu (Ctrl then
 // W would otherwise dismiss and then close a window) and must not clear pointer liveness (hover +
 // Ctrl+W could never work, because the Ctrl press would go stale before the W arrived).

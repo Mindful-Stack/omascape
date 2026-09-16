@@ -139,4 +139,108 @@ TestCase {
         compare(Logic.menuNavigate(3, 0, 5), 2)   // Forward wrap with large step
         compare(Logic.menuNavigate(3, 0, -5), 1)  // Backward wrap with large step
     }
+
+    function ids(items) { return items.map(function (i) { return i.id }) }
+    function win(o) {
+        var base = { address: "0xA", floating: false, fullscreen: 0, workspaceId: 1 }
+        for (var k in o) base[k] = o[k]
+        return base
+    }
+    function box(o) {
+        var base = { workspaceId: 1, monitorName: "eDP-1", occupied: true, armed: false,
+                     placeholder: false, special: "", synthetic: false, active: true }
+        for (var k in o) base[k] = o[k]
+        return base
+    }
+    property var oneMon: [{ name: "eDP-1" }]
+    property var twoMon: [{ name: "eDP-1" }, { name: "HDMI-A-1" }]
+
+    // Distinguishes: a window menu whose ids name a toggle ("toggleFloat") rather than the state
+    // to set. A stale snapshot activating a toggle does the opposite of its label; an explicit
+    // state is at worst a no-op.
+    function test_menuItems_window_ids_name_the_state_to_set() {
+        compare(ids(Logic.menuItems({ kind: "window", address: "0xA" },
+                                    { win: win({}), monitors: oneMon })),
+                ["close", "float", "fullscreen"])
+        compare(ids(Logic.menuItems({ kind: "window", address: "0xA" },
+                                    { win: win({ floating: true, fullscreen: 2 }), monitors: oneMon })),
+                ["close", "tile", "unfullscreen"])
+    }
+    // Distinguishes: "maximized" (mode 1) treated as not-fullscreen, which would offer to enter
+    // fullscreen on a window that is already in one of the two modes.
+    function test_menuItems_maximized_counts_as_fullscreen() {
+        compare(ids(Logic.menuItems({ kind: "window", address: "0xA" },
+                                    { win: win({ fullscreen: 1 }), monitors: oneMon })),
+                ["close", "float", "unfullscreen"])
+    }
+    // Distinguishes: a menu built for a window the rebuild has dropped (closed, or hidden behind
+    // a lock placeholder). An empty list is what dismisses the menu.
+    function test_menuItems_without_a_window_is_empty() {
+        compare(Logic.menuItems({ kind: "window", address: "0xA" }, { win: null, monitors: oneMon }).length, 0)
+        compare(Logic.menuItems(null, { monitors: oneMon }).length, 0)
+    }
+
+    // Distinguishes: Move/Swap offered on a single-monitor machine, where they mean nothing.
+    function test_menuItems_one_monitor_has_no_move_or_swap() {
+        compare(ids(Logic.menuItems({ kind: "workspace", id: 1 }, { box: box({}), monitors: oneMon })),
+                ["lock", "closeAll"])
+    }
+    // Distinguishes: Move naming the workspace's OWN monitor, and the documented item order.
+    function test_menuItems_two_monitors_offer_the_other_one() {
+        compare(ids(Logic.menuItems({ kind: "workspace", id: 1 }, { box: box({}), monitors: twoMon })),
+                ["lock", "move:HDMI-A-1", "swap:HDMI-A-1", "closeAll"])
+    }
+    // Distinguishes: Swap offered on a hidden workspace. swap_monitors exchanges the monitors'
+    // ACTIVE workspaces, so on a hidden one the item would act on a different workspace entirely.
+    function test_menuItems_swap_needs_an_active_workspace() {
+        compare(ids(Logic.menuItems({ kind: "workspace", id: 1 },
+                                    { box: box({ active: false }), monitors: twoMon })),
+                ["lock", "move:HDMI-A-1", "closeAll"])
+    }
+    // Distinguishes: Move offered on a workspace the compositor has never created, or on the
+    // scratchpad — neither has a monitor to move between.
+    function test_menuItems_synthetic_and_scratchpad_have_no_monitor_items() {
+        compare(ids(Logic.menuItems({ kind: "workspace", id: 3 },
+                                    { box: box({ synthetic: true, occupied: false, active: false }), monitors: twoMon })),
+                ["lock"])
+        compare(ids(Logic.menuItems({ kind: "workspace", id: -2 },
+                                    { box: box({ special: "scratchpad", active: false }), monitors: twoMon })),
+                ["lock", "closeAll"])
+    }
+    // Distinguishes: "Close all windows" offered on an empty workspace.
+    function test_menuItems_close_all_needs_windows() {
+        compare(ids(Logic.menuItems({ kind: "workspace", id: 1 },
+                                    { box: box({ occupied: false }), monitors: oneMon })), ["lock"])
+    }
+    // Distinguishes: a lock item whose label does not follow the armed state.
+    function test_menuItems_lock_label_follows_the_armed_state() {
+        var armed = Logic.menuItems({ kind: "workspace", id: 1 }, { box: box({ armed: true }), monitors: oneMon })
+        compare(armed[0].id, "unlock"); compare(armed[0].label, "Unlock")
+    }
+    // Distinguishes: a monitor glyph chosen by position rather than connector name.
+    function test_menuItems_monitor_glyph_follows_the_connector() {
+        var items = Logic.menuItems({ kind: "workspace", id: 1 },
+                                    { box: box({ monitorName: "HDMI-A-1", active: false }), monitors: twoMon })
+        compare(items[1].id, "move:eDP-1")
+        compare(items[1].glyph, Logic.monitorGlyph("eDP-1"))
+        verify(Logic.monitorGlyph("eDP-1") !== Logic.monitorGlyph("HDMI-A-1"))
+    }
+    // Distinguishes: a monitor name reaching a Lua chunk unvalidated. The name is interpolated
+    // into a quoted Lua string, so a quote or a brace in it must never get that far.
+    function test_validMonitorName() {
+        verify(Logic.validMonitorName("eDP-1"))
+        verify(Logic.validMonitorName("HDMI-A-1"))
+        verify(Logic.validMonitorName("DP-2.1"))
+        verify(!Logic.validMonitorName('e" })) --'))
+        verify(!Logic.validMonitorName("has space"))
+        verify(!Logic.validMonitorName(""))
+        verify(!Logic.validMonitorName(null))
+    }
+    // Distinguishes: a bad monitor name surviving into an item id, which would put it one
+    // activation away from a chunk.
+    function test_menuItems_drops_an_invalid_monitor_name() {
+        compare(ids(Logic.menuItems({ kind: "workspace", id: 1 },
+                                    { box: box({}), monitors: [{ name: "eDP-1" }, { name: 'bad" name' }] })),
+                ["lock", "closeAll"])
+    }
 }
