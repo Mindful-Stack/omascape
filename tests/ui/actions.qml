@@ -97,6 +97,31 @@ TestCase {
     function test_tile_candidates_match_the_model_rows() {
         compare(view.tileCandidates().length, view.testModel.count)
     }
+    // Distinguishes: a tileCandidates() scale expansion that is wrong (a flipped sign, a missing
+    // division by 2) but invisible to every test that only ever hits a tile's dead centre — a
+    // mistake like that is invariant under any origin-centred scaling and would still hit-test
+    // correctly there. This point sits inside the painted 1.03-scaled rect (the hover lift's own
+    // halo) but strictly outside the tile's unscaled model geometry, so only a correct expansion
+    // resolves it to the tile.
+    function test_tile_candidates_hit_the_scaled_edge_not_the_unscaled_one() {
+        hoverTile("0xA")   // hovering 0xA also scales IT (WindowTile's own HoverHandler, `hh`)
+        var row = null
+        for (var i = 0; i < view.testModel.count; i++) {
+            var r = view.testModel.get(i)
+            if (r.address === "0xA") { row = r; break }
+        }
+        verify(row !== null, "no model row for 0xA")
+        var cands = view.tileCandidates(), c = null
+        for (var j = 0; j < cands.length; j++) if (cands[j].address === "0xA") { c = cands[j]; break }
+        verify(c !== null, "no candidate for 0xA")
+        verify(c.x < row.wx, "a hovered tile's candidate must be expanded left of its model geometry")
+        var px = (c.x + row.wx) / 2, py = row.wy + row.wh / 2   // strictly in the halo, left of the base edge
+        var p = view.testCanvas.mapToItem(view, px, py)
+        mouseMove(view, p.x, p.y)
+        wait(30)
+        var t = view.resolveTarget()
+        compare(t.kind, "window"); compare(t.address, "0xA")
+    }
     // Distinguishes: open() failing to drop a stale liveness from the PREVIOUS summon. On a real
     // desktop the overview is kept loaded between summons, and SUPER+P is a compositor keybind it
     // never sees as a key event — closing with the pointer resting on a tile and reopening with
@@ -122,14 +147,28 @@ TestCase {
         keyClick(Qt.Key_Right)
         compare(view.pointerLive, false)
     }
-    // Distinguishes: THE regression the spec's key classes exist to prevent. A lone Ctrl press
-    // must not clear liveness, or hover + Ctrl+W could never act on the hovered tile.
+    // Distinguishes: THE regression the spec's key classes exist to prevent — for EVERY key
+    // isModifierKey claims, not just Ctrl. A lone modifier press must never clear liveness, or
+    // hover + Ctrl+W could never act on the hovered tile. Covering only Ctrl once let a wrong
+    // numeric constant ship (Qt.Key_AltGr was mislabelled onto Qt.Key_CapsLock's code): each of
+    // these presses the exact key the predicate names and would have caught that key falling
+    // through to the "clears liveness" path instead.
     function test_a_lone_modifier_press_changes_nothing() {
-        hoverTile("0xA")
-        keyPress(Qt.Key_Control)
-        compare(view.pointerLive, true, "Ctrl alone is neither navigation nor an action")
-        keyRelease(Qt.Key_Control)
-        compare(view.pointerLive, true)
+        var mods = [
+            { key: Qt.Key_Shift, name: "Shift" },
+            { key: Qt.Key_Control, name: "Control" },
+            { key: Qt.Key_Alt, name: "Alt" },
+            { key: Qt.Key_Meta, name: "Meta" },
+            { key: Qt.Key_CapsLock, name: "CapsLock" },
+            { key: Qt.Key_AltGr, name: "AltGr" }
+        ]
+        for (var i = 0; i < mods.length; i++) {
+            hoverTile("0xA")
+            keyPress(mods[i].key)
+            compare(view.pointerLive, true, mods[i].name + " alone is neither navigation nor an action")
+            keyRelease(mods[i].key)
+            compare(view.pointerLive, true, mods[i].name + " release must not clear liveness either")
+        }
     }
     // Distinguishes: a printable key that leaves liveness set, which would make a hovered tile
     // outrank the find match the user just typed.

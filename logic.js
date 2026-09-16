@@ -882,7 +882,8 @@ function isModifierKey(key) {
            key === 0x01000021 ||   // Qt.Key_Control
            key === 0x01000023 ||   // Qt.Key_Alt
            key === 0x01000022 ||   // Qt.Key_Meta
-           key === 0x01000024      // Qt.Key_AltGr
+           key === 0x01000024 ||   // Qt.Key_CapsLock
+           key === 0x01001103      // Qt.Key_AltGr
 }
 
 // An ACTION key reads pointer liveness and leaves it unchanged — "do this to what I am pointing
