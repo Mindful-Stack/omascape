@@ -8,8 +8,11 @@ for bin in hyprctl jq; do command -v "$bin" >/dev/null || { echo "SKIP: $bin mis
 
 # `hyprctl <unknown-subcommand>` prints "unknown request" and exits 0 on this build -- so a typo'd
 # or removed `repl` subcommand would not fail loudly on its own. Prove it actually evaluates and
-# returns a value before relying on it below.
-hyprctl repl 'return 1' | grep -qx 1 || { echo "SKIP: hyprctl repl unavailable"; exit 0; }
+# returns a value before relying on it below. No pipe here on purpose: `... | grep -qx 1` would
+# let `grep -q` exit on first match while `hyprctl repl` is still writing, and under `pipefail` a
+# SIGPIPE'd producer yields 141 despite the match -- the script would then take the SKIP branch
+# and exit 0 even though `repl` works fine.
+[ "$(hyprctl repl 'return 1')" = 1 ] || { echo "SKIP: hyprctl repl unavailable"; exit 0; }
 
 # NOTE (discovered running this probe, 2026-09-16): `hyprctl eval <code>` never prints a Lua
 # return value -- per `hyprctl --help` it only prints "ok" / "error: ...". `hyprctl repl <code>`
@@ -156,12 +159,18 @@ else
   sleep 0.3
   NOW_MON=$(hyprctl -j workspaces | jq -r ".[] | select(.id==$HID) | .monitor")
   NEWCUR=$(hyprctl -j cursorpos | jq -r '"\(.x),\(.y)"')
-  # Precondition recorded explicitly so "no cursor warp" and "no warp was expected because the
-  # workspace wasn't active on the focused monitor" cannot print identically: this run always
-  # tests the hidden case (active-on-MA=false by construction), never the active-monitor case
-  # that is expected to warp -- that case is not exercised here to avoid moving the workspace the
-  # user is actually looking at.
-  echo "FACT move: focused-monitor=$FOCUSED ws $HID was hidden on $MA (active-on-MA-before=false) -> moved to $MB -> now on $NOW_MON; cursor before=$CUR after=$NEWCUR"
+  # Precondition printed from the real variable, not a hardcoded literal: HID is constructed above
+  # to exclude MA_ACTIVE_BEFORE, so this reads false today, but it is a live comparison a reader
+  # can verify from the output, not the script asserting its own precondition into its own FACT
+  # line -- a future edit to the HID selection cannot leave a stale claim behind here.
+  ACTIVE_BEFORE=$([ "$HID" = "$MA_ACTIVE_BEFORE" ] && echo true || echo false)
+  # "Ended on the destination monitor" is focus-independent and fully determined by variables
+  # already in scope, so it is asserted, not just printed: a dispatcher that silently did nothing
+  # would otherwise print "now on $MA" and exit 0, which reads exactly like a measurement. Only
+  # the cursor reading stays reported rather than asserted (its correct value is focus-dependent,
+  # and this run deliberately never exercises the warp-expected case).
+  [ "$NOW_MON" = "$MB" ] || { echo "FAIL: workspace.move left ws $HID on $NOW_MON, not $MB"; exit 1; }
+  echo "FACT move: focused-monitor=$FOCUSED ws $HID was hidden on $MA (active-on-$MA-before=$ACTIVE_BEFORE) -> moved to $MB -> now on $NOW_MON; cursor before=$CUR after=$NEWCUR"
 fi
 
 # --- 4. swap_monitors ------------------------------------------------------------------------------
@@ -172,4 +181,9 @@ DID_SWAP=1
 sleep 0.3
 MA_AFTER=$(hyprctl -j monitors | jq -r --arg m "$MA" '.[] | select(.name==$m) | .activeWorkspace.id')
 MB_AFTER=$(hyprctl -j monitors | jq -r --arg m "$MB" '.[] | select(.name==$m) | .activeWorkspace.id')
+# "Each monitor ends showing what the other showed" is focus-independent and fully determined by
+# variables already in scope, so it is asserted, not just printed: a dispatcher that silently did
+# nothing would otherwise print unchanged before/after values and exit 0, which reads exactly
+# like a measurement.
+[ "$MA_AFTER" = "$MB_BEFORE" ] && [ "$MB_AFTER" = "$MA_BEFORE" ] || { echo "FAIL: swap_monitors did not exchange the active workspaces"; exit 1; }
 echo "FACT swap: focused-monitor=$FOCUSED before $MA=$MA_BEFORE $MB=$MB_BEFORE -> after $MA=$MA_AFTER $MB=$MB_AFTER"

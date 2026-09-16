@@ -463,8 +463,10 @@ SKIP: cases 3 (workspace.move) and 4 (swap_monitors) need two monitors; run them
   toggle implementation would have flipped it back to tiled and the assertion is written so that
   exact failure mode fails it (`[ "$F2" = true ]`). `action = "off"` then tiled it
   (`off→false`). The probe now also records the pre-dispatch baseline (`base→false`) so the FACT
-  line is self-documenting about the window's starting state. All four reads came from a fresh
-  `hyprctl -j clients` lookup taken after each dispatch, never from a value the script passed in.
+  line is self-documenting about the window's starting state: three of the four reads (`on`,
+  `on-again`, `off`) come from a fresh `hyprctl -j clients` lookup taken *after* their dispatch,
+  and the fourth (`base`) is deliberately taken *before* any dispatch, which is the point of a
+  baseline — none is derived from a value the script passed in.
 - **Cases 3 (`workspace.move`) and 4 (`swap_monitors`) are NOT verified on this machine** — it
   has one monitor (`eDP-1`) and the probe SKIPs both by design rather than fabricating a
   two-monitor result. The move/swap semantics described above under "Move to ‹monitor›" and "Swap
