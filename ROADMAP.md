@@ -1,10 +1,10 @@
-# Omyview — roadmap / next steps
+# Omascape — roadmap / next steps
 
 **Status:** **v2 shipped (2026-09-09).** Overlay on SUPER+P; per-monitor rows; **live window
 thumbnails** (Quickshell `ScreencopyView`); **drag-and-drop of windows between workspaces**
 (silent move); number/arrow/Enter selection; click-to-focus / middle-click-close. Coordinate
 math + reconcile in a unit-tested `logic.js` (Tier 1 CI); Tier 2 nested-Hyprland integration.
-Maintained as a standalone public repo (`Mindful-Stack/omyview`). See `DESIGN.md` (what/why),
+Maintained as a standalone public repo (`Mindful-Stack/omascape`). See `DESIGN.md` (what/why),
 `docs/specs/` + `docs/plans/` (the v2 design + build), and `PLAN.md` (v1 build log). Window
 states (2026-09-10): fullscreen windows drawn in their recovered slot with an un-fullscreen
 badge; floating tiles stack above tiled. Hardening (2026-09-10, review follow-up): atomic
@@ -50,9 +50,9 @@ Overview stays open; post-move `refreshToplevels()` reconcile with bounded recov
       model maps against `monitor size − reserved`.
 
 ### 6. ~~Extract to a standalone repo~~ ✅ done
-Extracted from the author's dotfiles into `Mindful-Stack/omyview` (2026-09-07). Installed
-per-machine with `omarchy plugin add https://github.com/Mindful-Stack/omyview.git --enable`
-and updated with `omarchy plugin update se.mindfulstack.omyview`. See `README.md` for the
+Extracted from the author's dotfiles into `Mindful-Stack/omascape` (2026-09-07). Installed
+per-machine with `omarchy plugin add https://github.com/Mindful-Stack/omascape.git --enable`
+and updated with `omarchy plugin update se.mindfulstack.omascape`. See `README.md` for the
 consumer-side install + SUPER+P bind.
 
 ### 7. ~~Find — type-ahead window search~~ ✅ done (2026-09-11)
@@ -70,15 +70,15 @@ Type any letter to fuzzy-filter windows by class and title; see
 ## Maintenance gotchas (verified in-session)
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell
   rescanPlugins` reloads the registry but NOT the live QML component.
-- New plugins default **disabled** — `omarchy plugin enable se.mindfulstack.omyview` (stored
+- New plugins default **disabled** — `omarchy plugin enable se.mindfulstack.omascape` (stored
   in `~/.config/omarchy/shell.json` `plugins[]`).
 - `omarchy plugin add` clones into `~/.config/omarchy/plugins/<manifest id>/`, i.e.
-  `se.mindfulstack.omyview/` — the folder is named after the manifest `id`, not the repo.
+  `se.mindfulstack.omascape/` — the folder is named after the manifest `id`, not the repo.
 - SUPER+P toggles open AND close even under the overlay's exclusive keyboard focus
   (Hyprland forwards configured keybinds over the layer); bare keys still reach the overlay.
 - **Every compositor operation is one atomic Lua chunk** (`logic.js`: `tiledInsertLua`,
   `floatingMoveLua`, `unfullscreenLua`) — kept on its own merits, not because of `keepLoaded`.
-  Chunk failures are printed to the Hyprland log (`[Lua] omyview: … failed: …`) and shown as a
+  Chunk failures are printed to the Hyprland log (`[Lua] omascape: … failed: …`) and shown as a
   notification. `manifest.json` sets `keepLoaded: true` (the exit fade needs the component
   alive after `close()`, and the reconcile tail that clears optimistic display state can then
   finish too; no compositor operation depends on it — each is a single atomic chunk), so

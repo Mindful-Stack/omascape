@@ -4,8 +4,8 @@ import Quickshell.Io
 import "logic.js" as Logic
 
 // Workspace lock state (docs/specs/2026-09-12-lock-design.md). Two watched files, one owner each:
-//   ~/.config/omarchy/omyview-locks.json  — written HERE (atomically): { "armed": ["3", "special:scratchpad"] }
-//   $XDG_RUNTIME_DIR/omyview/share-state  — written by the compositor observer: "1" | "0"
+//   ~/.config/omarchy/omascape-locks.json  — written HERE (atomically): { "armed": ["3", "special:scratchpad"] }
+//   $XDG_RUNTIME_DIR/omascape/share-state  — written by the compositor observer: "1" | "0"
 // `armed` is null until the first load resolves: the Overview must never sync an unresolved set
 // (it would disable rules the compositor still holds after a shell restart).
 QtObject {
@@ -16,8 +16,8 @@ QtObject {
     signal writeFailed(string why)
     signal invalidFile(string why)
 
-    readonly property string locksPath: Quickshell.env("HOME") + "/.config/omarchy/omyview-locks.json"
-    readonly property string statePath: Quickshell.env("XDG_RUNTIME_DIR") + "/omyview/share-state"
+    readonly property string locksPath: Quickshell.env("HOME") + "/.config/omarchy/omascape-locks.json"
+    readonly property string statePath: Quickshell.env("XDG_RUNTIME_DIR") + "/omascape/share-state"
 
     function isArmed(sel) { return armed !== null && armed.indexOf(sel) >= 0 }
     function placeholder(sel) { return isArmed(sel) && sharing }
@@ -25,11 +25,11 @@ QtObject {
     // Re-read the state file only. Quickshell's FileView watches the file's *parent directory*,
     // not the file itself: if that directory does not exist at FileView creation (every fresh
     // login, before the compositor's install chunk has run `mkdir -p
-    // $XDG_RUNTIME_DIR/omyview`), the watch never attaches, and no `fileChanged` ever fires for
+    // $XDG_RUNTIME_DIR/omascape`), the watch never attaches, and no `fileChanged` ever fires for
     // it later, even once the directory and file show up. Overview.qml calls this once, ~400ms
     // after every lockInstall(), by which point the directory very likely exists. The locks
     // file has no such problem — it lives under `~/.config/omarchy`, which Omarchy's own config
-    // layout guarantees exists well before omyview ever runs, so its watch attaches at
+    // layout guarantees exists well before omascape ever runs, so its watch attaches at
     // `FileView` creation and never needs this nudge; reloading it here too would only add a
     // redundant `loaded` echo (see Logic.applyLocksTo) for free.
     function refresh() { stateFile.reload() }

@@ -1,4 +1,4 @@
-# Omyview v3 — ideas & roadmap (research-backed)
+# Omascape v3 — ideas & roadmap (research-backed)
 
 Date: 2026-09-09 · Post-v2. Synthesised from research across macOS, Windows, Linux DEs,
 Wayland tiling-WM overviews, and Quickshell/AGS peers. Each idea is rated **easy / medium /

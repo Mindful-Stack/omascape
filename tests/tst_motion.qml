@@ -29,7 +29,7 @@ TestCase {
     }
 
     // Every key has a default; a wrong type, an unknown key, or unparseable text never
-    // changes behaviour (the existing OmyviewConfig contract, now with `motion`).
+    // changes behaviour (the existing OmascapeConfig contract, now with `motion`).
     function test_parse_config_defaults_types_and_motion_key() {
         var d = Logic.parseConfig("")
         compare(d.scrim, true); compare(d.hint, true); compare(d.motion, "auto")

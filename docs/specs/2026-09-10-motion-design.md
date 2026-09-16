@@ -1,4 +1,4 @@
-# Omyview — motion (2026-09-10)
+# Omascape — motion (2026-09-10)
 
 Branch `animations`, based on `main` (after #4, #5, #7). The last piece of the end-4 parity
 work: one motion vocabulary applied to open/close, selection, hover, drag and reconcile.
@@ -14,7 +14,7 @@ work: one motion vocabulary applied to open/close, selection, hover, drag and re
    when they are created at open (the card entrance covers that). Rebuilds that change nothing
    must produce no motion.
 4. **Respect the desktop.** Default `motion: "auto"` follows Hyprland `animations:enabled`;
-   `"full"` / `"off"` override in `~/.config/omarchy/omyview.json`. `off` sets every duration to 0.
+   `"full"` / `"off"` override in `~/.config/omarchy/omascape.json`. `off` sets every duration to 0.
 5. **Snappy.** A picker is a transient tool: fast 90 ms, normal 160 ms, enter 200 ms, exit
    120 ms. Movement uses `OutCubic`, hover `OutQuad`, entrance an emphasised decelerate
    (`OutBack` with a small overshoot, or `OutCubic` if that feels too playful).
@@ -43,8 +43,8 @@ work: one motion vocabulary applied to open/close, selection, hover, drag and re
   `opened || card.opacity > 0` (the pattern Omarchy's PopupCard uses). `close()` flips `opened`;
   the window hides when the fade ends. Keyboard focus must be released at once, not at the end.
 - **Hyprland also animates layers.** Omarchy gives its own overlays `no_anim = true` layer rules
-  so the shell animates instead of the compositor. Document the same rule for `omyview`:
-  `hl.layer_rule({ match = { namespace = "omyview" }, no_anim = true, animation = "none" })`.
+  so the shell animates instead of the compositor. Document the same rule for `omascape`:
+  `hl.layer_rule({ match = { namespace = "omascape" }, no_anim = true, animation = "none" })`.
   Without it, open/close double-animate (compositor fade + ours).
 - **Tile glide vs drag.** The drag sets `x/y` directly through `drag.target`; a `Behavior on x`
   would fight it, and gating it on `!dragging` is not enough (disabling a Behavior does not stop

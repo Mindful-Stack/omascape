@@ -1,4 +1,4 @@
-# Omyview
+# Omascape
 
 A workspace overview overlay for [Omarchy](https://omarchy.org)'s Quickshell shell.
 Press **SUPER+P** to get a visual, spatial overview of every workspace — grouped by
@@ -8,7 +8,7 @@ workspace, or **drag a window onto another workspace** to move it there.
 Built to replace the dead `walker`-based `workspace-picker.sh` after Omarchy Quattro
 removed `walker`.
 
-![Omyview open over omarchy.org: two monitor groups, live thumbnails of every window](preview.webp)
+![Omascape open over omarchy.org: two monitor groups, live thumbnails of every window](preview.webp)
 
 ![Open, drag windows between workspaces, jump, and the scratchpad row](docs/screenshots/demo.gif)
 
@@ -47,7 +47,7 @@ removed `walker`.
   every screen capture from then on (shares, recordings, screenshots), it carries a lock badge,
   and its box shows icons instead of thumbnails (the compositor denies their export); while a
   share is running the box shows a placeholder instead. Press again to disarm. The set is kept
-  in `~/.config/omarchy/omyview-locks.json`. Arming is per workspace: the overview still shows
+  in `~/.config/omarchy/omascape-locks.json`. Arming is per workspace: the overview still shows
   every other workspace's live thumbnails to a share viewer, and even an armed box only hides
   its own app icons and window names behind the lock glyph while sharing — arm every workspace
   you don't want seen. While a share is running, any monitor showing an armed workspace gets a
@@ -56,7 +56,7 @@ removed `walker`.
   black box and never your windows. It follows whatever that monitor is showing,
   the scratchpad included, and it is click-through and reserves no space. The frame (and the
   placeholder in the overview) can lag a few seconds behind the end of a share: the compositor
-  signals sharing per captured frame, so omyview waits out a short grace period before believing a
+  signals sharing per captured frame, so omascape waits out a short grace period before believing a
   share is over, rather than flickering whenever the frames pause.
 - **Theme-aware.** Pulls the active Omarchy theme's colors and fonts, so it matches the bar
   and re-themes automatically.
@@ -97,12 +97,17 @@ instead of its windows.
 
 ## Install
 
+> **Renamed from Omyview on 2026-09-16.** The plugin id, the config file names and the
+> Hyprland layer namespace all changed, so an existing Omyview install does not upgrade into
+> this one. See [Migrating from Omyview](#migrating-from-omyview).
+
+
 ### Requirements
 
 - Omarchy **Quattro (4.x)** or newer, with the Quickshell shell (`omarchy-shell` on your
   `PATH` — it ships with Omarchy). Quickshell must provide `Quickshell.Wayland`
   `ScreencopyView` + `ToplevelManager` (0.3.x does).
-- A **recent Hyprland** (developed against 0.56.2). Omyview uses Hyprland's typed `hl.dsp.*`
+- A **recent Hyprland** (developed against 0.56.2). Omascape uses Hyprland's typed `hl.dsp.*`
   dispatchers for focus/move/close and requires **Lua configuration mode** (`hyprland.lua`),
   as used by Omarchy Quattro. A legacy `.conf` session rejects those dispatchers.
 - The **dwindle** layout for drag-to-rearrange. On any other layout a tiled drop still moves
@@ -112,35 +117,35 @@ instead of its windows.
 ### 1. Add the plugin
 
 ```bash
-omarchy plugin add https://github.com/Mindful-Stack/omyview.git --enable
+omarchy plugin add https://github.com/Mindful-Stack/omascape.git --enable
 ```
 
-This clones the plugin into `~/.config/omarchy/plugins/se.mindfulstack.omyview/` (the folder
+This clones the plugin into `~/.config/omarchy/plugins/se.mindfulstack.omascape/` (the folder
 is named after the manifest `id`, not the repo) and enables it. New plugins default to
 disabled, so the `--enable` flag matters — without it, run `omarchy plugin enable
-se.mindfulstack.omyview` afterwards.
+se.mindfulstack.omascape` afterwards.
 
 Verify it's installed and enabled:
 
 ```bash
-omarchy plugin list | grep omyview
-# se.mindfulstack.omyview   enabled   third-party   overlay   Omyview
+omarchy plugin list | grep omascape
+# se.mindfulstack.omascape   enabled   third-party   overlay   Omascape
 ```
 
 ### 2. Bind a key to toggle it
 
-Omyview only appears when you toggle it, so bind a key. **SUPER+P** is the intended bind.
+Omascape only appears when you toggle it, so bind a key. **SUPER+P** is the intended bind.
 
 If your Omarchy uses the Lua binding config (`~/.config/hypr/bindings.lua`):
 
 ```lua
-o.bind("SUPER + P", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omyview")
+o.bind("SUPER + P", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
 ```
 
 If you use plain Hyprland config (`~/.config/hypr/bindings.conf` or `hyprland.conf`):
 
 ```ini
-bind = SUPER, P, exec, omarchy-shell shell toggle se.mindfulstack.omyview
+bind = SUPER, P, exec, omarchy-shell shell toggle se.mindfulstack.omascape
 ```
 
 Then reload Hyprland so the bind takes effect:
@@ -181,38 +186,56 @@ are query characters too. Ctrl+letter chords are reserved for future actions.
 ### Updating
 
 ```bash
-omarchy plugin update se.mindfulstack.omyview
+omarchy plugin update se.mindfulstack.omascape
 ```
 
 ### Uninstalling
 
 ```bash
-omarchy plugin remove se.mindfulstack.omyview
+omarchy plugin remove se.mindfulstack.omascape
 ```
 
 …then delete the SUPER+P bind you added and `hyprctl reload`.
 
+### Migrating from Omyview
+
+Omascape is the same plugin under a new name. Nothing about how it works changed; every
+identifier did. To move across:
+
+```bash
+omarchy plugin remove se.mindfulstack.omyview
+omarchy plugin add https://github.com/Mindful-Stack/omascape.git --enable
+
+# keep your settings and your armed workspaces
+mv ~/.config/omarchy/omyview.json       ~/.config/omarchy/omascape.json       2>/dev/null
+mv ~/.config/omarchy/omyview-locks.json ~/.config/omarchy/omascape-locks.json 2>/dev/null
+```
+
+Then edit your Hyprland config: point the toggle bind at `se.mindfulstack.omascape`, and change
+any `namespace = "omyview"` layer rule (the optional blur and no-animation rules below) to
+`"omascape"`. Finish with `hyprctl reload`, then `omarchy restart shell`.
+
 ### What it touches on your system
 
-Omyview never edits your Hyprland or Omarchy configuration. Everything it writes is its own:
+Omascape never edits your Hyprland or Omarchy configuration. Everything it writes is its own:
 
-- `~/.config/omarchy/omyview.json` — **read only**, never created. Your optional settings (see
+- `~/.config/omarchy/omascape.json` — **read only**, never created. Your optional settings (see
   Configuration).
-- `~/.config/omarchy/omyview-locks.json` — written when you arm or disarm a workspace with
+- `~/.config/omarchy/omascape-locks.json` — written when you arm or disarm a workspace with
   `Ctrl+L`. Holds the set of armed workspaces so it survives a shell restart.
-- `$XDG_RUNTIME_DIR/omyview/share-state` — a one-character file (`0` or `1`) the compositor-side
+- `$XDG_RUNTIME_DIR/omascape/share-state` — a one-character file (`0` or `1`) the compositor-side
   observer writes at shell start and whenever a screen share starts or stops, via a temporary
   file next to it that is renamed into place (plus a short-lived probe file when the directory
   is checked). Gone at logout.
-- **Runtime Hyprland rules** — omyview talks to Hyprland over its IPC socket with the same Lua
+- **Runtime Hyprland rules** — omascape talks to Hyprland over its IPC socket with the same Lua
   API your `hyprland.lua` uses. At shell start it installs a share observer (the thing that
   writes `share-state`) and a `no_screen_share` layer rule for its own reminder frame; when you
   arm a workspace it adds a `no_screen_share` window rule for that workspace. All of this lives
   in the running compositor only: disarming disables the workspace rule, `hyprctl reload` drops
-  everything and omyview re-installs what is still armed, and nothing is ever written to a config
+  everything and omascape re-installs what is still armed, and nothing is ever written to a config
   file.
 
-`omarchy plugin remove se.mindfulstack.omyview` deletes the plugin directory. Delete the two
+`omarchy plugin remove se.mindfulstack.omascape` deletes the plugin directory. Delete the two
 files above yourself if you want no trace left.
 
 ### Dependencies
@@ -224,10 +247,10 @@ to create the runtime directory). No packages are installed and nothing is downl
 ### Troubleshooting
 
 - **Nothing happens on SUPER+P.** Check the plugin is `enabled` (`omarchy plugin list |
-  grep omyview`) and that your bind targets the exact id `se.mindfulstack.omyview`. Re-run
+  grep omascape`) and that your bind targets the exact id `se.mindfulstack.omascape`. Re-run
   `hyprctl reload` after editing the bind.
 - **`summon: plugin not enabled` in the shell log.** Run `omarchy plugin enable
-  se.mindfulstack.omyview`.
+  se.mindfulstack.omascape`.
 - **It opens on the wrong monitor.** Focused-monitor targeting is verified on a single
   display; multi-monitor is still being validated — see `ROADMAP.md`.
 
@@ -235,7 +258,7 @@ to create the runtime directory). No packages are installed and nothing is downl
 
 ## Configuration
 
-Optional user settings live in `~/.config/omarchy/omyview.json` (watched; edits apply live):
+Optional user settings live in `~/.config/omarchy/omascape.json` (watched; edits apply live):
 
 ```json
 {
@@ -280,15 +303,15 @@ blur enabled globally (a GPU cost while the picker is open). Lua config
 
 ```lua
 hl.config({ decoration = { blur = { enabled = true } } })
-hl.layer_rule({ match = { namespace = "omyview" }, blur = true, ignore_alpha = 0.3 })
+hl.layer_rule({ match = { namespace = "omascape" }, blur = true, ignore_alpha = 0.3 })
 ```
 
 Classic config:
 
 ```ini
 decoration:blur:enabled = true
-layerrule = blur, omyview
-layerrule = ignorealpha 0.3, omyview
+layerrule = blur, omascape
+layerrule = ignorealpha 0.3, omascape
 ```
 
 Colours follow the active Omarchy theme (`menu` surface roles and the shared fill alphas), so
@@ -299,19 +322,19 @@ Contributing about why a plain rescan isn't enough).
 
 ### Let the picker animate itself (Hyprland side)
 
-Omyview animates its own open and close (a short fade and scale). Hyprland also animates
+Omascape animates its own open and close (a short fade and scale). Hyprland also animates
 layer surfaces by default, so without a rule the two stack: a compositor fade on top of the
-picker's own. Omarchy gives its shell overlays a `no_anim` rule; give `omyview` the same.
+picker's own. Omarchy gives its shell overlays a `no_anim` rule; give `omascape` the same.
 Lua config (`~/.config/hypr/looknfeel.lua` or any file loaded by `hyprland.lua`):
 
 ```lua
-hl.layer_rule({ match = { namespace = "omyview" }, no_anim = true, animation = "none" })
+hl.layer_rule({ match = { namespace = "omascape" }, no_anim = true, animation = "none" })
 ```
 
 Classic config:
 
 ```ini
-layerrule = noanim, omyview
+layerrule = noanim, omascape
 ```
 
 With `"motion": "off"` (or `"auto"` while Hyprland's `animations:enabled` is off) the picker
@@ -332,8 +355,8 @@ Contributions are welcome — bug reports, fixes, and the roadmap items in `ROAD
 | `WindowTile.qml`    | One window thumbnail (live capture or icon fallback).                    |
 | `FindBar.qml`       | The type-to-find query bar.                                             |
 | `LockFrame.qml`     | The share-time reminder frame around a monitor with an armed workspace. |
-| `OmyviewConfig.qml` | Reads and watches `~/.config/omarchy/omyview.json`.                     |
-| `OmyviewLocks.qml`  | Armed-workspace state, the share observer and the runtime rules.        |
+| `OmascapeConfig.qml` | Reads and watches `~/.config/omarchy/omascape.json`.                     |
+| `OmascapeLocks.qml`  | Armed-workspace state, the share observer and the runtime rules.        |
 | `SoftShadow.qml`    | Shadow under floating tiles.                                            |
 | `logic.js`          | Pure logic: geometry, reconcile, Lua chunk generation. Unit-tested.     |
 | `tests/`            | Tier 1 logic + UI tests (`mise run test`), Lua chunk suite, integration. |
@@ -350,12 +373,12 @@ APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inli
 ### Local development loop
 
 1. **Work against a live checkout.** The version Omarchy runs lives at
-   `~/.config/omarchy/plugins/se.mindfulstack.omyview/` (a clone of this repo). Either edit
+   `~/.config/omarchy/plugins/se.mindfulstack.omascape/` (a clone of this repo). Either edit
    there directly, or clone this repo elsewhere for development:
 
    ```bash
-   git clone git@github.com:Mindful-Stack/omyview.git
-   cd omyview
+   git clone git@github.com:Mindful-Stack/omascape.git
+   cd omascape
    ```
 
 2. **Edit `Overview.qml`.**
@@ -395,7 +418,7 @@ shell and checking behavior. Before opening a PR, confirm:
 1. Branch off `main`: `git checkout -b your-change`.
 2. Keep commits focused; write a clear message explaining the *why*.
 3. If you change behavior, update `DESIGN.md`/`ROADMAP.md` to match.
-4. Open a PR against `Mindful-Stack/omyview`. Describe what you tested from the checklist
+4. Open a PR against `Mindful-Stack/omascape`. Describe what you tested from the checklist
    above (a screenshot or short screen recording helps a lot for UI changes).
 
 Maintainers: **@DanielThyselius**, **@dotnetemmanuel**.

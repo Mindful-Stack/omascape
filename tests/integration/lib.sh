@@ -65,7 +65,7 @@ QtObject {
 QML
     printf 'module qs.Ui\nUnused 1.0 Unused.qml\n' > "$tmp/Ui/qmldir"
     printf 'import QtQuick\nItem {}\n' > "$tmp/Ui/Unused.qml"
-    cp "$src"/*.qml "$src/logic.js" "$tmp/"   # every component the plugin ships (SoftShadow, OmyviewConfig, ...)
+    cp "$src"/*.qml "$src/logic.js" "$tmp/"   # every component the plugin ships (SoftShadow, OmascapeConfig, ...)
     cp "$src/tests/integration/drag.qml" "$tmp/shell.qml"
     HYPRLAND_INSTANCE_SIGNATURE="$nested" WAYLAND_DISPLAY="$socket" quickshell -p "$tmp/shell.qml" > "$tmp/qs.log" 2>&1 & qs_pid=$!
     for _ in $(seq 1 40); do

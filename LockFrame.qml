@@ -11,7 +11,7 @@ import "logic.js" as Logic
 // two-token form), and a border_size change relayouts the workspace on every toggle.
 //
 // The strips are OUR surfaces, so the install chunk's `no_screen_share` layer rule on the
-// `omyview-lockframe` namespace blanks them in every capture: a viewer sees the plain black
+// `omascape-lockframe` namespace blanks them in every capture: a viewer sees the plain black
 // exclusion box, the red frame is purely local. They are click-through (an empty `mask` Region —
 // the same trick the overview uses while closed), take no keyboard focus and reserve no space
 // (`ExclusionMode.Ignore`), so nothing about the desktop layout changes when they appear.
@@ -75,7 +75,7 @@ Scope {
         visible: frame.shown
         screen: frame.frameScreen
         color: "transparent"
-        WlrLayershell.namespace: "omyview-lockframe"
+        WlrLayershell.namespace: "omascape-lockframe"
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
         exclusionMode: ExclusionMode.Ignore
@@ -95,7 +95,7 @@ Scope {
         visible: frame.shown
         screen: frame.frameScreen
         color: "transparent"
-        WlrLayershell.namespace: "omyview-lockframe"
+        WlrLayershell.namespace: "omascape-lockframe"
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
         exclusionMode: ExclusionMode.Ignore
@@ -115,7 +115,7 @@ Scope {
         visible: frame.shown
         screen: frame.frameScreen
         color: "transparent"
-        WlrLayershell.namespace: "omyview-lockframe"
+        WlrLayershell.namespace: "omascape-lockframe"
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
         exclusionMode: ExclusionMode.Ignore
@@ -134,7 +134,7 @@ Scope {
         visible: frame.shown
         screen: frame.frameScreen
         color: "transparent"
-        WlrLayershell.namespace: "omyview-lockframe"
+        WlrLayershell.namespace: "omascape-lockframe"
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
         exclusionMode: ExclusionMode.Ignore

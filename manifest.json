@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "id": "se.mindfulstack.omyview",
-  "name": "Omyview",
-  "version": "0.3.0",
+  "id": "se.mindfulstack.omascape",
+  "name": "Omascape",
+  "version": "0.4.0",
   "author": "Mindful Stack",
   "license": "MIT",
   "description": "Live-preview overview of all workspaces, grouped by monitor, with drag-and-drop",

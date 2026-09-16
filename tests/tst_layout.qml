@@ -921,7 +921,7 @@ TestCase {
         var lua = Logic.lockSyncLua(["3", "bad one", "special:scratchpad"])
         verify(lua.indexOf('"3"') >= 0 && lua.indexOf('"special:scratchpad"') >= 0)
         verify(lua.indexOf("bad one") < 0)
-        verify(lua.indexOf("omyview-lock-") >= 0, "rules are named")
+        verify(lua.indexOf("omascape-lock-") >= 0, "rules are named")
         compare(Logic.lockSyncLua([]).indexOf("local ARMED = {}") >= 0, true)
     }
     // Distinguishes: a parser that accepts a bad selector (it would reach a Lua chunk) or

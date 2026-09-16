@@ -62,7 +62,7 @@ TestCase {
     function catchers() {
         var out = [], ch = view.children
         for (var i = 0; i < ch.length; i++)
-            if (ch[i].objectName === "omyviewCatcher") out.push(ch[i])
+            if (ch[i].objectName === "omascapeCatcher") out.push(ch[i])
         return out
     }
     function catcherFor(screen) {

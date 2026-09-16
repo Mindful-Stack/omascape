@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Io
 import "logic.js" as Logic
 
-// User settings: ~/.config/omarchy/omyview.json (optional, watched). Every key has a default
+// User settings: ~/.config/omarchy/omascape.json (optional, watched). Every key has a default
 // (Logic.parseConfig); a missing file, a parse error or an unknown key never changes behaviour.
 QtObject {
     id: cfg
@@ -12,7 +12,7 @@ QtObject {
     property int workspaces: 10      // always show ids 1..N, even ones Hyprland has not created; 0 = off
     property string motion: "auto"   // "auto" follows Hyprland animations:enabled; "full" | "off"
     // Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum): the local-only
-    // frame omyview draws around a monitor that is SHOWING an armed workspace while a share is
+    // frame omascape draws around a monitor that is SHOWING an armed workspace while a share is
     // running (LockFrame.qml — four layer-shell strips, blanked in every capture). `lockBorder`
     // accepts only the `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms (Logic.parseConfig); anything
     // else falls back to the default. `lockBorderSize` is the strip thickness in px;
@@ -29,7 +29,7 @@ QtObject {
     readonly property string motionEffective: Logic.motionPolicy(motion, hyprAnimations)
     function probeMotion() { hyprProc.running = true; probeFallback.restart() }
 
-    readonly property string path: Quickshell.env("HOME") + "/.config/omarchy/omyview.json"
+    readonly property string path: Quickshell.env("HOME") + "/.config/omarchy/omascape.json"
 
     function apply(raw) {
         var o = Logic.parseConfig(raw)

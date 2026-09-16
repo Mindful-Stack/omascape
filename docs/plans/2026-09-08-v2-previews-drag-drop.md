@@ -1,14 +1,14 @@
-# Omyview v2 — Live Previews + Drag-and-Drop Implementation Plan
+# Omascape v2 — Live Previews + Drag-and-Drop Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace Omyview's icon mini-map with live window thumbnails and add drag-and-drop of windows between workspaces, matching end-4's overview while keeping per-monitor rows.
+**Goal:** Replace Omascape's icon mini-map with live window thumbnails and add drag-and-drop of windows between workspaces, matching end-4's overview while keeping per-monitor rows.
 
 **Architecture:** A single non-clipped canvas carries two sibling layers — workspace boxes (drop targets) and absolutely-positioned window tiles. All coordinate math, ordering, clipping, and the reconcile diff live in a dependency-free `logic.js` (pure functions, unit-tested offscreen). `Overview.qml` wires Quickshell singletons to that logic and renders; `WindowTile.qml` is one preview tile (a `ScreencopyView` with icon fallback). Drag-drop dispatches a silent Hyprland move and reconciles against refreshed geometry.
 
 **Tech Stack:** QML / Qt Quick, Quickshell 0.3.1 (`Quickshell.Hyprland`, `Quickshell.Wayland` `ScreencopyView` + `ToplevelManager`), Hyprland 0.56.2 typed dispatch (`hl.dsp.*`). Tests: `qmltestrunner` + `QtTest` under `QT_QPA_PLATFORM=offscreen`; Tier 2 headless Hyprland + `foot`/`hyprctl`.
 
-**Spec:** `docs/specs/2026-09-08-omyview-previews-drag-drop-design.md` (read it first).
+**Spec:** `docs/specs/2026-09-08-omascape-previews-drag-drop-design.md` (read it first).
 
 ---
 
@@ -21,7 +21,7 @@ repo. To see a change live, copy the changed files over and restart the shell �
 rescan does **not** reload QML:
 
 ```bash
-LIVE="$HOME/.config/omarchy/plugins/se.mindfulstack.omyview"
+LIVE="$HOME/.config/omarchy/plugins/se.mindfulstack.omascape"
 cp logic.js WindowTile.qml Overview.qml "$LIVE"/ 2>/dev/null; omarchy restart shell
 ```
 
@@ -55,7 +55,7 @@ test, or every later "expected: FAIL" is worthless.
 The branch already exists (this plan and the spec were committed on it). Ensure you're on it:
 
 ```bash
-cd ~/Source/omyview
+cd ~/Source/omascape
 git checkout v2-previews-drag-drop 2>/dev/null || git checkout -b v2-previews-drag-drop
 ```
 
@@ -898,7 +898,7 @@ boxes from `logic.layout`, and window tiles from a `ListModel` reconciled via
 - [ ] **Step 1: Rewrite `Overview.qml`**
 
 ```qml
-// Omyview — v2. Canvas + boxes + live tiles. See DESIGN.md / docs/specs, docs/plans.
+// Omascape — v2. Canvas + boxes + live tiles. See DESIGN.md / docs/specs, docs/plans.
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
@@ -1065,7 +1065,7 @@ Item {
         visible: root.opened; screen: root.targetScreen
         anchors { top: true; bottom: true; left: true; right: true }
         color: "transparent"
-        WlrLayershell.namespace: "omyview"
+        WlrLayershell.namespace: "omascape"
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
         exclusionMode: ExclusionMode.Ignore
@@ -1378,7 +1378,7 @@ ACTIVE_AFTER=$(hyprctl activeworkspace -j | jq -r '.id')
 echo "PASS: silent move to ws 3, active ws unchanged"
 ```
 
-Property this distinguishes: (a) the **exact dispatch string** Omyview sends actually moves
+Property this distinguishes: (a) the **exact dispatch string** Omascape sends actually moves
 the window by address on real Hyprland — a syntax/typo regression goes red; (b) `follow =
 false` genuinely does **not** switch the active workspace — a change to a following move goes
 red. Both are asserted against `hyprctl`, values the compositor reports, not values the test

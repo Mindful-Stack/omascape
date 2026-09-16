@@ -1,4 +1,4 @@
-// Omyview — v2. Canvas + boxes + live tiles. See DESIGN.md / docs/specs, docs/plans.
+// Omascape — v2. Canvas + boxes + live tiles. See DESIGN.md / docs/specs, docs/plans.
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
@@ -87,8 +87,8 @@ Item {
     readonly property int boxRadius: 8
     readonly property int cardRadius: boxRadius + card.pad
 
-    OmyviewConfig { id: config }
-    OmyviewLocks { id: locks }
+    OmascapeConfig { id: config }
+    OmascapeLocks { id: locks }
     // "Reported once per open": a toggle attempted while the locks file is still unresolved
     // (never loaded, or stuck on a malformed file) is a no-op; without feedback the user just
     // sees Ctrl+L do nothing. Reset in open() so a later, working open() can warn again.
@@ -122,7 +122,7 @@ Item {
             if (!lockUnresolvedNotified) {
                 lockUnresolvedNotified = true
                 Hyprland.dispatch(Logic.notifyLua(
-                    "omyview: locks file unreadable — fix or delete ~/.config/omarchy/omyview-locks.json"))
+                    "omascape: locks file unreadable — fix or delete ~/.config/omarchy/omascape-locks.json"))
             }
             return
         }
@@ -135,15 +135,15 @@ Item {
         target: locks
         function onLoadedArmed() { root.lockSync(); if (root.opened) root.rebuild() }
         function onSharingChanged() { if (root.opened) root.rebuild() }
-        function onWriteFailed(why) { Hyprland.dispatch(Logic.notifyLua("omyview: could not save locks: " + why)) }
+        function onWriteFailed(why) { Hyprland.dispatch(Logic.notifyLua("omascape: could not save locks: " + why)) }
         function onInvalidFile(why) {
             if (root.lockInvalidNotified) return
             root.lockInvalidNotified = true
-            Hyprland.dispatch(Logic.notifyLua("omyview: locks file ignored: " + why))
+            Hyprland.dispatch(Logic.notifyLua("omascape: locks file ignored: " + why))
         }
     }
     // Quickshell's FileView watches the file's *parent directory*, not the file itself: if
-    // $XDG_RUNTIME_DIR/omyview does not exist yet (every fresh login, before the compositor's
+    // $XDG_RUNTIME_DIR/omascape does not exist yet (every fresh login, before the compositor's
     // install chunk has run its `mkdir -p`), the watch never attaches, and share-state changes
     // go unseen for the rest of the session — reload() is the only thing that re-attaches it.
     // Restarting this timer on every lockInstall() re-reads both files ~400ms later, by which
@@ -939,7 +939,7 @@ Item {
         model: Quickshell.screens
         PanelWindow {
             required property var modelData
-            objectName: "omyviewCatcher"
+            objectName: "omascapeCatcher"
             // Never on the target screen: it would sit above the card and eat every click meant
             // for it. `targetScreen` is an element of `Quickshell.screens` (focusedScreen()), the
             // same objects this model carries, so identity is the comparison.
@@ -947,7 +947,7 @@ Item {
             screen: modelData
             anchors { top: true; bottom: true; left: true; right: true }
             color: "transparent"
-            WlrLayershell.namespace: "omyview-catcher"
+            WlrLayershell.namespace: "omascape-catcher"
             WlrLayershell.layer: WlrLayer.Overlay
             // No keyboard interactivity at all: Hyprland only moves keyboard focus to a layer
             // surface under the pointer when its interactivity is not `none`, so a focus-less
@@ -968,7 +968,7 @@ Item {
         screen: root.targetScreen
         anchors { top: true; bottom: true; left: true; right: true }
         color: "transparent"
-        WlrLayershell.namespace: "omyview"
+        WlrLayershell.namespace: "omascape"
         WlrLayershell.layer: WlrLayer.Overlay
         // OnDemand, not Exclusive. Hyprland 0.56 (InputManager.cpp, mouseMoveUnified: "forced above
         // all") routes EVERY pointer event to the exclusive layer surfaces while any exists — and

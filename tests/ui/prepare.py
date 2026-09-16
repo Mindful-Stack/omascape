@@ -176,14 +176,14 @@ for edge in ('left', 'right'):
 # `motionEffective` is writable here so tests can flip the policy without a compositor.
 # `workspaces` defaults to 0 (no padding) so the fixture shows exactly the compositor's
 # workspaces; tests that cover padding switch it on themselves.
-(dest / 'OmyviewConfig.qml').write_text(
+(dest / 'OmascapeConfig.qml').write_text(
     'import QtQuick\nQtObject { property bool scrim: true; property bool hint: true\n'
     '           property int workspaces: 0\n'
     '           property string motion: "auto"; property string motionEffective: "full"\n'
     '           property bool motionResolved: true\n'
     '           property string lockBorder: "rgb(ff4444)"; property int lockBorderSize: 6\n'
     '           function probeMotion() {} }\n')
-# Lock state stub: the real OmyviewLocks.qml watches two files through Quickshell.Io. The stub
+# Lock state stub: the real OmascapeLocks.qml watches two files through Quickshell.Io. The stub
 # keeps the one property later tests depend on — `armed` is null until a load resolves — and
 # records writes instead of touching disk. Real file watching, atomic rename and load ordering
 # are NOT reproduced here (live check); `refresh()` is a no-op for the same reason.
@@ -194,7 +194,7 @@ for edge in ('left', 'right'):
 # `compositorRef` (wired by a `Binding` where this stub is used) lets `persist()` record, per
 # write, how many commands the compositor had already seen (`writeAt`) — pinning that the
 # caller's sync always lands before the write, per the split `toggleInMemory`/`persist` ordering.
-(dest / 'OmyviewLocks.qml').write_text(
+(dest / 'OmascapeLocks.qml').write_text(
     'import QtQuick\nimport "logic.js" as Logic\nQtObject {\n'
     '    property var armed: null\n'
     '    property bool sharing: false\n'
