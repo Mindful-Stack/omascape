@@ -5,7 +5,7 @@
   "version": "0.4.0",
   "author": "Mindful Stack",
   "license": "MIT",
-  "description": "Live-preview overview of all workspaces, grouped by monitor, with drag-and-drop",
+  "description": "Live, spatial overview of every workspace, grouped by monitor, each window a real thumbnail in its true position. Jump by number or arrow, drag windows between workspaces, type to find one, open the scratchpad, or arm a workspace so its windows go black in every screen share. Theme-aware; nothing runs until you summon it.",
   "kinds": [
     "overlay"
   ],
