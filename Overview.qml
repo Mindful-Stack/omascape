@@ -116,8 +116,15 @@ Item {
         if (locks.armed === null) return
         Hyprland.dispatch(Logic.lockSyncLua(locks.armed))
     }
+    // Ctrl+L: flip the SELECTED workspace, whatever the pointer is doing. The cursor and the
+    // pointer never change what Ctrl+L acts on — it is a workspace key, not a target action.
     function lockToggleSelected() {
         if (!Logic.hasWs(selectedId)) return
+        lockSet(selectedId, !locks.isArmed(Logic.wsSelector(selectedId)))
+    }
+    // Explicit state, so the menu's Lock/Unlock row cannot invert if the set changed under it.
+    function lockSet(wsId, armed) {
+        if (!Logic.hasWs(wsId)) return
         if (locks.armed === null) {
             if (!lockUnresolvedNotified) {
                 lockUnresolvedNotified = true
@@ -126,10 +133,57 @@ Item {
             }
             return
         }
-        if (!locks.toggleInMemory(Logic.wsSelector(selectedId))) return
-        lockSync()          // the compositor is the enforcement; it must not wait for the write
+        var sel = Logic.wsSelector(wsId)
+        if (locks.isArmed(sel) === armed) return         // already in the requested state
+        if (!locks.toggleInMemory(sel)) return
+        lockSync()          // the compositor is the enforcement; it must not wait for disk
         locks.persist()
         rebuild()
+    }
+    // Close all windows on a workspace. Everything the chunk will close gets the same optimistic
+    // treatment Ctrl+W gives one window — including a window dropped there a moment ago, which the
+    // compositor already lists on that workspace even though the overview still holds its
+    // pre-drop row.
+    function closeAllOn(wsId) {
+        if (!Logic.hasWs(wsId)) return
+        var now = Date.now()
+        for (var i = 0; i < tilesModel.count; i++) {
+            var t = tilesModel.get(i)
+            if (t.wsid !== wsId) continue
+            supersedePending(t.address)
+            pendingCloses[t.address] = now + 1800
+        }
+        for (var a in pendingMoves)
+            if (pendingMoves[a].workspaceId === wsId) { supersedePending(a); pendingCloses[a] = now + 1800 }
+        if (cursorAddress && pendingCloses[cursorAddress]) setCursor("")
+        applyClosingRoles()
+        Hyprland.dispatch(Logic.closeAllLua(wsId))
+        scheduleRebuild()
+        reconcileTimer.restart()
+    }
+    // A pending move's coordinates are meaningless once its workspace changes monitor, so drop
+    // every optimistic row bound to that workspace in either direction.
+    function clearPendingForWorkspace(wsId) {
+        for (var a in pendingMoves) {
+            var win = _windowByAddress[a]
+            if (pendingMoves[a].workspaceId === wsId || (win && win.workspaceId === wsId))
+                delete pendingMoves[a]
+        }
+    }
+    function moveWorkspace(wsId, monitorName) {
+        if (!Logic.validMonitorName(monitorName)) return
+        clearPendingForWorkspace(wsId)
+        Hyprland.dispatch(Logic.workspaceMoveLua(wsId, monitorName))
+        scheduleRebuild()
+    }
+    function swapWorkspace(wsId, monitorName) {
+        if (!Logic.validMonitorName(monitorName)) return
+        var b = boxForWs(wsId)
+        if (!b || !Logic.validMonitorName(b.monitorName)) return
+        if (monitorName === b.monitorName) return
+        clearPendingForWorkspace(wsId)
+        Hyprland.dispatch(Logic.workspaceSwapLua(wsId, b.monitorName, monitorName))
+        scheduleRebuild()
     }
     Connections {
         target: locks
@@ -193,9 +247,7 @@ Item {
     // Backdrop behind the focused monitor's group: a whisper of accent, so which screen is
     // live reads peripherally without touching the three well shades.
     readonly property color groupBackdropColor: Qt.rgba(accent.r, accent.g, accent.b, 0.08)
-    // Nerd Font glyphs (nf-md-laptop / nf-md-monitor); Omarchy's menu font carries them.
-    // Internal panels are eDP/LVDS/DSI connectors, everything else is an external screen.
-    function monitorIcon(name) { return /^(eDP|LVDS|DSI)/i.test(name) ? "\u{F0322}" : "\u{F0379}" }
+    function monitorIcon(name) { return Logic.monitorGlyph(name) }
 
     property var groups: []
     // Monitor chips and the focused-group backdrop key on how many *monitor* groups there are;
@@ -225,11 +277,17 @@ Item {
 
     function buildInput() {
         var mons = [], hmons = Hyprland.monitors ? Hyprland.monitors.values : []
+        var activeByMon = {}
         for (var i = 0; i < hmons.length; i++) {
             var m = hmons[i]
             mons.push({ name: m.name, x: m.x, y: m.y, width: m.width, height: m.height,
                         scale: m.scale, reserved: m.lastIpcObject ? m.lastIpcObject.reserved : [0,0,0,0],
                         transform: m.lastIpcObject ? m.lastIpcObject.transform : 0 })
+            // Which workspace each monitor is SHOWING — the same snapshot field the lock frame
+            // reads, refreshed by the same events (Logic.lockFrameRefreshEvent).
+            activeByMon[m.name] = (m.lastIpcObject && m.lastIpcObject.activeWorkspace &&
+                                   typeof m.lastIpcObject.activeWorkspace.id === "number")
+                                  ? m.lastIpcObject.activeWorkspace.id : -1
         }
         var monNames = {}
         for (var mi0 = 0; mi0 < mons.length; mi0++) monNames[mons[mi0].name] = true
@@ -258,7 +316,10 @@ Item {
             wss.push({ id: wsId, monitorName: monName, special: special,
                        focused: ws.id === focusedWsId,
                        occupied: ws.toplevels && ws.toplevels.values.length > 0,
-                       armed: wsArmed, placeholder: wsPlaceholder })
+                       armed: wsArmed, placeholder: wsPlaceholder,
+                       // Compared against the REAL id, before the scratchpad remap: a special
+                       // workspace is reported as `specialWorkspace`, never `activeWorkspace`.
+                       active: !special && activeByMon[monName] === ws.id })
             var tls = ws.toplevels ? ws.toplevels.values : []
             for (var t = 0; t < tls.length; t++) {
                 var o = tls[t] ? tls[t].lastIpcObject : null
@@ -278,7 +339,7 @@ Item {
             wsSel = Logic.wsSelector(Logic.SCRATCHPAD_ID)
             wss.push({ id: Logic.SCRATCHPAD_ID, monitorName: focusedMonitorName, special: "scratchpad",
                        focused: false, occupied: false,
-                       armed: locks.isArmed(wsSel), placeholder: locks.placeholder(wsSel) })
+                       armed: locks.isArmed(wsSel), placeholder: locks.placeholder(wsSel), active: false })
         }
         // padWorkspaces() fills gaps with synthetic (empty) records that carry no armed/
         // placeholder flags: without this, arming an empty workspace shows no badge, and a
@@ -290,6 +351,7 @@ Item {
             if (pw.armed === undefined) {
                 var pwSel = Logic.wsSelector(pw.id)
                 pw.armed = locks.isArmed(pwSel); pw.placeholder = locks.placeholder(pwSel)
+                pw.active = false           // a workspace Hyprland has not created shows nowhere
             }
         }
         return { monitors: mons, workspaces: padded, windows: wins,
@@ -309,6 +371,156 @@ Item {
     property string dropTargetSide: ""   // "left"|"right"|"top"|"bottom" while a tiled drag hovers a tile
     property real dragViewportX: 0
     property real dragViewportY: 0
+    // ---- Actions: pointer liveness and target resolution ---------------------------------
+    // "Most recent input device wins." Liveness is tracked in SCENE coordinates, never canvas
+    // ones: an edge/wheel scroll, a card resize or the entrance scale all move the canvas under a
+    // stationary pointer, and none of those is the user pointing at something new.
+    property bool pointerLive: false
+    property real pointerSceneX: 0
+    property real pointerSceneY: 0
+    function notePointerMove(sp) {
+        if (sp.x === pointerSceneX && sp.y === pointerSceneY) return
+        pointerSceneX = sp.x; pointerSceneY = sp.y
+        pointerLive = true
+    }
+    // The pointer in canvas coordinates, derived only here and only at resolve time.
+    function pointerPoint() {
+        var p = flick.mapFromItem(null, pointerSceneX, pointerSceneY)
+        return { x: p.x + flick.contentX, y: p.y + flick.contentY,
+                 inView: p.x >= 0 && p.y >= 0 && p.x <= flick.width && p.y <= flick.height }
+    }
+    // Displayed tile rects for the hit test: each delegate's own geometry expanded about its
+    // centre by `scale`, so the hovered tile's 1.03 lift and an in-flight appear animation are
+    // hit-tested at the size they are painted. The drag ghost's separate Scale transform is not
+    // folded in because actions are ignored while a drag is in flight.
+    function tileCandidates() {
+        var out = []
+        for (var i = 0; i < tileRepeater.count; i++) {
+            var t = tileRepeater.itemAt(i)
+            if (!t) continue
+            var s = t.scale
+            out.push({ address: t.tileAddress, z: t.z,
+                       x: t.x + t.width * (1 - s) / 2, y: t.y + t.height * (1 - s) / 2,
+                       w: t.width * s, h: t.height * s })
+        }
+        return out
+    }
+    function resolveTarget() {
+        var live = false, tileAddr = "", wsId = -1
+        if (pointerLive) {
+            var p = pointerPoint()
+            if (p.inView) {
+                live = true
+                tileAddr = Logic.tileAt(tileCandidates(), p.x, p.y)
+                if (!tileAddr) {
+                    var hit = Logic.hitWorkspace(boxes, p.x, p.y)
+                    wsId = hit === null ? -1 : hit
+                }
+            }
+        }
+        return Logic.target({ pointerLive: live, pointerTileAddress: tileAddr,
+                              pointerWorkspaceId: wsId, query: root.query,
+                              matchAddress: root.selectedMatchAddress,
+                              cursorAddress: root.cursorAddress, selectedId: root.selectedId })
+    }
+    // ---- Actions: the Tab window cursor ---------------------------------------------------
+    // The keyboard's window target inside the selected workspace. "" = none. Mirrored into the
+    // tiles model as the `cursor` role so the ring is a binding, not an imperative repaint.
+    property string cursorAddress: ""
+    function setCursor(addr) {
+        if (cursorAddress === addr) return
+        cursorAddress = addr
+        applyCursorRole()
+    }
+    function applyCursorRole() {
+        for (var i = 0; i < tilesModel.count; i++) {
+            var cur = tilesModel.get(i)
+            var next = { cursor: cur.address === root.cursorAddress }
+            if (rowDiffers(cur, next)) tilesModel.set(i, next)
+        }
+    }
+    // The model rows as cycleWindows wants them. Canvas coordinates, so a fullscreen window's
+    // recovered slot and a floating window's real position both sort where they are drawn.
+    function tileRows() {
+        var out = []
+        for (var i = 0; i < tilesModel.count; i++) {
+            var t = tilesModel.get(i)
+            out.push({ address: t.address, wsid: t.wsid, x: t.wx, y: t.wy })
+        }
+        return out
+    }
+    function closeSkipSet() {
+        var skip = {}
+        for (var a in pendingCloses) skip[a] = true
+        return skip
+    }
+    function cycleCursor(step) {
+        if (!Logic.hasWs(selectedId)) return
+        setCursor(Logic.cycleWindows(tileRows(), selectedId, cursorAddress, step, closeSkipSet()))
+    }
+    // Focus one window and leave: the tile-click path, including the scratchpad raise (focus alone
+    // leaves a scratchpad window under whichever floating sibling was last on top).
+    function focusWindow(addr) {
+        var win = _windowByAddress[addr]
+        if (win && Logic.isScratchpad(win.workspaceId)) Hyprland.dispatch(Logic.scratchpadFocusLua(addr))
+        else Hyprland.dispatch('hl.dsp.focus({ window = "address:' + addr + '" })')
+        close()
+    }
+    // Enter: whatever the target rule names.
+    function activateTarget() {
+        var t = resolveTarget()
+        if (!t) return
+        if (t.kind === "workspace") jump(t.id)
+        else focusWindow(t.address)
+    }
+    // ---- Actions: outstanding closes -------------------------------------------------------
+    // A close is a REQUEST: the app may prompt, delay or refuse, and Hyprland keeps reporting the
+    // window until it is really gone. addr → deadline (1.8 s, like the other pending maps).
+    property var pendingCloses: ({})
+    function applyClosingRoles() {
+        for (var i = 0; i < tilesModel.count; i++) {
+            var cur = tilesModel.get(i)
+            var next = { closing: !!pendingCloses[cur.address] }
+            if (rowDiffers(cur, next)) tilesModel.set(i, next)
+        }
+    }
+    // Drop every optimistic display state held for `addr`, exactly as a new grab does. Without
+    // this, applyTiles would keep a just-dropped window's row (it skips updates AND removals for
+    // an address in pendingMoves) until its deadline, outliving the action taken on it.
+    function supersedePending(addr) {
+        delete pendingMoves[addr]
+        delete pendingFullscreen[addr]
+        setTileRoles(addr, { fsPending: false })
+    }
+    // The one close path: Ctrl+W and the middle click land here today; a future menu Close would
+    // too.
+    function closeWindow(addr, advanceCursor) {
+        if (!addr || pendingCloses[addr]) return
+        supersedePending(addr)
+        pendingCloses[addr] = Date.now() + 1800
+        if (advanceCursor)
+            setCursor(Logic.cycleWindows(tileRows(), selectedId, addr, 1, closeSkipSet()))
+        applyClosingRoles()
+        Hyprland.dispatch('hl.dsp.window.close({ window = "address:' + addr + '" })')
+        scheduleRebuild()
+        reconcileTimer.restart()
+    }
+    function closeTarget() {
+        if (dragTile !== null) return          // a drag owns the pointer; actions wait
+        var t = resolveTarget()
+        if (!t || t.kind !== "window") return
+        closeWindow(t.address, t.address === cursorAddress)
+    }
+    // As conservative as reconcileMoves: absence from `windows` alone never clears an entry. A
+    // window on a workspace that just became a lock placeholder is ALSO absent (find/drag never
+    // see a placeholder's windows — see buildInput), and is not gone; treating that absence as
+    // "the close went through" would drop the tracking and let a second Ctrl+W fire a duplicate
+    // the moment the placeholder clears. Only the deadline decides.
+    function reconcileCloses() {
+        for (var addr in pendingCloses)
+            if (Date.now() >= pendingCloses[addr]) delete pendingCloses[addr]
+        applyClosingRoles()
+    }
     Timer {
         id: reconcileTimer
         interval: 120; repeat: true
@@ -318,10 +530,119 @@ Item {
         for (var i = 0; i < tilesModel.count; i++)
             if (tilesModel.get(i).address === addr) { tilesModel.set(i, roles); return }
     }
+    // ---- Actions: the context menu ---------------------------------------------------------
+    // Lives at PANEL level, not in the canvas: the Flickable clips, so a canvas-level menu opened
+    // near the viewport's bottom edge would be cut off. Position is recorded in panel coordinates.
+    property bool menuOpen: false
+    property var menuTarget: null          // { kind: "window", address } | { kind: "workspace", id }
+    property var menuItems: []
+    property int menuIndex: -1
+    // The raw press point, in panel coordinates, UNCLAMPED. Clamping happens at the instantiation
+    // site instead of here, against the menu's own live width/height — see the comment there for
+    // why: contextMenu.width is not valid synchronously when openMenu() runs.
+    property real menuRawX: 0
+    property real menuRawY: 0
+    // The key that dismissed the menu, swallowed until its real release: holding a letter down
+    // through a dismissal must not start a query with the repeats that follow.
+    property int menuDismissKey: 0
+
+    function monitorList() {
+        var out = [], ms = Hyprland.monitors ? Hyprland.monitors.values : []
+        for (var i = 0; i < ms.length; i++) if (ms[i] && ms[i].name) out.push({ name: ms[i].name })
+        return out
+    }
+    function menuContext() {
+        if (!menuTarget) return null
+        if (menuTarget.kind === "window")
+            return { win: _windowByAddress[menuTarget.address] || null, box: null, monitors: monitorList() }
+        return { win: null, box: boxForWs(menuTarget.id), monitors: monitorList() }
+    }
+    function refreshMenuItems() {
+        var ctx = menuContext()
+        menuItems = ctx ? Logic.menuItems(menuTarget, ctx) : []
+    }
+    // `p` is the press point in PANEL coordinates, recorded as-is — no geometry here. Clamping it
+    // against contextMenu.width/height at THIS point would read a stale value: that width comes
+    // from a Repeater of Text delegates, resolved in a later polish pass, not synchronously with
+    // the `items` write above. Read here it would still be the previous menu's settled width (150,
+    // the floor, on the very first open) — not this menu's real, possibly wider, size. The
+    // instantiation site clamps itself instead, as a binding against its own live width/height,
+    // so the position re-evaluates the moment that width actually settles.
+    function openMenu(tgt, p) {
+        if (dragTile !== null) return                  // a drag owns the pointer
+        menuTarget = tgt
+        menuIndex = -1
+        menuDismissKey = 0
+        refreshMenuItems()
+        if (!menuItems.length) { menuTarget = null; return }
+        menuOpen = true
+        menuRawX = p.x
+        menuRawY = p.y
+    }
+    function openWindowMenu(addr, p) { openMenu({ kind: "window", address: addr }, p) }
+    function openWorkspaceMenu(id, p) { openMenu({ kind: "workspace", id: id }, p) }
+    // `menuItems` is deliberately NOT cleared here. ContextMenu's width, height and rows all bind
+    // to it, so emptying it on dismiss would collapse the menu to a sliver and fade *that* out
+    // instead of fading the menu in place. `menuOpen` is what gates everything — the key branch,
+    // the catcher, the staleness recompute — so stale rows behind a closed menu are inert, and
+    // openMenu() replaces them before it shows anything.
+    function menuDismiss() {
+        if (!menuOpen) return
+        menuOpen = false; menuTarget = null; menuIndex = -1
+    }
+    function menuActivate(i) {
+        var list = menuItems, tgt = menuTarget
+        var id = (i >= 0 && i < list.length) ? String(list[i].id) : ""
+        menuDismiss()                                   // activation dismisses first, then acts
+        if (id) runMenuAction(id, tgt)
+    }
+    // Every key while the menu is open. Up/Down stay inside it; everything else leaves it, and
+    // the key that leaves owns its own auto-repeats until released.
+    function menuKey(e) {
+        if (e.key === Qt.Key_Up) { menuIndex = Logic.menuNavigate(menuItems.length, menuIndex, -1); return }
+        if (e.key === Qt.Key_Down) { menuIndex = Logic.menuNavigate(menuItems.length, menuIndex, 1); return }
+        menuDismissKey = e.key
+        if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) menuActivate(menuIndex)
+        else menuDismiss()
+    }
+    // Every menu id names a state to set. A window action first supersedes that address's
+    // optimistic display state, exactly as a new grab does — otherwise applyTiles would keep a
+    // just-dropped window's row (it skips updates AND removals while a move is pending) and the
+    // stale tile would outlive the action taken on it.
+    function runMenuAction(id, tgt) {
+        if (!tgt) return
+        if (tgt.kind === "window") {
+            var addr = tgt.address
+            if (id === "close") { closeWindow(addr, addr === cursorAddress); return }
+            supersedePending(addr)
+            if (id === "float" || id === "tile") {
+                Hyprland.dispatch(Logic.setFloatLua(addr, id === "float"))
+            } else if (id === "fullscreen" || id === "unfullscreen") {
+                var mode = id === "fullscreen" ? 2 : 0
+                pendingFullscreen[addr] = { mode: mode, deadline: Date.now() + 1800 }
+                // Only the EXIT direction hides anything optimistically: there is no badge to hide
+                // when entering, and the slot changes when fresh geometry lands.
+                setTileRoles(addr, { fsPending: mode === 0 })
+                Hyprland.dispatch(Logic.setFullscreenLua(addr, mode))
+            } else return
+            scheduleRebuild()
+            reconcileTimer.restart()
+            return
+        }
+        var wsId = tgt.id
+        if (id === "lock" || id === "unlock") { lockSet(wsId, id === "lock"); return }
+        if (id === "closeAll") { closeAllOn(wsId); return }
+        if (id.indexOf("move:") === 0) { moveWorkspace(wsId, id.slice(5)); return }
+        if (id.indexOf("swap:") === 0) { swapWorkspace(wsId, id.slice(5)); return }
+    }
+    // Hint tiers. Kept on the component (keepLoaded), so the preference survives a summon but
+    // not a shell restart; deliberately not written to config — it is a transient affordance.
+    property bool hintsExpanded: false
     // ---- Find -------------------------------------------------------------------------
     // Query edit: the best match for the *new* query is always the selection (a window that
     // won for "s" must not stay selected once "slack" ranks another first).
     function setQuery(q) {
+        if (q.length) setCursor("")      // find and the cursor are the same intent; never both
         if (!query.length && q.length) preQuerySelectedId = selectedId
         query = q
         if (!q.length) {
@@ -411,10 +732,6 @@ Item {
         selectedIndex = idx
         ensureSelectedVisible()
     }
-    function acceptMatch() {
-        var addr = selectedMatchAddress; if (!addr) return
-        Hyprland.dispatch('hl.dsp.focus({ window = "address:' + addr + '" })'); root.close()
-    }
     // open(): forget any query from the previous summon, without touching the selection
     // (open() resets that itself).
     function resetFind() {
@@ -429,7 +746,7 @@ Item {
         if (!win || !win.fullscreen) return
         pendingFullscreen[addr] = { mode: 0, deadline: Date.now() + 1800 }
         setTileRoles(addr, { fsPending: true })
-        Hyprland.dispatch(Logic.unfullscreenLua(addr))
+        Hyprland.dispatch(Logic.setFullscreenLua(addr, 0))
         scheduleRebuild()
         reconcileTimer.restart()
     }
@@ -643,7 +960,8 @@ Item {
                                 cls: clsFor(t.address), title: titleFor(t.address),
                                 wsid: t.workspaceId, floating: floatingFor(t.address),
                                 layer: t.layer, fullscreen: t.fullscreen, fsPending: false,
-                                matched: false, selectedMatch: false })
+                                matched: false, selectedMatch: false,
+                                cursor: t.address === root.cursorAddress, closing: false })
         }
         for (var u = 0; u < d.updates.length; u++) {
             var tu = d.updates[u]
@@ -682,6 +1000,10 @@ Item {
         var seen = {}
         for (var i = 0; i < boxes.length; i++) {
             var b = boxes[i]
+            // synthetic/active are not roles here: the menu reads them off root.boxes
+            // (Logic.layout()'s raw output via boxForWs()), not boxesModel, and active flips on
+            // every workspace switch — an unread role would make rowDiffers fire a model set()
+            // with no visible effect on every such switch, even off-screen.
             var row = { workspaceId: b.workspaceId, bx: b.x, by: b.y, bw: b.w, bh: b.h,
                         focused: !!b.focused, occupied: !!b.occupied,
                         armed: !!b.armed, placeholder: !!b.placeholder,
@@ -738,7 +1060,9 @@ Item {
         if (draggingAddress && !wmap[draggingAddress]) endDrag()
         reconcileMoves(input.windows)
         reconcileFullscreen(input.windows)
-        if (!Object.keys(pendingMoves).length && !Object.keys(pendingFullscreen).length) reconcileTimer.stop()
+        reconcileCloses()
+        if (!Object.keys(pendingMoves).length && !Object.keys(pendingFullscreen).length &&
+            !Object.keys(pendingCloses).length) reconcileTimer.stop()
         root._clsByAddress = cmap
         root._titleByAddress = tmap
         root._floatingByAddress = fmap
@@ -762,6 +1086,33 @@ Item {
             if (idx < 0) idx = 0
         }
         root.selectedIndex = idx
+        // The cursor survives only while its window is still on the selected workspace. No
+        // successor rule (unlike find): nothing was typed here that a successor would preserve.
+        if (cursorAddress) {
+            var cw = wmap[cursorAddress]
+            if (!cw || cw.workspaceId !== root.selectedId) cursorAddress = ""
+        }
+        applyCursorRole()
+        // An open menu follows fresh data: it dismisses when its target is gone (menuItems returns
+        // an empty list for a missing window or box) and relabels in place otherwise, keeping the
+        // highlight on the same item id — or, for a toggle row whose id itself is the thing that
+        // just changed (float <-> tile, lock <-> unlock, fullscreen <-> unfullscreen), on the same
+        // POSITION: an id search can never find "float" in a list that now says "tile" for the
+        // very same row, so falling back to the old index (clamped) is what keeps the highlight on
+        // the row the user was looking at instead of dropping it to "none".
+        if (menuOpen) {
+            var keepId = (menuIndex >= 0 && menuIndex < menuItems.length) ? String(menuItems[menuIndex].id) : ""
+            var keepIndex = menuIndex
+            refreshMenuItems()
+            if (!menuItems.length) menuDismiss()
+            else {
+                var ni = -1
+                for (var mi = 0; mi < menuItems.length; mi++)
+                    if (String(menuItems[mi].id) === keepId) { ni = mi; break }
+                if (ni < 0 && keepIndex >= 0 && keepIndex < menuItems.length) ni = keepIndex
+                menuIndex = ni
+            }
+        }
         rematchAfterRebuild()   // a query survives rebuilds; windows may have come or gone
     }
 
@@ -794,7 +1145,15 @@ Item {
         targetScreen = focusedScreen(); hideScratchpad(); selectedIndex = -1; opened = true
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
-        resetFind()
+        resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0
+        // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
+        // event) must hand the target to the keyboard until the pointer actually moves again —
+        // "most recent input device wins" means the device that summoned the overview, not
+        // wherever the mouse was left resting the last time it closed. Only the flag resets:
+        // pointerSceneX/Y are left alone, so if the real pointer has not moved at all since the
+        // last close, the next onPointChanged/notePointerMove sees the SAME position and does not
+        // spuriously flip liveness back on (see notePointerMove's early-return guard).
+        pointerLive = false
         _showVisuals(true)                         // before the first rebuild: layout motion is gated on it
         rebuild()          // instant paint from current data
         flick.contentX = 0; flick.contentY = 0   // fresh scroll every open (kept-loaded state would otherwise leak the last offset)
@@ -804,10 +1163,10 @@ Item {
     }
     function close() {
         if (!opened) return                        // a click on the scrim mid-fade is not a second close
-        endDrag()
+        endDrag(); menuDismiss()
         // settleTimer is open-only; reconcileTimer keeps running (bounded by the 1.8 s
-        // deadlines): it clears optimistic display state (pendingMoves / fsPending) so a
-        // re-summon inside that window shows authoritative geometry, and with keepLoaded the
+        // deadlines): it clears optimistic display state (pendingMoves / fsPending / pendingCloses)
+        // so a re-summon inside that window shows authoritative state, and with keepLoaded the
         // component is alive to do it. No compositor operation depends on it — each one is a
         // single atomic chunk (logic.js).
         settleTimer.stop()
@@ -1005,8 +1364,18 @@ Item {
             // for the other on the first keystroke never resizes the card by the few pixels
             // their implicitHeights happen to differ by. Zero only when both are absent.
             readonly property bool findActive: root.query.length > 0
-            readonly property real hintSpace:
-                (findActive || config.hint) ? Math.max(findBar.implicitHeight, hint.implicitHeight) + 8 : 0
+            readonly property real hintSpace: {
+                // The larger of what is actually shown: the hint tiers only when hints are
+                // enabled, the find bar only while a query is active. An invisible item keeps
+                // its implicitHeight in QML, so the tiers must be excluded by the config flag
+                // rather than by their own visibility — otherwise a leftover expanded second
+                // tier (hintsExpanded true from an earlier `?`) keeps inflating the budget after
+                // config.hint turns off, even though nothing on screen explains the extra space.
+                var hints = config.hint ? hintBox.implicitHeight : 0
+                var bar = findActive ? findBar.implicitHeight : 0
+                var h = Math.max(hints, bar)
+                return h > 0 ? h + 8 : 0
+            }
             // Cap the card to the screen so the Flickable viewport can be smaller than the
             // content (`availCanvasW` already keeps canvas width <= this, minus the degenerate
             // narrow-screen case, which is expected to 2-D scroll per the spec).
@@ -1015,7 +1384,7 @@ Item {
             // The hint row never widens past the screen (maxCardW still caps it), but it does
             // widen a narrow card: a layout with few/narrow workspaces must not clip the eight
             // key hints against the card edge.
-            implicitWidth: Math.min(Math.max(canvas.implicitWidth, config.hint ? hint.implicitWidth : 0) + pad * 2, maxCardW)
+            implicitWidth: Math.min(Math.max(canvas.implicitWidth, config.hint ? hintBox.implicitWidth : 0) + pad * 2, maxCardW)
             implicitHeight: Math.min(canvas.implicitHeight + pad * 2 + hintSpace, maxCardH)
             // Card resize (workspaces added/removed, columns change) glides; the Flickable
             // viewport follows card.width, the canvas content is already at its new size.
@@ -1031,29 +1400,39 @@ Item {
                 focus: true
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function (e) {
-                    var finding = root.query.length > 0
-                    var chord = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
                     e.accepted = true
-                    // Chords first: the only one with a meaning is Ctrl+Backspace (clear the
-                    // query). Every other Ctrl/Alt/Meta combination is reserved for future
-                    // actions and must reach no action below — a modified digit, Enter, Tab or
-                    // arrow does nothing.
+                    // Lone modifiers belong to no class (see Logic.isModifierKey).
+                    if (Logic.isModifierKey(e.key)) return
+                    // The menu owns every key while it is open — checked before `finding`, so a
+                    // letter dismisses instead of extending the query.
+                    if (root.menuOpen) { root.menuKey(e); return }
+                    // …and the key that dismissed it keeps swallowing its own repeats.
+                    if (root.menuDismissKey !== 0 && e.key === root.menuDismissKey) return
+
+                    var chord = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+                    var finding = root.query.length > 0
+                    // Action keys read pointer liveness; everything else is keyboard intent and
+                    // clears it BEFORE any resolve below can see it.
+                    if (!Logic.isActionKey(e.key, chord, Qt.ControlModifier)) root.pointerLive = false
+
                     if (chord) {
                         if (chord === Qt.ControlModifier && e.key === Qt.Key_Backspace && finding) root.setQuery("")
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_S) root.toggleScratchpad()
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_L) root.lockToggleSelected()
+                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_W && !e.isAutoRepeat) root.closeTarget()
                         return
                     }
-                    if (e.key === Qt.Key_Escape) { if (finding) root.setQuery(""); else root.close(); return }
+                    if (e.key === Qt.Key_Escape) {
+                        if (root.cursorAddress) root.setCursor("")
+                        else if (finding) root.setQuery("")
+                        else root.close()
+                        return
+                    }
                     if (e.key === Qt.Key_Backspace) {
                         if (finding) root.setQuery(root.query.slice(0, -1))
                         return
                     }
-                    if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
-                        if (finding) root.acceptMatch()
-                        else if (Logic.hasWs(root.selectedId)) root.jump(root.selectedId)
-                        return
-                    }
+                    if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { root.activateTarget(); return }
                     if (finding) {
                         if (e.key === Qt.Key_Tab) { root.cycleMatch(1); return }
                         if (e.key === Qt.Key_Backtab) { root.cycleMatch(-1); return }
@@ -1062,15 +1441,26 @@ Item {
                         if (e.key === Qt.Key_Up) { root.navigateMatch("up"); return }
                         if (e.key === Qt.Key_Down) { root.navigateMatch("down"); return }
                     } else {
-                        if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) { root.jump(e.key - Qt.Key_0); return }
-                        if (e.key === Qt.Key_0) { root.jump(10); return }
-                        if (e.key === Qt.Key_Left) { root.selectByNav("left"); return }
-                        if (e.key === Qt.Key_Right) { root.selectByNav("right"); return }
-                        if (e.key === Qt.Key_Up) { root.selectByNav("up"); return }
-                        if (e.key === Qt.Key_Down) { root.selectByNav("down"); return }
+                        if (e.key === Qt.Key_Tab) { root.cycleCursor(1); return }
+                        if (e.key === Qt.Key_Backtab) { root.cycleCursor(-1); return }
+                        if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) { root.setCursor(""); root.jump(e.key - Qt.Key_0); return }
+                        if (e.key === Qt.Key_0) { root.setCursor(""); root.jump(10); return }
+                        if (e.key === Qt.Key_Left) { root.setCursor(""); root.selectByNav("left"); return }
+                        if (e.key === Qt.Key_Right) { root.setCursor(""); root.selectByNav("right"); return }
+                        if (e.key === Qt.Key_Up) { root.setCursor(""); root.selectByNav("up"); return }
+                        if (e.key === Qt.Key_Down) { root.setCursor(""); root.selectByNav("down"); return }
                     }
+                    // `?` is the hint toggle only while there is no query to append to — the
+                    // same rule digits already follow — and only while hints are enabled at all;
+                    // otherwise it would flip a tier nobody can see.
+                    if (!finding && config.hint && e.text === "?") { root.hintsExpanded = !root.hintsExpanded; return }
                     var next = Logic.appendQueryText(root.query, e.text)
                     if (next !== root.query) root.setQuery(next)
+                }
+                Keys.onReleased: function (e) {
+                    e.accepted = true
+                    if (root.menuDismissKey !== 0 && e.key === root.menuDismissKey && !e.isAutoRepeat)
+                        root.menuDismissKey = 0
                 }
             }
 
@@ -1091,17 +1481,28 @@ Item {
                     if (root.dragTile) root.dragTile.x += contentX - previousX
                     previousX = contentX
                     root.updateDropTarget()
+                    root.menuDismiss()
                 }
                 onContentYChanged: {
                     if (root.dragTile) root.dragTile.y += contentY - previousY
                     previousY = contentY
                     root.updateDropTarget()
+                    root.menuDismiss()
                 }
 
                 // Content shrinking (windows/workspaces closing) must never leave the viewport
                 // scrolled past the new end.
                 onContentWidthChanged: flick.contentX = Math.max(0, Math.min(flick.contentX, flick.contentWidth - flick.width))
                 onContentHeightChanged: flick.contentY = Math.max(0, Math.min(flick.contentY, flick.contentHeight - flick.height))
+
+                // Pointer liveness. A HoverHandler, not a hoverEnabled MouseArea: handlers do not
+                // block one another (`blocking` defaults to false), so the tiles' own hover zoom
+                // and title label keep working underneath this one.
+                HoverHandler {
+                    id: pointerWatch
+                    onPointChanged: root.notePointerMove(point.scenePosition)
+                    onHoveredChanged: if (!hovered) root.pointerLive = false
+                }
 
                 Item {
                     id: canvas
@@ -1171,10 +1572,17 @@ Item {
                                 font.family: root.fontFamily
                                 font.pixelSize: Math.round(boxItem.height * 0.4)
                             }
-                            MouseArea {   // click empty area of a workspace => jump
+                            MouseArea {   // left click on empty well => jump; right press => menu
                                 anchors.fill: parent
                                 enabled: root.opened
-                                onClicked: root.jump(boxItem.model.workspaceId)
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: function (m) {
+                                    if (m.button === Qt.LeftButton) root.jump(boxItem.model.workspaceId)
+                                }
+                                onPressed: function (m) {
+                                    if (m.button === Qt.RightButton)
+                                        root.openWorkspaceMenu(boxItem.model.workspaceId, mapToItem(panel, m.x, m.y))
+                                }
                             }
                         }
                     }
@@ -1208,6 +1616,7 @@ Item {
 
                     // tiles layer (siblings, above boxes)
                     Repeater {
+                        id: tileRepeater
                         model: tilesModel
                         WindowTile {
                             required property var model
@@ -1229,12 +1638,15 @@ Item {
                             Behavior on targetY { enabled: root.layoutMotion && !windowTile.dragging
                                 NumberAnimation { duration: root.motion.normal; easing.type: root.motion.move } }
                             cls: model.cls
+                            readonly property string tileAddress: model.address
                             tileLayer: model.layer
                             fullscreen: model.fullscreen
                             fullscreenPending: model.fsPending
                             title: model.title
                             matched: model.matched
                             selectedMatch: model.selectedMatch
+                            cursorTarget: model.cursor
+                            closing: model.closing
                             dimmed: root.query.length > 0 && !model.matched && root.dropTargetAddress !== model.address
                             accent: root.accent
                             dragging: root.draggingAddress === model.address
@@ -1287,11 +1699,15 @@ Item {
                                 id: dragArea
                                 anchors.fill: parent
                                 enabled: root.opened
-                                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                                acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                                 preventStealing: true
                                 drag.target: undefined
                                 property bool moved: false
                                 onPressed: function (m) {
+                                    if (m.button === Qt.RightButton) {
+                                        root.openWindowMenu(model.address, mapToItem(panel, m.x, m.y))
+                                        return
+                                    }
                                     if (m.button !== Qt.LeftButton) return
                                     // A second grab supersedes that address's pending visual state.
                                     delete root.pendingMoves[model.address]
@@ -1319,9 +1735,15 @@ Item {
                                 onCanceled: if (root.dragTile === windowTile) root.endDrag()
                                 onReleased: function (m) {
                                     if (m.button === Qt.MiddleButton) {
-                                        Hyprland.dispatch('hl.dsp.window.close({ window = "address:' + model.address + '" })')
+                                        if (root.dragTile === null)   // a drag owns the pointer; actions wait
+                                            root.closeWindow(model.address, model.address === root.cursorAddress)
                                         return
                                     }
+                                    // Only the LEFT button ever drops or counts as a click. Before
+                                    // the right button was accepted here, every non-middle release
+                                    // was treated as a possible drop — a right click during a left
+                                    // drag would have moved the window.
+                                    if (m.button !== Qt.LeftButton) return
                                     if (root.dragTile !== windowTile) return
                                     var addr = model.address, wasMoved = moved
                                     // Capture before rebinding. Never dispatch for a drop outside a box.
@@ -1332,16 +1754,7 @@ Item {
                                     if (wasMoved && Logic.hasWs(targetWs))
                                         root.submitDrop(addr, targetWs, dropX, dropY, ptr.x, ptr.y)
                                     root.endDrag()
-                                    if (!wasMoved) {
-                                        // A tile in the scratchpad row: focus alone raises the special
-                                        // workspace but leaves the window under whichever floating
-                                        // sibling was last on top (see Logic.scratchpadFocusLua).
-                                        if (model.wsid === Logic.SCRATCHPAD_ID)
-                                            Hyprland.dispatch(Logic.scratchpadFocusLua(addr))
-                                        else
-                                            Hyprland.dispatch('hl.dsp.focus({ window = "address:' + addr + '" })')
-                                        root.close()
-                                    }
+                                    if (!wasMoved) { root.focusWindow(addr) }
                                 }
                             }
                         }
@@ -1375,6 +1788,18 @@ Item {
                                 font.family: root.fontFamily
                                 font.pixelSize: root.labelSize
                                 font.weight: Font.DemiBold
+                            }
+                            // Right button only, so a left click still falls through to the tile
+                            // or well beneath. A well filled by one tiled window leaves only the
+                            // 3 px inset of bare well, which makes this the reliable target for
+                            // the workspace menu.
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: root.opened
+                                acceptedButtons: Qt.RightButton
+                                onPressed: function (m) {
+                                    root.openWorkspaceMenu(badge.model.workspaceId, mapToItem(panel, m.x, m.y))
+                                }
                             }
                         }
                     }
@@ -1436,39 +1861,39 @@ Item {
                 }
             }
 
-            // key hints: each binding as a small key cap plus a label; off via config.hint
-            Row {
-                id: hint
+            // key hints: two tiers. The primary row is what a new user needs; `?` reveals the
+            // advanced keys, which would otherwise crowd it past the card width on a laptop.
+            Column {
+                id: hintBox
                 visible: config.hint && !card.findActive
                 anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 8 }
-                spacing: Math.round(Style.space(12))
-                Repeater {
-                    id: hintKeys
-                    model: [ { k: "1–0", l: "jump" }, { k: "↑ ↓ ← →", l: "move" }, { k: "↵", l: "select" },
-                             { k: "drag", l: "move window" }, { k: "type", l: "find" },
-                             { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" }, { k: "esc", l: "close" } ]
-                    Row {
-                        required property var modelData
-                        spacing: 5
-                        Rectangle {
-                            radius: 4
-                            color: root.wellColor
-                            height: capText.implicitHeight + 4
-                            width: capText.implicitWidth + 10
-                            Text {
-                                id: capText; anchors.centerIn: parent
-                                text: modelData.k
-                                color: root.foreground; opacity: 0.75
-                                font.family: root.fontFamily; font.pixelSize: root.captionSize
-                                font.weight: Font.DemiBold
-                            }
-                        }
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: modelData.l
-                            color: root.foreground; opacity: 0.45
-                            font.family: root.fontFamily; font.pixelSize: root.captionSize
-                        }
+                spacing: 4
+                Row {
+                    id: hint
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: Math.round(Style.space(12))
+                    Repeater {
+                        id: hintKeys
+                        model: [ { k: "1–0", l: "jump" }, { k: "↑ ↓ ← →", l: "move" }, { k: "↵", l: "select" },
+                                 { k: "drag", l: "move window" }, { k: "type", l: "find" },
+                                 { k: "esc", l: "close" },
+                                 { k: "?", l: root.hintsExpanded ? "less" : "more" } ]
+                        HintCap { foreground: root.foreground; fill: root.wellColor
+                                  fontFamily: root.fontFamily; fontSize: root.captionSize }
+                    }
+                }
+                Row {
+                    id: hint2
+                    visible: root.hintsExpanded
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: Math.round(Style.space(12))
+                    Repeater {
+                        id: hintKeys2
+                        model: [ { k: "tab", l: "window" }, { k: "ctrl+w / mid-click", l: "close" },
+                                 { k: "right-click", l: "menu" },
+                                 { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" } ]
+                        HintCap { foreground: root.foreground; fill: root.wellColor
+                                  fontFamily: root.fontFamily; fontSize: root.captionSize }
                     }
                 }
             }
@@ -1484,6 +1909,51 @@ Item {
                 index: root.matchIndex
                 fg: root.foreground; accent: root.accent
                 fontFamily: root.fontFamily; fontSize: root.captionSize
+            }
+        }
+        // Swallows any press that is not on the menu itself. Panel-sized and above the card, so a
+        // press on the scrim cannot both dismiss the menu and close the overview — one press, one
+        // effect. A press on ANOTHER monitor still closes the overview (its own catcher), which is
+        // the user asking to leave; the menu goes with it.
+        MouseArea {
+            id: menuCatcher
+            anchors.fill: parent
+            z: 100
+            visible: root.menuOpen
+            enabled: root.menuOpen
+            acceptedButtons: Qt.AllButtons
+            onPressed: root.menuDismiss()
+        }
+        ContextMenu {
+            id: contextMenu
+            z: 101
+            // `open`, not `visible`: the component owns its own fade and drops its input region
+            // once it reaches zero opacity (see ContextMenu.qml).
+            open: root.menuOpen && root.menuItems.length > 0
+            // Clamped here, as a binding against this item's OWN width/height, rather than as a
+            // one-shot snapshot in openMenu(): width in particular comes from a Repeater of Text
+            // delegates and is not known synchronously when the press happens, only once the
+            // polish pass measures it — so the clamp must re-run when that settles, not once
+            // upfront against a stale (often still-150-floor) value. This is what keeps the menu
+            // fully on screen even when a row (e.g. "Move to <long monitor name>") widens it well
+            // past the floor.
+            x: Math.max(4, Math.min(root.menuRawX, panel.width - width - 4))
+            y: Math.max(4, Math.min(root.menuRawY, panel.height - height - 4))
+            items: root.menuItems
+            index: root.menuIndex
+            background: root.background
+            foreground: root.foreground
+            selBackground: root.selBackground
+            selText: root.selText
+            fontFamily: root.fontFamily
+            fontSize: root.labelSize
+            cornerRadius: root.boxRadius
+            motion: root.motion
+            onHoverRow: function (row) { root.menuIndex = row }
+            onActivated: function (id) {
+                var tgt = root.menuTarget
+                root.menuDismiss()
+                root.runMenuAction(id, tgt)
             }
         }
     }

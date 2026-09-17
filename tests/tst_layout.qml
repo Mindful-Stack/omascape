@@ -827,6 +827,8 @@ TestCase {
         var s = boxById(r, Logic.SCRATCHPAD_ID)
         verify(s !== null, "one box for the scratchpad")
         compare(s.special, "scratchpad")
+        compare(s.synthetic, false, "the scratchpad is never a pad slot")
+        compare(s.active, false, "the scratchpad is never a monitor's activeWorkspace")
         compare(s.w, r.cell.w); compare(s.h, boxById(r, 1).h, "same monitor, same cell height")
         fuzzyCompare(s.x + s.w / 2, r.canvasSize.w / 2, 1, "centred in the row")
         compare(r.groups[1].w, r.canvasSize.w, "the row spans the canvas")
@@ -1087,5 +1089,29 @@ TestCase {
         compare(Logic.lockFrameSurfaceSize(6, 1.333333), 9, "same for a rounded 4/3")
         compare(Logic.lockFrameSurfaceSize(6, NaN), 7, "a nonsense scale degrades to thickness + 1")
         compare(Logic.lockFrameSurfaceSize(6, 0), 7, "and so does a zero scale, which would divide the world by zero")
+    }
+
+    // Distinguishes: layout() dropping the flags menuItems needs. A padded (never-created)
+    // workspace must arrive on its box as synthetic, and the monitor's active workspace as
+    // active — a fixture that builds box records by hand could never catch this.
+    function test_boxes_carry_synthetic_and_active() {
+        var mon = { name: "M", x: 0, y: 0, width: 1920, height: 1080, scale: 1, reserved: [0, 0, 0, 0] }
+        var wss = Logic.padWorkspaces(
+            [{ id: 1, monitorName: "M", focused: true, occupied: true, active: true },
+             { id: 2, monitorName: "M", focused: false, occupied: false, active: false }], 3, "M")
+        var res = Logic.layout({ monitors: [mon], workspaces: wss, windows: [],
+                                 focusedMonitorName: "M", availW: 1600,
+                                 params: { maxCols: 5, minCellW: 140, maxCellW: 380, cellInset: 3,
+                                           cellSpacing: 4, rowSpacing: 8, headerH: 22, groupInset: 6,
+                                           minTileW: 8, minTileH: 6, slotGapTolerance: 24 } })
+        function box(id) {
+            for (var i = 0; i < res.boxes.length; i++) if (res.boxes[i].workspaceId === id) return res.boxes[i]
+            fail("no box for workspace " + id)
+        }
+        compare(box(1).synthetic, false, "a real workspace is not synthetic")
+        compare(box(1).active, true, "workspace 1 is the monitor's active one")
+        compare(box(2).active, false)
+        compare(box(3).synthetic, true, "workspace 3 exists only as a pad slot")
+        compare(box(3).active, false, "a workspace Hyprland never created cannot be active")
     }
 }

@@ -136,10 +136,11 @@ TestCase {
         verify(view.compositor.commands[0].indexOf('workspace = "2"') >= 0)
         compare(view.opened, false)
     }
-    // Distinguishes: labels for the scratchpad rendering "-2".
+    // Distinguishes: labels for the scratchpad rendering "-2". ctrl+s lives in the second tier
+    // (testHintModel2) — the advanced keys `?` reveals — not the primary row.
     function test_labels_and_hint() {
         compare(view.wsLabel(-2), "S"); compare(view.wsLabel(10), "0"); compare(view.wsLabel(3), "3")
-        var hints = view.testHintModel, found = false
+        var hints = view.testHintModel2, found = false
         for (var i = 0; i < hints.length; i++) if (hints[i].k === "ctrl+s") found = true
         verify(found, "hint row advertises ctrl+s")
     }

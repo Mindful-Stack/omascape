@@ -167,6 +167,72 @@ case("un-fullscreen toggles only when the window is fullscreen", function()
   seq(hl2, { "cursor.move" })
 end)
 
+-- SET_FLOAT_ON / SET_FLOAT_OFF: 0xabc (tiled, ws 1) — see lua-check.sh
+case("set float on: floats the window and restores focus and cursor", function()
+  local hl = Mock.new({ windows = tiledWindows(), active_window = { address = "0xdef" } })
+  run("SET_FLOAT_ON", hl)
+  eq(hl.__windows["0xabc"].floating, true, "ends floating")
+  -- The mock moved focus onto the floated window, so a chunk that restores must dispatch focus
+  -- back to 0xdef. A chunk that skips the restore shows up here as a missing "focus".
+  seq(hl, { "window.float", "focus", "cursor.move" })
+  -- The end state and the call count are the same for an explicit "on" and a naive toggle from
+  -- this start state, so only reading the dispatched ARGUMENT distinguishes them.
+  eq(hl.__log[1].args.action, "on", "the dispatch names the state, not a toggle")
+  eq(hl.__active_window.address, "0xdef", "focus is back where it was")
+  eq(hl.__cursor.x, 5); eq(hl.__cursor.y, 6)
+end)
+case("set float on: already floating dispatches nothing", function()
+  local w = tiledWindows(); w["0xabc"].floating = true
+  local hl = Mock.new({ windows = w })
+  run("SET_FLOAT_ON", hl)
+  seq(hl, { "cursor.move" })          -- the cursor restore always runs; the float must not
+  eq(hl.__windows["0xabc"].floating, true)
+end)
+case("set float off: tiles a floating window", function()
+  local w = tiledWindows(); w["0xabc"].floating = true
+  local hl = Mock.new({ windows = w })
+  run("SET_FLOAT_OFF", hl)
+  eq(hl.__windows["0xabc"].floating, false)
+  eq(hl.__seen["window.float"], 1)
+  -- Distinguishes explicit "off" from a naive toggle: starting floating, both a real "off" and a
+  -- toggle land on `floating == false` and one dispatch, so only the argument tells them apart.
+  eq(hl.__log[1].args.action, "off", "the dispatch names the state, not a toggle")
+end)
+case("set float: a failing dispatcher is reported once", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  hl.__fail_on = "window.float"
+  run("SET_FLOAT_ON", hl)
+  eq(#hl.__notifications, 1, "one notification")
+  eq(hl.__notifications[1].text:match("^omascape: float failed") ~= nil, true, hl.__notifications[1].text)
+  -- restoreFocusLua runs OUTSIDE the inner pcall (see setFloatLua's comment), so the cursor
+  -- restore must still be the last thing dispatched even though the float itself threw.
+  eq(Mock.names(hl)[#hl.__log], "cursor.move", "cursor restore still runs after the float dispatch fails")
+end)
+case("set float: a window that is gone is reported, not silently skipped", function()
+  local hl = Mock.new({ windows = {} })
+  run("SET_FLOAT_ON", hl)
+  eq(#hl.__notifications, 1)
+end)
+
+case("set fullscreen 2: enters fullscreen on a tiled window", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  run("SET_FULLSCREEN_2", hl)
+  eq(hl.__windows["0xabc"].fullscreen, 2)
+  seq(hl, { "window.fullscreen", "cursor.move" })
+end)
+case("set fullscreen 2: already fullscreen dispatches nothing", function()
+  local w = tiledWindows(); w["0xabc"].fullscreen = 2
+  local hl = Mock.new({ windows = w })
+  run("SET_FULLSCREEN_2", hl)
+  seq(hl, { "cursor.move" })
+end)
+case("set fullscreen 0: leaves a maximized window unfullscreened", function()
+  local w = tiledWindows(); w["0xabc"].fullscreen = 1
+  local hl = Mock.new({ windows = w })
+  run("SET_FULLSCREEN_0", hl)
+  eq(hl.__windows["0xabc"].fullscreen, 0)
+end)
+
 case("scratchpad show: toggles when no special workspace is up", function()
   local hl = Mock.new({})
   run("SCRATCHPAD_SHOW", hl)
@@ -227,6 +293,141 @@ case("scratchpad focus: focus throws → one notification, the raise never runs"
   eq(#hl.__notifications, 1, "one notification")
   assert(hl.__notifications[1].text:find("focus scratchpad window failed", 1, true))
   eq(hl.__seen["window.alter_zorder"], nil, "the raise never ran")
+end)
+
+-- CLOSE_ALL: workspace 3 (see lua-check.sh). The mock's workspace carries get_windows().
+local function wsWithWindows(hl, id, addrs)
+  hl.__workspaces[tostring(id)] = { fullscreen_window = nil, fullscreen_mode = 0,
+    get_windows = function() local t = {}
+      for i, a in ipairs(addrs) do t[i] = hl.__windows[a] end
+      return t end }
+end
+
+case("close all: closes every window the workspace lists", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  -- 0xdef is on ws 3; 0xabc is added to the workspace's own list even though it is not, standing
+  -- in for a window the overview never laid out (a null tile rect) — the chunk must close it too,
+  -- which is the whole reason the list is read in Lua rather than passed in.
+  wsWithWindows(hl, 3, { "0xdef", "0xabc" })
+  run("CLOSE_ALL", hl)
+  eq(#hl.__closed, 2, "both closed")
+  eq(hl.__windows["0xdef"], nil); eq(hl.__windows["0xabc"], nil)
+  eq(#hl.__notifications, 0, "nothing reported")
+end)
+case("close all: one refused close still lets the others run, reported once", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  wsWithWindows(hl, 3, { "0xdef", "0xabc" })
+  hl.__fail_on = "window.close"; hl.__fail_nth = 1
+  run("CLOSE_ALL", hl)
+  eq(#hl.__closed, 1, "the second close still ran")
+  eq(#hl.__notifications, 1, "one report, not one per failure")
+end)
+case("close all: an empty workspace closes nothing and reports nothing", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  wsWithWindows(hl, 3, {})
+  run("CLOSE_ALL", hl)
+  seq(hl, {}); eq(#hl.__notifications, 0)
+end)
+-- Distinguishes: a workspace destroyed between the menu being drawn and the row being activated.
+-- No case above ever registers ws 3 without wsWithWindows — the mock's own default fallback
+-- (get_workspace's `or { fullscreen_window = nil, fullscreen_mode = 0 }`, no get_windows field)
+-- is what the "not w or not w.get_windows" guard exists to catch. Pins that the guard's error
+-- stays INSIDE the outer pcall (so it is reported, once, rather than propagating as a raw Lua
+-- error) and that nothing is closed.
+case("close all: a workspace that no longer resolves closes nothing, reported once", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  run("CLOSE_ALL", hl)
+  seq(hl, {}); eq(#hl.__closed, 0, "nothing closed")
+  eq(#hl.__notifications, 1, "reported once")
+  assert(hl.__notifications[1].text:find("close all failed", 1, true))
+end)
+-- CLOSE_ALL_SCRATCH: the scratchpad selector (see lua-check.sh). Every other scratchpad-capable
+-- chunk in this file has a companion case using "special:scratchpad"; this pins our own intent —
+-- hl.get_workspace() is asked with exactly that selector string — but does NOT establish that the
+-- real compositor accepts a special-workspace NAME there rather than a numeric id: only the
+-- numeric form has ever been probed live (see the task report's open item).
+case("close all on the scratchpad selector closes every window it lists", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  wsWithWindows(hl, "special:scratchpad", { "0xabc" })
+  run("CLOSE_ALL_SCRATCH", hl)
+  eq(#hl.__closed, 1); eq(hl.__windows["0xabc"], nil)
+  eq(#hl.__notifications, 0)
+end)
+
+-- WS_MOVE: workspace 3 → "HDMI-A-1" (see lua-check.sh)
+case("workspace move: one move, cursor restored, focus left alone", function()
+  local hl = Mock.new({ windows = tiledWindows(), active_window = { address = "0xdef" } })
+  hl.__cursor = { x = 11, y = 22 }
+  run("WS_MOVE", hl)
+  eq(#hl.__moved, 1); eq(hl.__moved[1].workspace, "3"); eq(hl.__moved[1].monitor, "HDMI-A-1")
+  -- The compositor warps the cursor to the destination when the moved workspace was active on the
+  -- focused monitor, so the chunk warps it back. Focus is deliberately NOT restored: re-focusing
+  -- the previous window would drag monitor focus back to the workspace just moved away.
+  seq(hl, { "workspace.move", "cursor.move" })
+  eq(hl.__cursor.x, 11); eq(hl.__cursor.y, 22)
+end)
+case("workspace move: a refused move is reported", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  hl.__fail_on = "workspace.move"
+  run("WS_MOVE", hl)
+  eq(#hl.__notifications, 1)
+  eq(hl.__notifications[1].text:match("move workspace failed") ~= nil, true, hl.__notifications[1].text)
+end)
+
+-- WS_SWAP: workspace 1, from "eDP-1" to "HDMI-A-1" (see lua-check.sh)
+case("workspace swap: swaps when the workspace is still active on its monitor", function()
+  local hl = Mock.new({ windows = tiledWindows(), active_by_monitor = { ["eDP-1"] = { id = 1 } } })
+  hl.__cursor = { x = 11, y = 22 }
+  run("WS_SWAP", hl)
+  eq(#hl.__swapped, 1)
+  eq(hl.__swapped[1].monitor1, "eDP-1"); eq(hl.__swapped[1].monitor2, "HDMI-A-1")
+  seq(hl, { "workspace.swap_monitors", "cursor.move" })
+  eq(hl.__cursor.x, 11)
+end)
+-- THE case this guard exists for: swap_monitors acts on whatever is active on eDP-1 AT DISPATCH
+-- TIME. If that monitor switched workspaces since the menu was drawn, swapping would move a
+-- workspace the user never chose. The chunk must refuse, dispatch nothing, and say why.
+case("workspace swap: refuses when the monitor has switched workspaces", function()
+  local hl = Mock.new({ windows = tiledWindows(), active_by_monitor = { ["eDP-1"] = { id = 4 } } })
+  run("WS_SWAP", hl)
+  eq(#hl.__swapped, 0, "nothing dispatched")
+  eq(#hl.__notifications, 1)
+  eq(hl.__notifications[1].text:match("no longer active") ~= nil, true, hl.__notifications[1].text)
+end)
+case("workspace swap: refuses when the monitor reports no active workspace", function()
+  local hl = Mock.new({ windows = tiledWindows(), active_by_monitor = {} })
+  run("WS_SWAP", hl)
+  eq(#hl.__swapped, 0); eq(#hl.__notifications, 1)
+end)
+-- The identity guard passes here (workspace 1 IS still active on eDP-1) so this reaches the
+-- dispatch line itself: a compositor-refused swap_monitors must still be reported, and the
+-- cursor restore (outside the inner pcall, on purpose) must still run even though the dispatch
+-- failed. Mirrors "workspace move: a refused move is reported", plus the restore assertion that
+-- case lacks. If the guarded `run(...)` around the dispatch were ever swapped for a bare
+-- `hl.dispatch(...)`, this is the only case that would notice.
+case("workspace swap: a refused swap is reported and the cursor is still restored", function()
+  local hl = Mock.new({ windows = tiledWindows(), active_by_monitor = { ["eDP-1"] = { id = 1 } } })
+  hl.__fail_on = "workspace.swap_monitors"
+  hl.__cursor = { x = 11, y = 22 }
+  run("WS_SWAP", hl)
+  eq(#hl.__swapped, 0, "the failed dispatch never recorded a swap")
+  eq(#hl.__notifications, 1)
+  eq(hl.__notifications[1].text:match("swap workspaces failed") ~= nil, true, hl.__notifications[1].text)
+  seq(hl, { "workspace.swap_monitors", "cursor.move" })
+  eq(hl.__cursor.x, 11); eq(hl.__cursor.y, 22)
+end)
+-- WS_SWAP_3: workspace 3, from "eDP-1" to "HDMI-A-1" (see lua-check.sh). Every prior case built
+-- and checked workspace 1, so a guard that hardcoded its comparison against the literal "1"
+-- instead of the interpolated wsId would have passed all of them undetected — the dispatch
+-- payload itself carries no workspace id (unlike WS_MOVE's), so only the identity check inside
+-- the chunk ever mentions it. eDP-1 is showing workspace 1 here while this chunk was built for
+-- workspace 3: a correctly-parameterised guard refuses, a guard hardcoded to "1" would not.
+case("workspace swap: refuses a chunk built for a different workspace than what is active", function()
+  local hl = Mock.new({ windows = tiledWindows(), active_by_monitor = { ["eDP-1"] = { id = 1 } } })
+  run("WS_SWAP_3", hl)
+  eq(#hl.__swapped, 0, "nothing dispatched")
+  eq(#hl.__notifications, 1)
+  eq(hl.__notifications[1].text:match("no longer active") ~= nil, true, hl.__notifications[1].text)
 end)
 
 -- The observer's grace period (logic.js `LOCK_SHARE_GRACE_MS`), shipped through the same
