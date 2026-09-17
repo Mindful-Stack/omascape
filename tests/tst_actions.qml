@@ -125,6 +125,21 @@ TestCase {
         compare(Logic.cycleWindows(rows, 1, "a", -5, null), "b")  // Backward wrap with large step
     }
 
+    // Distinguishes: a focus-steal event dropped from the set, which would leave the picker deaf
+    // after that action (the Ctrl+W and SUPER+n reports both came from exactly this). And the one
+    // event that must NOT be in the set: focusing the layer can itself emit an activewindow change,
+    // so regrabbing on it would chase its own tail.
+    function test_focusStealingEvent_covers_every_compositor_refocus() {
+        verify(Logic.focusStealingEvent("closewindow"))
+        verify(Logic.focusStealingEvent("workspacev2"))
+        verify(Logic.focusStealingEvent("activespecialv2"))
+        verify(Logic.focusStealingEvent("focusedmonv2"))
+        verify(!Logic.focusStealingEvent("activewindowv2"), "would regrab in response to its own regrab")
+        verify(!Logic.focusStealingEvent("openwindow"))
+        verify(!Logic.focusStealingEvent("windowtitlev2"))
+        verify(!Logic.focusStealingEvent(""))
+    }
+
     // Distinguishes: a menu highlight that does not wrap, or that starts anywhere but the ends.
     function test_menuNavigate() {
         compare(Logic.menuNavigate(3, -1, 1), 0)

@@ -212,6 +212,43 @@ TestCase {
         return out
     }
 
+    // Distinguishes: the overview silently losing keyboard focus after a close. Hyprland refocuses
+    // a window when the closed one was focused, and focusing a window takes keys off this on-demand
+    // layer — so a repeated Ctrl+W would start landing in the window Hyprland picked. The cursor
+    // warp is what re-grants focus; without this wiring nothing is dispatched and the overview goes
+    // deaf. Mutation check: delete the closewindow branch in onRawEvent and this goes red.
+    function test_a_window_closing_regrabs_keyboard_focus() {
+        view.compositor.commands = []
+        view.compositor.rawEvent({ name: "closewindow", data: "556cc931f180" })
+        wait(30)
+        var warps = 0
+        for (var i = 0; i < view.compositor.commands.length; i++)
+            if (view.compositor.commands[i].indexOf("cursor.move") >= 0) warps++
+        compare(warps, 1, "exactly one cursor warp, to re-grant focus")
+    }
+    // Distinguishes: the picker going deaf after SUPER+n. A workspace switch focuses that
+    // workspace's last window, which takes keys off the on-demand layer exactly as a close does —
+    // the user reported this separately from the Ctrl+W case, and one shared rule fixes both.
+    function test_a_workspace_switch_regrabs_keyboard_focus() {
+        view.compositor.commands = []
+        view.compositor.rawEvent({ name: "workspacev2", data: "3,3" })
+        wait(30)
+        var warps = 0
+        for (var i = 0; i < view.compositor.commands.length; i++)
+            if (view.compositor.commands[i].indexOf("cursor.move") >= 0) warps++
+        compare(warps, 1, "exactly one cursor warp, to re-grant focus")
+    }
+
+    // Distinguishes: warping the cursor on every window close on the desktop, not just while the
+    // picker is up. Closed, the overview holds no keyboard focus and has nothing to re-grab.
+    function test_a_window_closing_while_closed_regrabs_nothing() {
+        view.close()
+        view.compositor.commands = []
+        view.compositor.rawEvent({ name: "closewindow", data: "556cc931f180" })
+        wait(30)
+        compare(view.compositor.commands.length, 0)
+    }
+
     // Distinguishes: a cursor that follows model order rather than reading order. 0xA is the
     // left-hand window; a model-order implementation would also answer 0xA here, so the second
     // Tab is what discriminates — it must reach 0xB, the window to its right.

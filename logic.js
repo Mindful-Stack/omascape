@@ -616,6 +616,50 @@ function setFullscreenLua(addr, mode) {
 // menu and the existing chunk test all refer to it.
 function unfullscreenLua(addr) { return setFullscreenLua(addr, 0) }
 
+// Raw Hyprland events after which the compositor may have moved keyboard focus to a WINDOW,
+// which silently takes it away from this overlay's on-demand layer surface while the picker is
+// still up. Each one is a place Hyprland calls fullWindowFocus/refocus:
+//   closewindow      — the closed window was the focused one (Window.cpp, "refocus on a new window
+//                      if needed"; it logs "ignoring a refocus" otherwise, hence the intermittency)
+//   workspacev2      — a workspace switch focuses that workspace's last window
+//                      (WorkspacePlacementController.cpp)
+//   activespecialv2  — opening a special workspace focuses a window on it
+//   focusedmonv2     — monitor focus moved, taking window focus with it
+// The overlay held focus unconditionally until it became OnDemand (so the other-monitor catcher
+// could receive presses); an exclusive layer could not lose it this way. The answer is not to go
+// back — it is to re-grab (see regrabFocusLua), which the warp does without disturbing pointer
+// routing. Deliberately NOT activewindowv2: focusing the layer can itself emit an activewindow
+// change, and regrabbing on that would chase its own tail.
+function focusStealingEvent(name) {
+    return name === "closewindow" || name === "workspacev2" ||
+           name === "activespecialv2" || name === "focusedmonv2"
+}
+
+// One atomic chunk that re-grants keyboard focus to this overlay's layer surface, by warping the
+// cursor to where it already is.
+//
+// Why this is needed at all: when a window really closes, Hyprland refocuses another one if the
+// closed window was the focused one (Window.cpp, "refocus on a new window if needed" — it logs
+// "ignoring a refocus" otherwise, which is why the symptom is intermittent). Focusing a *window*
+// takes keyboard focus away from an on-demand layer surface, which is what this overlay is, so the
+// overview silently stops receiving keys — mid-Ctrl+W, the next keystroke lands in the window
+// Hyprland just picked.
+//
+// Why a warp fixes it: mouseMoveUnified re-grants keyboard focus to the layer under the pointer
+// whenever its interactivity is not `none` (InputManager.cpp). Warping to the SAME position is
+// deliberate and sufficient — Actions::moveCursor calls warpTo(pos, true), and Hyprland's own
+// simulateMouseMovement has to offset by a pixel specifically to AVOID counting as a refocus, so an
+// unoffset warp does count. Every other action chunk already ends with a cursor restore and so
+// never lost focus; close was the only one that did not, and the only one that did.
+function regrabFocusLua() {
+    return (
+        'function()\n' +
+        '  local cur = hl.get_cursor_pos()\n' +
+        '  ' + restoreCursorLua('cur') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}
+
 // One atomic chunk that closes every window on workspace `wsId`. The list is read INSIDE the
 // compositor (HL.Workspace:get_windows() — a one-based table of HL.Window, verified in
 // LuaWorkspace.cpp and by tests/integration/actions-probe.sh), not passed in, so windows the

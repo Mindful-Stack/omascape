@@ -239,6 +239,48 @@ an unread role would fire `boxesModel.set()` for rows whose visible fields did n
 monitor the user is not even looking at. (Contrast the `special` role, which is also unread today
 but never changes, so carrying it costs nothing.)
 
+✎ **A window's menu also carries its workspace's actions, below a separator** (added 2026-09-17,
+after live use). Right-clicking the workspace number badge is a ~16 px target and is fiddly on a
+trackpad, which is the whole reason the badge opener exists. Rather than enlarge it, a window's menu
+now offers the workspace actions too, so any window is a route to its own workspace:
+
+| row | group |
+|-----|-------|
+| Close | the window, and what it contains |
+| Close all windows | ″ |
+| Float / Tile | ″ |
+| Fullscreen / Exit fullscreen | ″ |
+| *(separator)* | |
+| Lock / Unlock | the workspace as a container |
+| Move to ‹monitor› | ″ |
+| Swap with ‹monitor› | ″ |
+
+**Close all sits with Close, not below the line.** The grouping is by verb — both close things —
+rather than by scope, which is why it is the one workspace action above the separator. That puts a
+workspace-destroying item one row under a window-closing one, on the same menu, reached by the
+pointer that was already imprecise enough to motivate this change. The mitigation is a
+**confirmation** (below), chosen over hiding the item, because splitting the same menu's contents by
+where the user happened to click is its own kind of surprise.
+
+The workspace rows act on **the window's own workspace**, which is not necessarily the selected one
+— `ctx` therefore carries that box for a window target, where it used to be null.
+
+**The separator is a border, not a row.** It is not hoverable, not activatable, and the keyboard
+skips over it: `Logic.menuNavigate` takes the item list rather than a count so it can step past one,
+and activating it does nothing. Two consequences worth stating, because both are easy to miss: the
+menu's highlight-preservation fallback matches by *position* when an id changes, so a separator must
+be counted consistently or the highlight drifts by a row when a toggle flips; and a separator must
+never be the highlight's landing place when wrapping from either end.
+
+✎ **Close all asks first** (added 2026-09-17), which reverses this spec's own "Out" line on
+confirmation dialogs. That exclusion was reasoning about *unsaved work* — applications prompt for
+that themselves, and they still do. This is a different risk: one mis-aimed pick closing every
+window on a workspace, irreversibly, with no per-application prompt for anything already saved. The
+shell's own `Ui/ConfirmDialog` is used rather than a new one: it is themed with everything else and
+its `handleKey(event)` is built to be driven by a parent, which is exactly this component's
+single-key-catcher architecture. It gates Close all from **every** entry point — window menu, well,
+badge — so the guarantee does not depend on which one the user reached it through.
+
 **While open** (`menuOpen`, a key-catcher branch checked *before* `finding`):
 
 | input                     | effect                                                       |

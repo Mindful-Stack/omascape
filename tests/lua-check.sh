@@ -44,6 +44,7 @@ TestCase {
         console.log("CHUNK SCRATCHPAD_SHOW " + Logic.scratchpadShowLua())
         console.log("CHUNK SCRATCHPAD_FOCUS " + Logic.scratchpadFocusLua("0xabc"))
         console.log("CHUNK CLOSE_ALL " + Logic.closeAllLua(3))
+        console.log("CHUNK REGRAB_FOCUS " + Logic.regrabFocusLua())
         console.log("CHUNK CLOSE_ALL_SCRATCH " + Logic.closeAllLua(Logic.SCRATCHPAD_ID))
         console.log("CHUNK WS_MOVE " + Logic.workspaceMoveLua(3, "HDMI-A-1"))
         console.log("CHUNK WS_SWAP " + Logic.workspaceSwapLua(1, "eDP-1", "HDMI-A-1"))
@@ -80,8 +81,8 @@ QT_QPA_PLATFORMTHEME=generic QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1
 sed -n 's/^.*CHUNK //p' "$fixture/qml.out" > "$fixture/chunks.txt"
 
 count=$(grep -c . "$fixture/chunks.txt" || true)
-if [ "$qml_status" -ne 0 ] || [ "$count" -lt 23 ]; then
-  echo "FAIL: $RUNNER exited $qml_status; expected 23 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
+if [ "$qml_status" -ne 0 ] || [ "$count" -lt 24 ]; then
+  echo "FAIL: $RUNNER exited $qml_status; expected 24 generated Lua chunks, got $count (silent/empty output must not pass)" >&2
   echo "--- raw qml output:" >&2; cat "$fixture/qml.out" >&2
   exit 1
 fi

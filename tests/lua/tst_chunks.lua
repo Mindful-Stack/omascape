@@ -945,3 +945,16 @@ end)
 
 if failures > 0 then io.stderr:write(failures .. " Lua chunk test(s) failed\n"); os.exit(1) end
 print("PASS: Lua chunk behaviour suite")
+
+-- REGRAB_FOCUS: warps the cursor to where it already is, which is what re-grants keyboard focus to
+-- the overlay's layer surface after a close made Hyprland refocus a window (see regrabFocusLua).
+case("regrab focus: warps the cursor to its current position and nothing else", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  hl.__cursor = { x = 41, y = 42 }
+  run("REGRAB_FOCUS", hl)
+  seq(hl, { "cursor.move" })
+  eq(hl.__log[1].args.x, 41, "warps to the CURRENT position, not a remembered one")
+  eq(hl.__log[1].args.y, 42)
+  eq(hl.__cursor.x, 41); eq(hl.__cursor.y, 42)
+  eq(#hl.__notifications, 0, "nothing reported")
+end)

@@ -540,6 +540,13 @@ Item {
     // The raw press point, in panel coordinates, UNCLAMPED. Clamping happens at the instantiation
     // site instead of here, against the menu's own live width/height — see the comment there for
     // why: contextMenu.width is not valid synchronously when openMenu() runs.
+    // Scene coordinates, from mapToItem(null, …). NOT mapToItem(panel, …): in the running shell
+    // `panel` is a PanelWindow — a Window, not an Item — and passing it to mapToItem throws
+    // "Passing incompatible arguments to C++ functions from JavaScript is not allowed", killing the
+    // handler before the menu ever opens. The offscreen fixture cannot catch that, because
+    // prepare.py rewrites every `PanelWindow {` into `Item {`, which makes the call legal there.
+    // The menu's parent is the panel's content item at (0, 0), so scene coordinates are exactly
+    // what its x/y want.
     property real menuRawX: 0
     property real menuRawY: 0
     // The key that dismissed the menu, swallowed until its real release: holding a letter down
@@ -1249,6 +1256,14 @@ Item {
         target: Hyprland
         function onRawEvent(event) {
             if (event && event.name === "configreloaded") { root.lockInstall(); root.lockSync() }
+            // The compositor just moved keyboard focus to a window while the picker is up (a close,
+            // a workspace switch, a special workspace opening, a monitor focus change — see
+            // Logic.focusStealingEvent), which takes the keys off this overlay's on-demand layer.
+            // Re-grant them with a cursor warp (Logic.regrabFocusLua). Gated on `opened` only, and
+            // never on our own pendingCloses: a window closing by itself steals focus the same way,
+            // and the close event carries a bare hex address that would need prefix-matching anyway.
+            if (event && root.opened && Logic.focusStealingEvent(event.name))
+                Hyprland.dispatch(Logic.regrabFocusLua())
             // Share-time reminder frame (addendum): each monitor's `lastIpcObject` is a snapshot,
             // and the frame is a binding on it. These are the events after which the workspace a
             // monitor SHOWS may have changed (Logic.lockFrameRefreshEvent) — deliberately not the
@@ -1581,7 +1596,7 @@ Item {
                                 }
                                 onPressed: function (m) {
                                     if (m.button === Qt.RightButton)
-                                        root.openWorkspaceMenu(boxItem.model.workspaceId, mapToItem(panel, m.x, m.y))
+                                        root.openWorkspaceMenu(boxItem.model.workspaceId, mapToItem(null, m.x, m.y))
                                 }
                             }
                         }
@@ -1705,7 +1720,7 @@ Item {
                                 property bool moved: false
                                 onPressed: function (m) {
                                     if (m.button === Qt.RightButton) {
-                                        root.openWindowMenu(model.address, mapToItem(panel, m.x, m.y))
+                                        root.openWindowMenu(model.address, mapToItem(null, m.x, m.y))
                                         return
                                     }
                                     if (m.button !== Qt.LeftButton) return
@@ -1798,7 +1813,7 @@ Item {
                                 enabled: root.opened
                                 acceptedButtons: Qt.RightButton
                                 onPressed: function (m) {
-                                    root.openWorkspaceMenu(badge.model.workspaceId, mapToItem(panel, m.x, m.y))
+                                    root.openWorkspaceMenu(badge.model.workspaceId, mapToItem(null, m.x, m.y))
                                 }
                             }
                         }
