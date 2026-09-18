@@ -2,13 +2,20 @@ name: ci
 on:
   push:
   pull_request:
+# The workflow only reads the repository and reports through the checks API that
+# GITHUB_TOKEN grants by default. Nothing here writes to the repo, so drop every
+# other scope rather than inherit the repository default.
+permissions:
+  contents: read
+
 jobs:
   logic-tests:
     runs-on: ubuntu-latest
     env:
       CI: "1"   # tests/lua-check.sh fails instead of skipping when its runtime is missing
     steps:
-      - uses: actions/checkout@v4
+      # Pinned to a full commit SHA: a tag can be moved to different code.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install Qt6 Quick test tooling and Lua
         run: |
           sudo apt-get update
