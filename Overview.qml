@@ -458,6 +458,30 @@ Item {
                               matchAddress: root.selectedMatchAddress,
                               cursorAddress: root.cursorAddress, selectedId: root.selectedId })
     }
+    // ---- Peek (docs/specs/2026-09-18-peek-design.md) --------------------------------------
+    // The hold carries exactly three pieces of state and no more. `peeking` is "the key is down
+    // and the hold is live"; `peekedKey` is the identity currently on screen, for the
+    // disappearance test in rebuild(); `peekCancelled` suppresses the layer for the REST of the
+    // hold once the target vanished or a modal took over. None of the three is a copy of the
+    // target's geometry or contents — following the target is the absence of a snapshot.
+    property bool peeking: false
+    property string peekedKey: ""
+    property bool peekCancelled: false
+    // "w:<address>" for a window, "s:<id>" for a workspace. A single namespaced string so the
+    // two kinds can never collide in the model test (a workspace id is a number, an address a
+    // string, and JS would happily compare them across kinds).
+    function peekKeyOf(t) {
+        if (!t) return ""
+        return t.kind === "window" ? "w:" + t.address : "s:" + t.id
+    }
+    // Every path out of a hold: the release, a modal opening, focus loss, the overview closing.
+    // `cancel` true additionally suppresses re-opening until the key is physically released —
+    // the release handler is the only thing that clears it.
+    function peekClear(cancel) {
+        peeking = false
+        peekedKey = ""
+        if (cancel) peekCancelled = true
+    }
     // ---- Actions: the arrow-key window cursor ----------------------------------------------
     // The keyboard's window target inside the selected workspace. "" = none. Mirrored into the
     // tiles model as the `cursor` role so the ring is a binding, not an imperative repaint.
@@ -1245,6 +1269,7 @@ Item {
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
+        peekClear(false); peekCancelled = false
         // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
         // "most recent input device wins" means the device that summoned the overview, not
@@ -1266,6 +1291,7 @@ Item {
     function close() {
         if (!opened) return                        // a click on the scrim mid-fade is not a second close
         endDrag(); menuDismiss(); cancelCloseAllConfirm()
+        peekClear(true)                            // the release will never arrive at an unfocused surface
         // settleTimer is open-only; reconcileTimer keeps running (bounded by the 1.8 s
         // deadlines): it clears optimistic display state (pendingMoves / fsPending / pendingCloses)
         // so a re-summon inside that window shows authoritative state, and with keepLoaded the
@@ -1526,6 +1552,25 @@ Item {
 
                     var chord = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
                     var finding = root.query.length > 0
+                    // Peek: hold Space to preview the target. Placed after the menuDismissKey
+                    // swallow (so a Space that dismissed a menu does not also peek) and before
+                    // the chord branch (a chorded Space is not a peek and falls through to it).
+                    // Also placed before the pointerLive reset below: resolveTarget() must see
+                    // pointer liveness exactly as the pointer left it. Task 3 already keeps Space
+                    // out of that reset (it is an action key), so this ordering is belt and
+                    // braces — but a future reordering that moved the reset above this branch
+                    // would silently break pointer targeting, and this is what protects against
+                    // it. Guarded on STATE, not on e.isAutoRepeat: a held key repeats, and the
+                    // open decision must be made once. QtTest cannot synthesize isAutoRepeat, so
+                    // a flag-only guard would have no offscreen test at all.
+                    if (!chord && e.key === Qt.Key_Space) {
+                        if (root.peeking || root.peekCancelled) return
+                        var pt = root.resolveTarget()
+                        if (!pt) { root.peekCancelled = true; return }   // no target: nothing, all hold
+                        root.peekedKey = root.peekKeyOf(pt)
+                        root.peeking = true
+                        return
+                    }
                     // Action keys read pointer liveness; everything else is keyboard intent and
                     // clears it BEFORE any resolve below can see it.
                     if (!Logic.isActionKey(e.key, chord, Qt.ControlModifier)) root.pointerLive = false
@@ -1579,6 +1624,13 @@ Item {
                     e.accepted = true
                     if (root.menuDismissKey !== 0 && e.key === root.menuDismissKey && !e.isAutoRepeat)
                         root.menuDismissKey = 0
+                    // The release is the ONLY thing that clears the cancel: every other exit path
+                    // (a modal, focus loss, the target vanishing) leaves it set, which is what
+                    // stops the layer re-opening under a key that is merely still held.
+                    if (e.key === Qt.Key_Space && !e.isAutoRepeat) {
+                        root.peekClear(false)
+                        root.peekCancelled = false
+                    }
                 }
             }
 
@@ -2036,16 +2088,47 @@ Item {
         // dialog in either direction — `Keys.onPressed` returns early for both before the `Space`
         // branch, and both call the peek's own force-clear on open, so the two are never on
         // screen together. Display only: every property below is a plain binding on root state,
-        // not a value copied at press time. `shown` and `peekTarget` are hard-coded here because
-        // `peeking` does not exist yet — Task 7 adds the hold state, rebinds those two, and wires
-        // `monForTarget`, `workspaceWindows` and `armed` (none of which exist on `root` yet
-        // either, so they are left at PeekLayer's own defaults for now). PeekLayer anchors
-        // nothing itself, so this call site owns its sizing.
+        // not a value copied at press time. `shown` and `peekTarget` are bindings on `resolveTarget()`
+        // so a live Tab or hover re-targets the layer without a release — no imperative
+        // `onPeekingChanged` assignment anywhere in this block. PeekLayer anchors nothing itself,
+        // so this call site owns its sizing.
         PeekLayer {
             id: peekLayer
             anchors.fill: parent
-            shown: false                 // Task 7 binds this to root.peeking
-            peekTarget: null             // Task 7 binds this to root.resolveTarget()
+            shown: root.peeking && !root.peekCancelled
+            peekTarget: root.peeking ? root.resolveTarget() : null
+            monForTarget: {
+                var t = peekTarget
+                if (!t) return null
+                if (t.kind === "window") {
+                    var w = root._windowByAddress[t.address]
+                    var b = w ? root.boxForWs(w.workspaceId) : null
+                    return b ? root._monByName[b.monitorName] : null
+                }
+                var wb = root.boxForWs(t.id)
+                return wb ? root._monByName[wb.monitorName] : null
+            }
+            workspaceWindows: {
+                var t = peekTarget
+                if (!t || t.kind !== "workspace") return []
+                var out = []
+                for (var i = 0; i < root._windows.length; i++)
+                    if (root._windows[i].workspaceId === t.id) out.push(root._windows[i])
+                return out
+            }
+            // The lock gate, mirroring the grid tile's `boxArmed`: an armed workspace's windows
+            // are under a `no_screen_share` rule and the compositor denies toplevel export, so
+            // capturing would fire a denied request per window and show nothing. Task 5 added the
+            // `armed` property for this; without this binding the gate is inert.
+            armed: {
+                var t = peekTarget
+                if (!t) return false
+                var wsId = t.kind === "workspace" ? t.id
+                         : (root._windowByAddress[t.address] || { workspaceId: -1 }).workspaceId
+                // Bare `locks`, not `root.locks`: it is an object id, and QML ids are not
+                // reachable as properties of root. This is how the grid tile does it too.
+                return Logic.hasWs(wsId) ? locks.isArmed(Logic.wsSelector(wsId)) : false
+            }
             windowByAddress: root._windowByAddress
             handleByAddress: root.handleByAddress
             params: root.params

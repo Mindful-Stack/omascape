@@ -111,4 +111,142 @@ TestCase {
         verify(t !== null, "hovering a tile must resolve a target")
         compare(t.kind, "window"); compare(t.address, "0xB")
     }
+
+    // ---- the hold ------------------------------------------------------------------------
+
+    // Distinguishes: a Space that does not open the peek at all, and one that opens it on the
+    // wrong target. The pointer is over 0xB while the keyboard's own target is elsewhere.
+    function test_space_peeks_the_hovered_window() {
+        hoverTile("0xB")
+        keyPress(Qt.Key_Space)
+        compare(view.peeking, true)
+        compare(view.testPeek.shown, true)
+        compare(view.testPeek.peekTarget.kind, "window")
+        compare(view.testPeek.peekTarget.address, "0xB")
+        keyRelease(Qt.Key_Space)
+        compare(view.peeking, false)
+        compare(view.testPeek.shown, false)
+    }
+
+    // Distinguishes: a Space routed as ordinary keyboard intent. This is the whole point of
+    // Task 3 — the key handler clears pointerLive for non-action keys BEFORE resolving, so a
+    // mis-routed Space peeks the Tab cursor (0xA) instead of the hovered tile (0xB). Both
+    // targets exist and differ, which is what makes the assertion discriminate.
+    function test_space_prefers_the_pointer_over_the_keyboard_target() {
+        keyClick(Qt.Key_Tab)
+        compare(view.cursorAddress, "0xA", "precondition: the keyboard target is 0xA")
+        hoverTile("0xB")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.peekTarget.address, "0xB", "the hovered tile wins")
+        keyRelease(Qt.Key_Space)
+        compare(view.cursorAddress, "0xA", "and the cursor is untouched by the hold")
+    }
+
+    // Distinguishes: a peek that snapshots its target at press time. Tab moves the cursor while
+    // the key is still down; a snapshotting implementation keeps showing the first window.
+    function test_the_peek_follows_the_cursor_while_held() {
+        keyClick(Qt.Key_Tab)
+        var first = view.cursorAddress
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.peekTarget.address, first)
+        keyClick(Qt.Key_Tab)
+        verify(view.cursorAddress !== first, "precondition: Tab moved the cursor")
+        compare(view.testPeek.peekTarget.address, view.cursorAddress,
+                "the peek re-targeted without a release")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a peek that follows the Tab cursor but not the arrows. The arrows move the
+    // SELECTION, which is a different resolve branch from the cursor — an implementation that
+    // re-reads the target only in the Tab path passes the test above and fails this one. Right,
+    // not Down: this file's two seeded workspaces (ws1, ws2) land side-by-side in one row (see
+    // seed()), so Right is the axis with a neighbour here — Down has no box below and would
+    // no-op regardless of the implementation, which is not what this test is for.
+    function test_the_peek_follows_the_selection_while_held() {
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.peekTarget.kind, "workspace")
+        var first = view.testPeek.peekTarget.id
+        keyClick(Qt.Key_Right)
+        verify(view.selectedId !== first, "precondition: Right moved the selection")
+        compare(view.testPeek.peekTarget.id, view.selectedId,
+                "the peek re-targeted to the newly selected workspace")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a Space still reaching appendQueryText. The query must be byte-identical
+    // across the whole hold — a spec rule with no exceptions ("`Space`, any state").
+    function test_space_never_extends_the_query() {
+        keyClick("a")
+        var q = view.query
+        verify(q.length > 0, "precondition: a query is active")
+        keyPress(Qt.Key_Space)
+        keyRelease(Qt.Key_Space)
+        compare(view.query, q, "the query must be unchanged")
+    }
+
+    // Distinguishes: a peek opening on a workspace as if it were a window, or not opening at
+    // all. Hovering the canvas inside a workspace box but off every tile is the workspace-target
+    // case; the mini-map must place one row per window on that workspace.
+    function test_space_peeks_a_workspace_as_a_mini_map() {
+        // No Escape here: with no live pointer and no cursor — the state open() leaves — the
+        // target is already the selected workspace. (Escape in that state would `close()` the
+        // overview, not clear a cursor.)
+        var t = view.resolveTarget()
+        verify(t !== null && t.kind === "workspace", "precondition: the target is a workspace")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        compare(view.testPeek.peekTarget.kind, "workspace")
+        compare(view.testPeek.workspaceWindows.length, 2,
+                "workspace 1's two windows are handed to the mini-map")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: an open decision re-evaluated on every press rather than guarded on state —
+    // the shape a real auto-repeat would take. QtTest cannot set isAutoRepeat (see
+    // tests/ui/actions.qml:426), so a second plain press while held is the closest offscreen
+    // proxy, and the spec's guard is written on state precisely so this proxy is meaningful.
+    function test_a_second_press_while_held_changes_nothing() {
+        hoverTile("0xB")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        var target = view.testPeek.peekTarget.address
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true, "still open, not toggled shut")
+        compare(view.testPeek.peekTarget.address, target, "and still on the same target")
+        keyRelease(Qt.Key_Space)
+        compare(view.testPeek.shown, false, "one release closes it")
+    }
+
+    // Distinguishes: a hold that arms and opens later. With no target at the press, the spec
+    // gives the whole hold nothing — hovering a tile mid-hold must not pop a preview in.
+    //
+    // "No target" is produced with a query that matches nothing, which is the terminal no-target
+    // case `Logic.target` documents. Hovering blank canvas is NOT a reliable way to get one here:
+    // `hitWorkspace` returns null only outside every box, so the pointer would have to land in a
+    // gap whose existence depends on the fixture's canvas size.
+    function test_a_press_with_no_target_stays_closed_for_the_whole_hold() {
+        keyClick("z"); keyClick("z"); keyClick("z")
+        compare(view.matches.length, 0, "precondition: a query with no match")
+        verify(view.resolveTarget() === null, "precondition: no target")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, false)
+        hoverTile("0xB")
+        compare(view.testPeek.shown, false, "the hold does not open late")
+        keyRelease(Qt.Key_Space)
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true, "a fresh press opens normally")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a peek left open when the overview closes while the key is still down — the
+    // stuck-forever case, since the release event never arrives at an unfocused surface.
+    function test_closing_the_overview_clears_a_held_peek() {
+        hoverTile("0xB")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        view.close()
+        compare(view.peeking, false, "peeking is force-cleared, not waiting on a release")
+        compare(view.testPeek.shown, false)
+        keyRelease(Qt.Key_Space)
+    }
 }
