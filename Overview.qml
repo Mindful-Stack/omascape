@@ -482,8 +482,26 @@ Item {
     // wrong call site a readable diff instead of a silent behavioural swap, which matters more
     // once Task 8 adds more call sites than the three below.
     //
+    // These three functions are the ONLY sanctioned mutators of `peeking`/`peekCancelled` (the
+    // press branch below also sets `peeking = true`, but only immediately after confirming
+    // `peekCancelled` is false — see its own comment). That closes an invariant worth writing
+    // down: `peekCancelled` implies `!peeking`, always. Only `peekAbort()` ever sets
+    // `peekCancelled = true`, and it sets `peeking = false` in that SAME call — so the two can
+    // never both be true. `shown` below relies on this to skip a redundant `&& !peekCancelled`
+    // clause; if a future change adds a fourth mutator, or moves the cancel and the clear apart,
+    // re-check that binding.
+    //
     // A normal release: the key came up, the hold ends, and the key is free to open a new one on
     // its very next press — so the cancel clears too.
+    //
+    // `peekRelease()` and `peekReset()` below have byte-identical bodies today. Keep both anyway:
+    // they say different things at their call sites (a real key-up vs. a fresh summon owing
+    // nothing to the last one) and are free to diverge later — Task 8's disappearance bookkeeping
+    // is a plausible reason the two might one day clear different things. Nothing here catches an
+    // edit that changes one body but not the other's — that is a known gap, not an oversight, and
+    // is the cost of keeping the names distinct. Resist "simplifying" by having one call the
+    // other (that would make the intent at one of the two call sites a lie); if you change what
+    // either function does, re-read this comment and update both.
     function peekRelease() {
         peeking = false
         peekedKey = ""
@@ -500,7 +518,8 @@ Item {
     }
     // A fresh summon: nothing carries over from whatever the key was doing at the previous close,
     // cancelled or not — a stale `peekCancelled` here would leave the very first Space of a new
-    // session silently inert.
+    // session silently inert. See the note above `peekRelease()`: identical to it today, kept
+    // separate on purpose.
     function peekReset() {
         peeking = false
         peekedKey = ""
@@ -2146,16 +2165,23 @@ Item {
         // The peek (docs/specs/2026-09-18-peek-design.md, "The peek layer"): a sibling of `card`,
         // stacked above it, needing no z-order arbitration against the menu or the confirmation
         // dialog in either direction — `Keys.onPressed` returns early for both before the `Space`
-        // branch, and both call the peek's own force-clear on open, so the two are never on
-        // screen together. Display only: every property below is a plain binding on root state,
-        // not a value copied at press time. `shown` follows `peeking`/`peekCancelled` directly;
-        // `peekTarget` is a binding on `resolveTarget()`, so a live Tab, arrow or hover re-targets
-        // the layer without a release — no imperative `onPeekingChanged` assignment anywhere in
-        // this block. PeekLayer anchors nothing itself, so this call site owns its sizing.
+        // branch. Task 8 adds call sites where the menu and the confirmation dialog opening each
+        // force-clear the peek, so the two are never on screen together. Display only: every
+        // property below is a plain binding on root state, not a value copied at press time.
+        // `shown` follows `peeking` alone (see the invariant note on `peeking`/`peekCancelled`
+        // above); `peekTarget` is a binding on `resolveTarget()`, so a live Tab, arrow or hover
+        // re-targets the layer without a release — no imperative `onPeekingChanged` assignment
+        // anywhere in this block. PeekLayer anchors nothing itself, so this call site owns its
+        // sizing.
         PeekLayer {
             id: peekLayer
             anchors.fill: parent
-            shown: root.peeking && !root.peekCancelled
+            // Not `root.peeking && !root.peekCancelled`: the clause was proven unreachable dead
+            // code, not merely untested. `peekAbort()` is the ONLY place `peekCancelled` is ever
+            // set true, and it sets `peeking = false` in that same call (see the three named
+            // mutators above) — so `peeking && peekCancelled` can never both hold. A written-down
+            // invariant beats a defensive clause that implies a state the code cannot reach.
+            shown: root.peeking
             peekTarget: root.peeking ? root.resolveTarget() : null
             monForTarget: {
                 var t = peekTarget

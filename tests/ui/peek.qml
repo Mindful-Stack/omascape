@@ -18,6 +18,11 @@ TestCase {
     width: 1200; height: 800; visible: true
     property var view
     property var mon
+    // Workspace 1's "bravo" window (0xB), captured by reference at seed() time so a test can
+    // mutate its title/position in place and call view.rebuild() to re-derive `root._windows` —
+    // the same pattern tests/ui/drag.qml uses for its own `client`. Only the mini-map churn probes
+    // below need this; every other test in this file goes through the compositor fixture only.
+    property var winB
 
     Component { id: overview; Overview {} }
 
@@ -45,11 +50,12 @@ TestCase {
         mon = { name: "TEST", x: 0, y: 1440, width: 1920, height: 1080, scale: 1,
                 lastIpcObject: { reserved: [0, 26, 0, 0], transform: 0,
                                  activeWorkspace: { id: 1 }, specialWorkspace: { id: 0, name: "" } } }
+        winB = client("0xB", "bravo", 900)
         v.compositor.monitors = { values: [mon] }
         v.compositor.focusedMonitor = mon
         v.compositor.focusedWorkspace = { id: 1 }
         v.compositor.workspaces = { values: [
-            wsRow(1, [client("0xA", "alpha", 100), client("0xB", "bravo", 900)]),
+            wsRow(1, [client("0xA", "alpha", 100), winB]),
             wsRow(2, [client("0xC", "charlie", 100)])
         ] }
     }
@@ -296,6 +302,57 @@ TestCase {
         keyPress(Qt.Key_Space)
         compare(view.peeking, true,
                 "a fresh summon is not held inert by the previous summon's cancellation")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // ---- the mini-map's window-list cache (Task 7 review, item 1) --------------------------
+
+    // Distinguishes: `peekWorkspaceWindowsFor()`'s cache losing identity stability on a change
+    // that should NOT bust it. A title-only edit touches none of the fields the mini-map's
+    // placement (`_placeWindows`/`peekTiles` in logic.js) actually reads — `address`, `ax`, `ay`,
+    // `sw`, `sh`, `floating`, `fullscreen`, `workspaceId` — so the cached array must come back
+    // UNCHANGED: the same array object, not merely an equal one. Identity is the whole point and
+    // is invisible from the array's contents alone: PeekLayer's Repeater keys its `model` on that
+    // identity, and a fresh-but-equal array reassigns the model, destroying and recreating every
+    // WindowTile underneath it — and with it, every live ScreencopyView capture, mid-hold, on
+    // compositor traffic that has nothing to do with the peeked workspace. No capture exists in
+    // this offscreen tier to show the restart directly (see this file's own header comment), so
+    // this checks the one proxy that stands in for it: whether the array reference itself moved.
+    function test_a_title_only_change_keeps_the_mini_maps_window_list_identity() {
+        var t = view.resolveTarget()
+        verify(t !== null && t.kind === "workspace", "precondition: the target is a workspace")
+        keyPress(Qt.Key_Space)
+        var before = view.testPeek.workspaceWindows
+        verify(before.length === 2, "precondition: workspace 1 has two windows")
+        winB.title = "bravo-renamed"
+        view.rebuild()
+        verify(view.testPeek.workspaceWindows === before,
+               "a title-only change must not reassign the mini-map's window list")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: the cache's OTHER failure mode — one that never busts and serves stale
+    // geometry forever. Moving 0xB changes `ax`, one of the fields the signature is built from
+    // (see the test above), so the cache must miss: a NEW array, whose row for 0xB carries the
+    // NEW position rather than the one cached before the move. Read together, these two tests pin
+    // both directions of the cache and rule out the two mutations a reviewer found green against
+    // the original implementation (disabling the cache outright, and a cache that ignores its own
+    // signature).
+    function test_a_moved_window_busts_the_mini_maps_cache_with_fresh_geometry() {
+        var t = view.resolveTarget()
+        verify(t !== null && t.kind === "workspace", "precondition: the target is a workspace")
+        keyPress(Qt.Key_Space)
+        var before = view.testPeek.workspaceWindows
+        var beforeAx = -1
+        for (var i = 0; i < before.length; i++) if (before[i].address === "0xB") beforeAx = before[i].ax
+        verify(beforeAx >= 0, "precondition: 0xB is in the mini-map's window list")
+        winB.at = [winB.at[0] + 50, winB.at[1]]
+        view.rebuild()
+        var after = view.testPeek.workspaceWindows
+        verify(after !== before, "a geometry change must bust the cache")
+        var afterAx = -1
+        for (var j = 0; j < after.length; j++) if (after[j].address === "0xB") afterAx = after[j].ax
+        compare(afterAx, beforeAx + 50, "the cache must not serve 0xB's stale position")
         keyRelease(Qt.Key_Space)
     }
 }
