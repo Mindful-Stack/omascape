@@ -355,4 +355,157 @@ TestCase {
         compare(afterAx, beforeAx + 50, "the cache must not serve 0xB's stale position")
         keyRelease(Qt.Key_Space)
     }
+
+    // ---- cancellation --------------------------------------------------------------------
+
+    // Distinguishes: a peek that slides to a successor when its window closes. 0xB vanishes
+    // mid-hold; the target then falls through to the selected workspace, which is a perfectly
+    // valid target — so an implementation keyed on "the target went null" keeps the layer open
+    // on a workspace the user never chose, and passes every test that only checks peekTarget.
+    function test_a_closed_window_cancels_the_hold() {
+        hoverTile("0xB")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        view.compositor.workspaces = { values: [
+            wsRow(1, [client("0xA", "alpha", 100)]),
+            wsRow(2, [client("0xC", "charlie", 100)])
+        ] }
+        view.rebuild()
+        compare(view.peekCancelled, true)
+        compare(view.testPeek.shown, false, "the layer is gone")
+        keyClick(Qt.Key_Tab)
+        compare(view.testPeek.shown, false, "and navigation does not bring it back")
+        keyRelease(Qt.Key_Space)
+        compare(view.peekCancelled, false, "the release clears the cancel")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true, "a fresh press peeks again")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a cancel keyed on "the resolved target changed" rather than on the model.
+    // Escape clears the cursor, which retargets the peek to the selected workspace — intentional
+    // navigation, not disappearance. Nothing left the model, so the peek must FOLLOW, not cancel.
+    // This is the negative control for the test above; without it, "cancel whenever the target
+    // changes" passes everything else in this file.
+    function test_clearing_the_cursor_retargets_without_cancelling() {
+        keyClick(Qt.Key_Tab)
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.peekTarget.kind, "window")
+        keyClick(Qt.Key_Escape)                  // clears the cursor; the window still exists
+        compare(view.peekCancelled, false, "navigation must not cancel")
+        compare(view.testPeek.shown, true)
+        compare(view.testPeek.peekTarget.kind, "workspace", "it followed to the selected workspace")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a peeked workspace treated as gone when it merely empties. An empty
+    // workspace is still a target per the spec, and must peek as an empty mini-map — cancelling
+    // here would make the common "close the last window" case flicker the layer away.
+    function test_an_emptied_but_surviving_workspace_does_not_cancel() {
+        var t = view.resolveTarget()             // already a workspace after open(); see above
+        verify(t !== null && t.kind === "workspace")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        // Workspace 1 survives with no windows: still reported, still in boxes.
+        view.compositor.workspaces = { values: [wsRow(1, []), wsRow(2, [client("0xC", "charlie", 100)])] }
+        view.rebuild()
+        compare(view.peekCancelled, false, "an empty workspace is still a target")
+        compare(view.testPeek.shown, true)
+        compare(view.testPeek.workspaceWindows.length, 0, "and the mini-map is empty")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a peeked workspace that leaves the model entirely. Unlike the test above,
+    // workspace 1 is no longer reported at all, so it is not in boxes and the peek must cancel.
+    function test_a_destroyed_workspace_cancels_the_hold() {
+        keyPress(Qt.Key_Space)                   // the target is already the selected workspace
+        compare(view.testPeek.peekTarget.kind, "workspace")
+        var gone = view.testPeek.peekTarget.id
+        view.compositor.workspaces = { values: [wsRow(2, [client("0xC", "charlie", 100)])] }
+        view.compositor.focusedWorkspace = { id: 2 }
+        view.rebuild()
+        verify(view.boxForWs(gone) === null, "precondition: the workspace really left boxes")
+        compare(view.peekCancelled, true)
+        compare(view.testPeek.shown, false)
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a menu opening on top of a peek, or a peek popping back when the menu goes.
+    // Right-click never reaches the key handler, which is why the spec's original "neither can
+    // open while Space is down" was false and this rule exists.
+    function test_opening_a_menu_cancels_the_hold() {
+        hoverTile("0xB")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        var p = tileCentre("0xB")
+        mousePress(view, p.x, p.y, Qt.RightButton)
+        mouseRelease(view, p.x, p.y, Qt.RightButton)
+        wait(30)
+        compare(view.menuOpen, true, "the menu opened")
+        compare(view.testPeek.shown, false, "and the peek yielded")
+        view.menuDismiss()
+        compare(view.testPeek.shown, false, "dismissing the menu does not bring it back")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a peek left open when keyboard focus leaves mid-hold. The release event
+    // never arrives at an unfocused surface, so without the force-clear the layer sticks open
+    // forever — the bug the spec calls out explicitly. Asserted WITHOUT a release, which is the
+    // whole point: a test that releases the key cannot tell the force-clear from the handler.
+    function test_focus_loss_clears_a_held_peek() {
+        hoverTile("0xB")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        view.testKeys.focus = false              // drop the key catcher's active focus
+        wait(30)
+        compare(view.peeking, false, "cleared without any release event")
+        compare(view.peekCancelled, true, "and cancelled, so a still-held key cannot re-open it")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: the scratchpad's NEGATIVE workspace id (Logic.SCRATCHPAD_ID is -2) breaking
+    // the identity round-trip. peekKeyOf writes "s:-2" and the rebuild check parses it back with
+    // parseInt — a key built by concatenation and read back by a naive split, or a check using
+    // `id > 0`, fails here and nowhere else in this file.
+    function test_the_scratchpad_row_peeks_like_any_workspace() {
+        view.compositor.workspaces = { values: [
+            wsRow(1, [client("0xA", "alpha", 100), client("0xB", "bravo", 900)]),
+            wsRow(2, [client("0xC", "charlie", 100)]),
+            scratchRow(-99, "0xS", "scratch")
+        ] }
+        view.rebuild()
+        keyClick("s", Qt.ControlModifier)        // reveal the scratchpad row
+        wait(30)
+        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down)
+        // Walk down to the scratchpad row rather than assuming its index.
+        var guard = 0
+        while (view.selectedId !== -2 && guard++ < 8) keyClick(Qt.Key_Down)
+        compare(view.selectedId, -2, "precondition: the scratchpad row is selected")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        compare(view.testPeek.peekTarget.id, -2)
+        compare(view.peekedKey, "s:-2", "the identity key round-trips a negative id")
+        compare(view.peekCancelled, false, "and a rebuild must not read it as a vanished workspace")
+        view.rebuild()
+        compare(view.peekCancelled, false, "still not cancelled after a fresh rebuild")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a Space that both dismisses a menu and opens a peek from one press. The
+    // menuDismissKey latch must swallow it, and the still-held key must stay inert.
+    function test_space_dismissing_a_menu_does_not_peek() {
+        var p = tileCentre("0xA")
+        mousePress(view, p.x, p.y, Qt.RightButton); mouseRelease(view, p.x, p.y, Qt.RightButton)
+        wait(30)
+        compare(view.menuOpen, true)
+        keyPress(Qt.Key_Space)
+        compare(view.menuOpen, false, "Space dismissed the menu")
+        compare(view.testPeek.shown, false, "and did not also open a peek")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, false, "the held key stays swallowed")
+        keyRelease(Qt.Key_Space)
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true, "a fresh press after the release peeks")
+        keyRelease(Qt.Key_Space)
+    }
 }

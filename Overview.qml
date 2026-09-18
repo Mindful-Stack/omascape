@@ -724,6 +724,7 @@ Item {
     // so the position re-evaluates the moment that width actually settles.
     function openMenu(tgt, p) {
         if (dragTile !== null) return                  // a drag owns the pointer
+        peekAbort()                                     // a modal and a peek are never both up
         menuTarget = tgt
         menuIndex = -1
         menuDismissKey = 0
@@ -816,6 +817,7 @@ Item {
         if (!Logic.hasWs(wsId)) return
         confirmCloseAllWs = wsId
         confirmDialog.selectedIndex = 0   // default to Cancel: this is the destructive path
+        peekAbort()                                     // a modal and a peek are never both up
         confirmOpen = true
     }
     function cancelCloseAllConfirm() {
@@ -1226,6 +1228,18 @@ Item {
 
     function rebuild() {
         var keepId = root.selectedId   // the workspace the user has selected, before layout
+        // Snapshotted before anything below touches `boxes`/`selectedIndex`: those two update in
+        // separate statements later in this function, and `selectedId` (and therefore
+        // PeekLayer.peekTarget, which reads it through resolveTarget()) is a live binding that
+        // re-evaluates the instant `root.boxes` is reassigned — before `root.selectedIndex`
+        // catches up to match it. In that split second, `selectedId` can transiently answer with
+        // the WRONG workspace (old index against new boxes), PeekLayer's onPeekTargetChanged
+        // reacts to that transient value, and `peekedKey` gets silently overwritten to the
+        // survivor's identity before the disappearance check below ever runs — erasing the one
+        // piece of evidence that check needs. Reading `root.peekedKey` fresh at that check would
+        // therefore see whatever this rebuild's own side effects already retargeted it to, not
+        // what was actually on screen when this rebuild started.
+        var peekedAtEntry = root.peekedKey
         buildHandles()
         var input = buildInput()
         // A box that just became a placeholder must not keep an optimistic tile (it would be a
@@ -1286,6 +1300,20 @@ Item {
             if (!cw || cw.workspaceId !== root.selectedId) cursorAddress = ""
         }
         applyCursorRole()
+        // Peek: the target's DISAPPEARANCE cancels the hold (spec: "A disappearing target cancels
+        // the hold"). Tested against the model, never against resolveTarget(): that falls THROUGH
+        // on disappearance — a cleared cursor lands on the selected workspace, a find match on its
+        // successor — so a null test would never fire and the peek would silently slide to a
+        // target the user never chose. Navigation needs no case here: it changes what resolves
+        // while the old identity is still in the model. Checked against `peekedAtEntry` (captured
+        // at the top of this function), not the live `root.peekedKey` — see that snapshot's own
+        // comment for why the live property can no longer be trusted by this point.
+        if (peeking && peekedAtEntry) {
+            var pk = peekedAtEntry.slice(2), gone = false
+            if (peekedAtEntry.charAt(0) === "w") gone = !wmap[pk]
+            else gone = Logic.indexOfWorkspace(res.boxes, parseInt(pk, 10)) < 0
+            if (gone) peekAbort()
+        }
         // An open menu follows fresh data: it dismisses when its target is gone (menuItems returns
         // an empty list for a missing window or box) and relabels in place otherwise, keeping the
         // highlight on the same item id — or, for a toggle row whose id itself is the thing that
@@ -1616,6 +1644,14 @@ Item {
                 id: keyCatcher
                 anchors.fill: parent
                 focus: true
+                // The release never arrives at a surface that has lost keyboard focus, so a held
+                // peek would stick open forever — the bug the spec calls out explicitly. This is
+                // the primary clear; Keys.onReleased above is a second path to the same place,
+                // never the only one. Attached here, not to `panel`: prepare.py rewrites `panel`
+                // to a plain Item in the offscreen fixture, so its activeFocus is not guaranteed
+                // to behave as it does in the real shell, whereas `keyCatcher` is the actual focus
+                // item in both.
+                onActiveFocusChanged: if (!activeFocus) root.peekAbort()
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function (e) {
                     e.accepted = true
@@ -2183,6 +2219,13 @@ Item {
             // invariant beats a defensive clause that implies a state the code cannot reach.
             shown: root.peeking
             peekTarget: root.peeking ? root.resolveTarget() : null
+            // Keeps peekedKey naming the identity CURRENTLY on screen, so the disappearance check
+            // in rebuild() compares against what the user is actually looking at. Without this,
+            // peekedKey would stay pinned to whatever was on screen at press time: after Tab
+            // retargets the layer to a new window, closing the ORIGINAL window would wrongly
+            // cancel (it is no longer shown) while closing the NEW one would not (rebuild() would
+            // still be checking the stale identity).
+            onPeekTargetChanged: if (root.peeking) root.peekedKey = root.peekKeyOf(peekTarget)
             monForTarget: {
                 var t = peekTarget
                 if (!t) return null
