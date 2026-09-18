@@ -331,7 +331,7 @@ PASS 1 (window target): a peek hold changed no compositor state
 PASS 2: mini-map rows do not overlap (fullscreen modes [2,0])
 PASS 3: the peek's content changed between frames, cropped to its own box (live capture)
 FACT 4: before={"peeking":false,"key":"","cancelled":false} held={"peeking":true,"key":"s:1","cancelled":false} after={"peeking":false,"key":"","cancelled":false}
-PASS 4: a 2s held Space opened one peek and closed on release
+PASS 4: a 2s held Space opened a peek and closed on release
 peek-probe: done
 ```
 
@@ -362,11 +362,13 @@ peek-probe: done
       rather than trusting one synchronous read). So `overview.rebuild()` alone was not guaranteed
       to close the race on a slower machine — it happened to on this one. `peekRows()` now calls
       `overview.requestRefresh()` before `overview.rebuild()`, and the probe itself polls
-      `peekRows()` (like `wait_fs` polls `hyprctl`) until a row reports `fullscreen > 0`, **failing
-      loudly** ("no row is fullscreen: model stale, case 2 did not exercise slot recovery") if the
-      poll times out, rather than silently falling through to the overlap check the way round 1
-      did. `wait_fs` alone was never sufficient here — it only proves `hyprctl` itself has the new
-      state, never that Quickshell's own copy of it has caught up.
+      `peekRows()` (like `wait_fs` polls `hyprctl`) until a row reports `fullscreen > 0` — true of
+      both maximized (mode 1) and fullscreen (mode 2), since slot recovery runs for both, hence the
+      message below names both — **failing loudly** ("no row is fullscreen or maximized: model
+      stale, case 2 did not exercise slot recovery") if the poll times out, rather than silently
+      falling through to the overlap check the way round 1 did. `wait_fs` alone was never
+      sufficient here — it only proves `hyprctl` itself has the new state, never that Quickshell's
+      own copy of it has caught up.
     - **Tooling note:** the brief's original script text dispatched `window.fullscreen` with a bare
       `action = "on"|"off"`; that form is not attested anywhere else in this repo (production
       `logic.js:603`, `fullscreen.sh`, `probe-fullscreen.sh` all use `{ mode = "fullscreen",
@@ -420,8 +422,9 @@ peek-probe: done
   distinguish a *guarded* auto-repeat from an *unguarded* one that happens to re-enter the press
   branch and reassign `peeking = true` to an already-true bool — observationally identical to the
   guarded path from outside. So "the auto-repeat guard was verified" is not a fact this case
-  produces; what it produces is narrower and still new: a real held key opens exactly one peek and
-  a real release closes it, on this build. Repeat-*swallowing* itself remains **inferred**, pinned
+  produces; what it produces is narrower and still new — not a count of openings, which is exactly
+  what telling guarded from unguarded would need: a real held key opens a peek and a real release
+  closes it, on this build. Repeat-*swallowing* itself remains **inferred**, pinned
   instead by the offscreen, mutation-verified second-press proxy in `tests/ui/peek.qml`. Adding a
   production-side press counter to discriminate repeat-swallowing at this tier was considered and
   deliberately **not done** — the offscreen proxy already covers it and the cost is instrumenting

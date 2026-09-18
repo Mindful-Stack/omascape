@@ -84,7 +84,7 @@ fsmodes=$(echo "$rows" | jq -c '[.[].fullscreen]')
 # that two ordinary tiles never overlap — precisely how the race this probe fixed once already
 # (peekRows() lacking its own rebuild()) slipped through as a false PASS.
 echo "$fsmodes" | jq -e 'any(. > 0)' >/dev/null 2>&1 || {
-    echo "FAIL 2: no row is fullscreen: model stale, case 2 did not exercise slot recovery"
+    echo "FAIL 2: no row is fullscreen or maximized: model stale, case 2 did not exercise slot recovery"
     echo "$rows"; dump; exit 1; }
 n=$(echo "$rows" | jq 'length')
 [[ "$n" == "2" ]] || { echo "FAIL 2: mini-map has $n rows, expected 2"; echo "$rows"; dump; exit 1; }
@@ -173,9 +173,10 @@ else
   # exists to prevent. UNVERIFIED and PASS are mutually exclusive outcomes here. Note on scope
   # (spec's Verified facts section has the full account): this case cannot distinguish a GUARDED
   # auto-repeat from an UNGUARDED one that happens to re-enter the same press branch harmlessly —
-  # it only establishes that a real held key opens one peek and a real release closes it. Repeat-
-  # *swallowing* itself is pinned offscreen, in tests/ui/peek.qml's mutation-verified second-press
-  # proxy, not here.
+  # it only establishes that a real held key opens a peek and a real release closes it — not a
+  # COUNT of openings, which is exactly what "distinguish guarded from unguarded" would need.
+  # Repeat-*swallowing* itself is pinned offscreen, in tests/ui/peek.qml's mutation-verified
+  # second-press proxy, not here.
   if [[ "$(echo "$held" | jq -r .peeking)" != "true" ]]; then
     echo "UNVERIFIED 4: the held key never opened a peek — wtype may not reach the overlay's"
     echo "              keyboard focus in this rig. The guard is NOT established; do not record"
@@ -183,7 +184,7 @@ else
   elif [[ "$(echo "$done_" | jq -r .peeking)" != "false" ]]; then
     echo "FAIL 4: the peek survived the release"; exit 1
   else
-    echo "PASS 4: a 2s held Space opened one peek and closed on release"
+    echo "PASS 4: a 2s held Space opened a peek and closed on release"
   fi
 fi
 echo "peek-probe: done"
