@@ -257,6 +257,12 @@ TestCase {
     // case `Logic.target` documents. Hovering blank canvas is NOT a reliable way to get one here:
     // `hitWorkspace` returns null only outside every box, so the pointer would have to land in a
     // gap whose existence depends on the fixture's canvas size.
+    //
+    // Review note (round 2): the `hoverTile` assertion below is satisfied by `peeking` simply
+    // never having become true — it would stay green even if the no-target press latched nothing
+    // at all. The repeat `keyPress` added after it is what actually pins the LATCH this test's own
+    // name claims ("for the WHOLE hold"): a target now exists (0xB is hovered), so a press that
+    // merely re-checked `peeking` (false) with no cancel to also check would wrongly open here.
     function test_a_press_with_no_target_stays_closed_for_the_whole_hold() {
         keyClick("z"); keyClick("z"); keyClick("z")
         compare(view.matches.length, 0, "precondition: a query with no match")
@@ -265,6 +271,9 @@ TestCase {
         compare(view.testPeek.shown, false)
         hoverTile("0xB")
         compare(view.testPeek.shown, false, "the hold does not open late")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, false,
+                "a repeat press within the SAME hold must stay closed even though a target now exists")
         keyRelease(Qt.Key_Space)
         keyPress(Qt.Key_Space)
         compare(view.testPeek.shown, true, "a fresh press opens normally")
@@ -573,6 +582,55 @@ TestCase {
         compare(view.peekCancelled, false, "no Space was ever down: nothing should be latched")
         keyPress(Qt.Key_Space)
         compare(view.testPeek.shown, true, "a fresh hold must open, not be swallowed by a stale cancel")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a lost release during focus loss leaving the NEXT fresh press dead one level
+    // down from test_a_menu_opened_and_dismissed_without_space_does_not_dead_the_next_press above.
+    // Focus loss cancels the hold correctly (peekKeyDown=true, peekCancelled=true) — but the
+    // physical release that would normally clear both never reaches an unfocused catcher, by
+    // construction. If nothing clears them when focus RETURNS, they are still set the next time
+    // the user reaches for Space, and that unrelated fresh press is swallowed exactly as it was
+    // before peekKeyDown existed. No release is ever sent here — that omission is the whole point.
+    function test_a_lost_release_during_focus_loss_does_not_dead_the_next_press() {
+        hoverTile("0xB")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        view.testKeys.focus = false
+        wait(30)
+        compare(view.peekCancelled, true, "precondition: focus loss cancelled the hold")
+        // No keyRelease(Qt.Key_Space) anywhere in this test: the release never arrives while
+        // unfocused, and by the time focus below returns it is gone for good, not merely delayed.
+        view.testKeys.focus = true
+        wait(30)
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true, "a fresh press after focus returns must not be dead")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a stale peekKeyDown surviving a close()/open() cycle. close() aborts a held
+    // peek whose release will also never arrive (the same "release never arrives" fact as the
+    // test above, via a different door: the surface is torn down instead of merely unfocused), so
+    // peekKeyDown is left true across the boundary unless open()'s peekReset() clears it too. Left
+    // stale, a modal opened in the FRESH session — with no Space held at all this time — would
+    // incorrectly read "a key is down" and latch a cancel nothing asked for, deadening the next
+    // real press. Uses a right-click (not Space) after reopening specifically because Space is
+    // what must stay untouched by the previous summon's leftovers.
+    function test_a_stale_key_down_flag_across_a_summon_does_not_dead_the_next_press() {
+        hoverTile("0xB")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        view.close()   // peekAbort() under a still-held key whose release will never arrive
+        view.open(); wait(400)
+        // No Space is held anywhere in this fresh session.
+        var p = tileCentre("0xA")
+        mousePress(view, p.x, p.y, Qt.RightButton); mouseRelease(view, p.x, p.y, Qt.RightButton)
+        wait(30)
+        compare(view.menuOpen, true, "precondition: the menu opened")
+        view.menuDismiss()
+        compare(view.peekCancelled, false, "no Space was ever down this session: nothing should be latched")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true, "a fresh press must not be dead from a stale flag")
         keyRelease(Qt.Key_Space)
     }
 }

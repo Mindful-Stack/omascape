@@ -507,15 +507,21 @@ Item {
     // A normal release: the key came up, the hold ends, and the key is free to open a new one on
     // its very next press — so the cancel clears too.
     //
-    // `peekRelease()` and `peekReset()` below have byte-identical bodies today. Keep both anyway:
-    // they say different things at their call sites (a real key-up vs. a fresh summon owing
-    // nothing to the last one) and are free to diverge later — the disappearance check in
-    // rebuild() (which snapshots `peekedKey` at entry; see `peekedAtEntry` there) is a plausible
-    // reason the two might one day clear different things. Nothing here catches an edit that
-    // changes one body but not the other's — that is a known gap, not an oversight, and is the
-    // cost of keeping the names distinct. Resist "simplifying" by having one call the other (that
-    // would make the intent at one of the two call sites a lie); if you change what either
-    // function does, re-read this comment and update both.
+    // `peekRelease()` and `peekReset()` below now diverge by exactly one line (`peekReset()` also
+    // clears `peekKeyDown`) — the two do NOT need to stay identical, and this is the first case of
+    // them actually differing. `peekRelease()` doesn't need to touch `peekKeyDown` because its own
+    // call site (`Keys.onReleased`) already clears it in the same breath, from the real key-up
+    // event. `peekReset()` has no such event to piggyback on — a fresh summon has no "the key just
+    // came up" moment — so it must clear the flag itself, or a `peekKeyDown` left stale from a
+    // still-unreleased key at the previous close (see `close()`'s own `peekAbort()` call) would
+    // carry into the new session and let an unrelated modal there wrongly latch a cancel again.
+    // They still say different things at their call sites (a real key-up vs. a fresh summon owing
+    // nothing to the last one), and are free to diverge further later. Nothing here catches an
+    // edit that changes one body without checking whether the other needs the same change — that
+    // is a known gap, not an oversight, and is the cost of keeping the names distinct. Resist
+    // "simplifying" by having one call the other (that would make the intent at one of the two
+    // call sites a lie); if you change what either function does, re-read this comment and check
+    // whether the other one needs the same fix.
     function peekRelease() {
         peeking = false
         peekedKey = ""
@@ -537,12 +543,19 @@ Item {
     }
     // A fresh summon: nothing carries over from whatever the key was doing at the previous close,
     // cancelled or not — a stale `peekCancelled` here would leave the very first Space of a new
-    // session silently inert. See the note above `peekRelease()`: identical to it today, kept
+    // session silently inert. `peekKeyDown` must reset too, for the same reason one level down:
+    // `close()` calls `peekAbort()` under a still-held key whose release will never arrive (the
+    // surface is unfocused/gone), so `peekKeyDown` is left true across the close. Without clearing
+    // it here, the NEXT summon starts with a stale "key is down" belief, and a modal opened with
+    // no Space actually held in the new session (a plain right-click) would incorrectly latch
+    // `peekCancelled` via that stale flag — reintroducing the exact bug this property exists to
+    // fix, one summon later. See the note above `peekRelease()`: identical to it today, kept
     // separate on purpose.
     function peekReset() {
         peeking = false
         peekedKey = ""
         peekCancelled = false
+        peekKeyDown = false
     }
     // The mini-map's window list, reconciled by identity (Task 7 review, item 2). `rebuild()`
     // reassigns `_windows` to a brand-new array on every `onWorkspacesChanged` — i.e. on ANY
@@ -1675,7 +1688,24 @@ Item {
                 // to a plain Item in the offscreen fixture, so its activeFocus is not guaranteed
                 // to behave as it does in the real shell, whereas `keyCatcher` is the actual focus
                 // item in both.
-                onActiveFocusChanged: if (!activeFocus) root.peekAbort()
+                //
+                // The RETURN half exists for the same reason (review fix, round 2): the release
+                // that never arrived while unfocused still never arrives once focus comes back —
+                // it was lost, not merely delayed — so `peekKeyDown` and `peekCancelled` are stuck
+                // exactly as `peekAbort()` above left them (key "down", cancel latched) unless
+                // something clears them. Nothing else does: `peekAbort()` only runs on the loss,
+                // and the physical key may genuinely still be held, so there is no key-up event to
+                // wait for. Focus RETURNING is the one moment this code can know the surface is
+                // live again, so it is the one moment safe to stop believing the stale "key down"
+                // state and let a fresh press through. Residual and accepted, not engineered
+                // around: if Space is still physically held when focus returns, the key's own next
+                // auto-repeat can re-open the peek — the release was lost, so nothing here can be
+                // honest about the key's real state, and re-opening under a genuinely-held key is
+                // the better of the two wrong answers versus leaving the hold dead forever.
+                onActiveFocusChanged: {
+                    if (!activeFocus) root.peekAbort()
+                    else { root.peekKeyDown = false; root.peekCancelled = false }
+                }
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function (e) {
                     e.accepted = true
@@ -1715,7 +1745,13 @@ Item {
                         if (root.peeking || root.peekCancelled) return
                         var pt = root.resolveTarget()
                         if (!pt) { root.peekAbort(); return }   // no target: nothing, all hold
-                        root.peekedKey = root.peekKeyOf(pt)
+                        // No `peekedKey = peekKeyOf(pt)` here: PeekLayer's `onPeekTargetChanged`
+                        // (below, on the PeekLayer instantiation) already sets it the instant
+                        // `peeking` flips true and its `peekTarget` binding re-evaluates — a
+                        // duplicate write here was proven genuinely redundant (review, round 2:
+                        // deleting it changes nothing, 29/29 still green), and two writers of the
+                        // same property is exactly the shape that let the earlier confusion in
+                        // this file happen once already. One writer.
                         root.peeking = true
                         return
                     }
