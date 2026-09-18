@@ -60,6 +60,13 @@ Item {
     readonly property bool wantCapture: handle !== null && capMode !== "icon"
     readonly property string iconUrl: Quickshell.iconPath(String(cls).toLowerCase(), true)
 
+    // Peek reuses this delegate at ~3x grid size (docs/specs/2026-09-18-peek-design.md). Two
+    // grid-only affordances are opted out of there rather than forked into a second delegate:
+    // the icon fallback's 40px cap, which reads as a postage stamp in a 60% box, and the hover
+    // title chip, which belongs to a tile you can click — a peek is not a click target.
+    property int iconMax: 40
+    property bool decorated: true
+
     // Drag ghost: while in transit the tile shrinks around the grabbed point (so that point stays
     // under the pointer and the ghost never hides the drop highlight) and turns translucent.
     // The pointer, not the ghost, decides where a tiled window lands.
@@ -84,7 +91,7 @@ Item {
         grabX = gx; grabY = gy
     }
 
-    HoverHandler { id: hh; enabled: !tile.dragging }
+    HoverHandler { id: hh; enabled: !tile.dragging && tile.decorated }
     // Appear (window opened while the picker is showing): fade + scale 0.9 → 1 from the
     // centre, on channels of their own so the hover/lift Behaviors are not re-smoothing an
     // already smooth ramp (they are disabled while it runs). Both NumberAnimations carry an
@@ -163,7 +170,7 @@ Item {
             anchors.centerIn: parent
             visible: !cap.visible && tile.iconUrl.length > 0
             source: tile.iconUrl
-            width: Math.min(40, parent.width * 0.5)
+            width: Math.min(tile.iconMax, parent.width * 0.5)
             height: width
             fillMode: Image.PreserveAspectFit
             sourceSize.width: width * Screen.devicePixelRatio
