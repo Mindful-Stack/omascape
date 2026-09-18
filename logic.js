@@ -1350,7 +1350,10 @@ function isModifierKey(key) {
 function isActionKey(key, chord, ctrlMask) {
     if (chord === ctrlMask && key === 0x57) return true            // Ctrl+W (Qt.Key_W)
     if (chord) return false
-    return key === 0x01000004 || key === 0x01000005                // Return, Enter
+    // Return, Enter, and Space (peek). Space acts on the target exactly as the other two do, so
+    // it must read pointer liveness rather than clearing it — see the peek spec, "`Space` is an
+    // action key". A chorded Space is excluded by the line above.
+    return key === 0x01000004 || key === 0x01000005 || key === 0x20
 }
 
 // ---- Scratchpad (docs/specs/2026-09-12-scratchpad-design.md) ---------------------------

@@ -33,6 +33,25 @@ TestCase {
                    "not a modifier: 0x" + others[j].toString(16))
     }
 
+    // Distinguishes: a Space that clears pointer liveness like an ordinary key. The key handler
+    // clears pointerLive for everything isActionKey rejects, BEFORE any resolve runs — so a Space
+    // outside this predicate means hovering one window and pressing Space previews the Tab cursor
+    // instead. Also pins the hex: logic.js is a .pragma library with no Qt.Key_* access, so 0x20
+    // is hand-written and a transposed digit would make Space an ordinary key silently.
+    function test_isActionKey_accepts_bare_space_only() {
+        verify(Logic.isActionKey(Qt.Key_Space, 0, Qt.ControlModifier), "bare Space is an action key")
+        var chords = [Qt.ControlModifier, Qt.AltModifier, Qt.MetaModifier,
+                      Qt.ControlModifier | Qt.AltModifier]
+        for (var i = 0; i < chords.length; i++)
+            verify(!Logic.isActionKey(Qt.Key_Space, chords[i], Qt.ControlModifier),
+                   "chorded Space is not an action key (chord " + chords[i] + ")")
+        // Positive control: the existing action keys must still qualify, so a regression that
+        // replaced the predicate's body rather than extending it cannot pass this test.
+        verify(Logic.isActionKey(Qt.Key_Return, 0, Qt.ControlModifier))
+        verify(Logic.isActionKey(Qt.Key_W, Qt.ControlModifier, Qt.ControlModifier))
+        verify(!Logic.isActionKey(Qt.Key_Tab, 0, Qt.ControlModifier), "Tab is keyboard intent")
+    }
+
     // Distinguishes: a hit test that returns the FIRST containing rect instead of the topmost.
     // Both tiles contain (15,15); only a z-aware implementation answers "b".
     function test_tileAt_picks_the_highest_z() {
