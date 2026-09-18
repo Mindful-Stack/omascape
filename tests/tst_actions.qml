@@ -7,6 +7,32 @@ TestCase {
 
     function cand(addr, x, y, w, h, z) { return { address: addr, x: x, y: y, w: w, h: h, z: z } }
 
+    // ---- Modifier keys -----------------------------------------------------------------
+    // Distinguishes: a raw key constant in logic.js that does not match the Qt enum it claims
+    // to be. logic.js is a `.pragma library` with no access to Qt.Key_*, so every value there is
+    // hand-written hex — a transposed digit makes a modifier press count as an ordinary key,
+    // silently taking the target away from the pointer mid-chord. Comparing against the real
+    // enum here is what pins them.
+    //
+    // This also carries the cases the UI suite CANNOT: QTest cannot synthesize Key_AltGr on
+    // Qt 6.4, which CI runs — its keyToAscii has no case for it and the default branch asserts,
+    // aborting the whole run (qasciikey.cpp:280 in v6.4.2). tests/ui/actions.qml therefore
+    // presses only the five keys Qt 6.4 can synthesize, and AltGr is covered here instead.
+    function test_isModifierKey_covers_every_modifier_and_nothing_else() {
+        var mods = [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta,
+                    Qt.Key_CapsLock, Qt.Key_AltGr]
+        for (var i = 0; i < mods.length; i++)
+            verify(Logic.isModifierKey(mods[i]), "modifier " + i + " (0x" + mods[i].toString(16) + ")")
+        // Keys that must NOT count: the chord partners (Ctrl+W, Ctrl+L), the navigation keys,
+        // and the lock keys that are not modifiers at all.
+        var others = [Qt.Key_W, Qt.Key_L, Qt.Key_A, Qt.Key_Tab, Qt.Key_Backtab, Qt.Key_Up,
+                      Qt.Key_Down, Qt.Key_Left, Qt.Key_Right, Qt.Key_Return, Qt.Key_Enter,
+                      Qt.Key_Escape, Qt.Key_Space, Qt.Key_NumLock, Qt.Key_ScrollLock, Qt.Key_1]
+        for (var j = 0; j < others.length; j++)
+            verify(!Logic.isModifierKey(others[j]),
+                   "not a modifier: 0x" + others[j].toString(16))
+    }
+
     // Distinguishes: a hit test that returns the FIRST containing rect instead of the topmost.
     // Both tiles contain (15,15); only a z-aware implementation answers "b".
     function test_tileAt_picks_the_highest_z() {

@@ -182,8 +182,13 @@ TestCase {
             { key: Qt.Key_Control, name: "Control" },
             { key: Qt.Key_Alt, name: "Alt" },
             { key: Qt.Key_Meta, name: "Meta" },
-            { key: Qt.Key_CapsLock, name: "CapsLock" },
-            { key: Qt.Key_AltGr, name: "AltGr" }
+            { key: Qt.Key_CapsLock, name: "CapsLock" }
+            // Qt.Key_AltGr is deliberately absent: CI runs Qt 6.4, whose QTest::keyToAscii has
+            // no case for it and asserts in its default branch (qasciikey.cpp:280 in v6.4.2),
+            // aborting the entire run rather than failing one test. It passes locally on Qt
+            // 6.11 only because that assert is gone. Logic.isModifierKey's own Tier 1 test
+            // (tests/tst_actions.qml) covers AltGr against the real Qt enum instead, which is
+            // where the value being right actually matters.
         ]
         for (var i = 0; i < mods.length; i++) {
             hoverTile("0xA")
