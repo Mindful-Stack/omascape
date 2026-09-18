@@ -460,10 +460,11 @@ Item {
     }
     // ---- Peek (docs/specs/2026-09-18-peek-design.md) --------------------------------------
     // The hold carries exactly three pieces of state and no more. `peeking` is "the key is down
-    // and the hold is live"; `peekedKey` is the identity currently on screen, for the
-    // disappearance test in rebuild(); `peekCancelled` suppresses the layer for the REST of the
-    // hold once the target vanished or a modal took over. None of the three is a copy of the
-    // target's geometry or contents — following the target is the absence of a snapshot.
+    // and the hold is live"; `peekedKey` is the identity currently on screen — Task 8 adds a
+    // disappearance test in rebuild() that reads it; `peekCancelled` suppresses the layer for the
+    // REST of the hold once the target vanished or a modal took over. None of the three is a
+    // copy of the target's geometry or contents — following the target is the absence of a
+    // snapshot.
     property bool peeking: false
     property string peekedKey: ""
     property bool peekCancelled: false
@@ -474,13 +475,75 @@ Item {
         if (!t) return ""
         return t.kind === "window" ? "w:" + t.address : "s:" + t.id
     }
-    // Every path out of a hold: the release, a modal opening, focus loss, the overview closing.
-    // `cancel` true additionally suppresses re-opening until the key is physically released —
-    // the release handler is the only thing that clears it.
-    function peekClear(cancel) {
+    // Three named exits, not one function with a boolean: `cancel` true/false looked like a
+    // simple inverse pair, but it is not — a release must clear `peekCancelled` and an abort must
+    // SET it, and mutation testing showed a bare boolean argument gives no signal, offscreen or
+    // otherwise, when a call site passes the wrong one. Naming the three cases instead makes a
+    // wrong call site a readable diff instead of a silent behavioural swap, which matters more
+    // once Task 8 adds more call sites than the three below.
+    //
+    // A normal release: the key came up, the hold ends, and the key is free to open a new one on
+    // its very next press — so the cancel clears too.
+    function peekRelease() {
         peeking = false
         peekedKey = ""
-        if (cancel) peekCancelled = true
+        peekCancelled = false
+    }
+    // An abort: the target vanished, a modal took over, or the overview is closing under a still
+    // -held key whose release will never arrive. The hold ends, but the cancel is left SET so the
+    // key stays inert for the rest of this physical press — only `peekRelease()` (the real key-up)
+    // clears it.
+    function peekAbort() {
+        peeking = false
+        peekedKey = ""
+        peekCancelled = true
+    }
+    // A fresh summon: nothing carries over from whatever the key was doing at the previous close,
+    // cancelled or not — a stale `peekCancelled` here would leave the very first Space of a new
+    // session silently inert.
+    function peekReset() {
+        peeking = false
+        peekedKey = ""
+        peekCancelled = false
+    }
+    // The mini-map's window list, reconciled by identity (Task 7 review, item 2). `rebuild()`
+    // reassigns `_windows` to a brand-new array on every `onWorkspacesChanged` — i.e. on ANY
+    // title change anywhere, not just on the peeked workspace — so a naive `_windows.filter(...)`
+    // in the PeekLayer binding below hands it a fresh array every time, even when nothing about
+    // the peeked workspace changed. PeekLayer's own Repeater keys its model on that array's
+    // IDENTITY, not its content, so a fresh-but-equal array reassigns the model, which destroys
+    // and recreates every WindowTile delegate underneath it — and with it, every live
+    // ScreencopyView capture mid-hold. That is invisible offscreen (no captures exist in this
+    // tier) but real on a live desktop: a held workspace peek would restart all its captures on
+    // compositor traffic that has nothing to do with it. The fix mirrors the grid's own
+    // `tilesModel` reconciliation (`rowDiffers`, above): build the candidate list, fold a cheap
+    // signature over exactly the fields `_placeWindows`/`peekTiles` (logic.js) actually consume,
+    // and hand back the PREVIOUS array — same object, same identity — whenever the signature
+    // still matches. A workspace switch mid-hold (a new `wsId`) always misses the cache, so the
+    // mini-map still repaints immediately when the peek re-targets to a different workspace.
+    //
+    // ONE property holding a mutable object, not three scalar properties: `workspaceWindows`'s own
+    // binding calls this function, so on a cache HIT this function both reads and (on a miss)
+    // writes the cache in the same pass. Reassigning a `property var` from inside another
+    // property's binding evaluation trips QML's binding-loop detector (`Binding loop detected for
+    // property "workspaceWindows"` — seen and removed while writing this), even though the
+    // read/write here is safe and terminates. Mutating this object's OWN fields in place, instead
+    // of reassigning the property that holds it, changes nothing QML's property system can see
+    // (no assignment, no change notification) and avoids the false loop entirely.
+    property var _peekWsWinCache: ({ id: -1, sig: "", list: [] })
+    function peekWorkspaceWindowsFor(wsId) {
+        var out = [], sig = ""
+        for (var i = 0; i < root._windows.length; i++) {
+            var w = root._windows[i]
+            if (w.workspaceId !== wsId) continue
+            out.push(w)
+            sig += w.address + "|" + w.ax + "|" + w.ay + "|" + w.sw + "|" + w.sh + "|" +
+                   w.floating + "|" + w.fullscreen + "|" + w.workspaceId + ";"
+        }
+        var c = _peekWsWinCache
+        if (wsId === c.id && sig === c.sig) return c.list
+        c.id = wsId; c.sig = sig; c.list = out
+        return out
     }
     // ---- Actions: the arrow-key window cursor ----------------------------------------------
     // The keyboard's window target inside the selected workspace. "" = none. Mirrored into the
@@ -1269,7 +1332,7 @@ Item {
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
-        peekClear(false); peekCancelled = false
+        peekReset()                                 // nothing carries over from the previous summon
         // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
         // "most recent input device wins" means the device that summoned the overview, not
@@ -1291,7 +1354,7 @@ Item {
     function close() {
         if (!opened) return                        // a click on the scrim mid-fade is not a second close
         endDrag(); menuDismiss(); cancelCloseAllConfirm()
-        peekClear(true)                            // the release will never arrive at an unfocused surface
+        peekAbort()                                 // the release will never arrive at an unfocused surface
         // settleTimer is open-only; reconcileTimer keeps running (bounded by the 1.8 s
         // deadlines): it clears optimistic display state (pendingMoves / fsPending / pendingCloses)
         // so a re-summon inside that window shows authoritative state, and with keepLoaded the
@@ -1566,7 +1629,7 @@ Item {
                     if (!chord && e.key === Qt.Key_Space) {
                         if (root.peeking || root.peekCancelled) return
                         var pt = root.resolveTarget()
-                        if (!pt) { root.peekCancelled = true; return }   // no target: nothing, all hold
+                        if (!pt) { root.peekAbort(); return }   // no target: nothing, all hold
                         root.peekedKey = root.peekKeyOf(pt)
                         root.peeking = true
                         return
@@ -1627,10 +1690,7 @@ Item {
                     // The release is the ONLY thing that clears the cancel: every other exit path
                     // (a modal, focus loss, the target vanishing) leaves it set, which is what
                     // stops the layer re-opening under a key that is merely still held.
-                    if (e.key === Qt.Key_Space && !e.isAutoRepeat) {
-                        root.peekClear(false)
-                        root.peekCancelled = false
-                    }
+                    if (e.key === Qt.Key_Space && !e.isAutoRepeat) root.peekRelease()
                 }
             }
 
@@ -2088,10 +2148,10 @@ Item {
         // dialog in either direction — `Keys.onPressed` returns early for both before the `Space`
         // branch, and both call the peek's own force-clear on open, so the two are never on
         // screen together. Display only: every property below is a plain binding on root state,
-        // not a value copied at press time. `shown` and `peekTarget` are bindings on `resolveTarget()`
-        // so a live Tab or hover re-targets the layer without a release — no imperative
-        // `onPeekingChanged` assignment anywhere in this block. PeekLayer anchors nothing itself,
-        // so this call site owns its sizing.
+        // not a value copied at press time. `shown` follows `peeking`/`peekCancelled` directly;
+        // `peekTarget` is a binding on `resolveTarget()`, so a live Tab, arrow or hover re-targets
+        // the layer without a release — no imperative `onPeekingChanged` assignment anywhere in
+        // this block. PeekLayer anchors nothing itself, so this call site owns its sizing.
         PeekLayer {
             id: peekLayer
             anchors.fill: parent
@@ -2108,13 +2168,12 @@ Item {
                 var wb = root.boxForWs(t.id)
                 return wb ? root._monByName[wb.monitorName] : null
             }
+            // See peekWorkspaceWindowsFor's own comment: this hands back the SAME array when
+            // nothing that _placeWindows/peekTiles reads has changed, so an unrelated rebuild()
+            // does not reassign the Repeater's model and restart every capture underneath it.
             workspaceWindows: {
                 var t = peekTarget
-                if (!t || t.kind !== "workspace") return []
-                var out = []
-                for (var i = 0; i < root._windows.length; i++)
-                    if (root._windows[i].workspaceId === t.id) out.push(root._windows[i])
-                return out
+                return (t && t.kind === "workspace") ? root.peekWorkspaceWindowsFor(t.id) : []
             }
             // The lock gate, mirroring the grid tile's `boxArmed`: an armed workspace's windows
             // are under a `no_screen_share` rule and the compositor denies toplevel export, so

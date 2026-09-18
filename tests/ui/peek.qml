@@ -201,20 +201,47 @@ TestCase {
         keyRelease(Qt.Key_Space)
     }
 
-    // Distinguishes: an open decision re-evaluated on every press rather than guarded on state —
-    // the shape a real auto-repeat would take. QtTest cannot set isAutoRepeat (see
-    // tests/ui/actions.qml:426), so a second plain press while held is the closest offscreen
-    // proxy, and the spec's guard is written on state precisely so this proxy is meaningful.
-    function test_a_second_press_while_held_changes_nothing() {
-        hoverTile("0xB")
+    // Distinguishes: a re-press treated as a fresh open once the hold's cancellation is the only
+    // thing guarding it (the plan's own missing "no-op when the hold is cancelled" row). A first
+    // press with no target aborts the hold and sets `peekCancelled`; clearing the query mid-hold
+    // makes a target exist again, but the SAME physical press must stay inert until the key is
+    // actually released — a second press must not reopen it just because resolving would now
+    // succeed. Red if the whole guard (`Overview.qml`'s `if (root.peeking || root.peekCancelled)
+    // return`) is deleted; red if only the `|| root.peekCancelled` clause is removed; red if the
+    // no-target branch stops setting `peekCancelled` (`root.peekAbort()`).
+    function test_a_press_after_cancellation_stays_closed_for_the_rest_of_the_hold() {
+        keyClick("z"); keyClick("z"); keyClick("z")
+        compare(view.matches.length, 0, "precondition: a query with no match")
         keyPress(Qt.Key_Space)
-        compare(view.testPeek.shown, true)
-        var target = view.testPeek.peekTarget.address
+        compare(view.peeking, false, "no target: the press aborts, nothing opens")
+        view.setQuery("")
+        verify(view.resolveTarget() !== null, "precondition: a target exists again")
         keyPress(Qt.Key_Space)
-        compare(view.testPeek.shown, true, "still open, not toggled shut")
-        compare(view.testPeek.peekTarget.address, target, "and still on the same target")
+        compare(view.peeking, false,
+                "still cancelled: a target reappearing mid-hold does not reopen the SAME hold")
         keyRelease(Qt.Key_Space)
-        compare(view.testPeek.shown, false, "one release closes it")
+    }
+
+    // PROVISIONAL: this pins a transitional state, not the spec's final word on it. Once Task 8
+    // adds the rebuild()-driven disappearance check, a target that stops resolving mid-hold ought
+    // to end the hold on its own (via that check), not merely leave the layer showing nothing.
+    // Until then, this test is the guard's OTHER half: a null target on a REPEAT press must not
+    // retroactively cancel a hold that already opened successfully — cancellation is a decision
+    // the no-target branch makes once, at open, not something a later press re-derives. Red if
+    // the whole guard is deleted (a second press would re-run the no-target branch and set
+    // `peekCancelled`); correctly stays green if only the cancelled half above is removed, since
+    // this hold was never cancelled to begin with.
+    function test_a_second_press_after_the_target_stops_resolving_does_not_cancel_the_hold() {
+        var t = view.resolveTarget()
+        verify(t !== null && t.kind === "workspace", "precondition: the target is a workspace")
+        keyPress(Qt.Key_Space)
+        compare(view.peeking, true)
+        keyClick("z"); keyClick("z"); keyClick("z")
+        compare(view.matches.length, 0, "precondition: the query now matches nothing")
+        keyPress(Qt.Key_Space)
+        compare(view.peekCancelled, false, "a repeat press does not retroactively cancel the hold")
+        compare(view.peeking, true, "and the hold is still open")
+        keyRelease(Qt.Key_Space)
     }
 
     // Distinguishes: a hold that arms and opens later. With no target at the press, the spec
@@ -247,6 +274,28 @@ TestCase {
         view.close()
         compare(view.peeking, false, "peeking is force-cleared, not waiting on a release")
         compare(view.testPeek.shown, false)
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: `open()`'s own `peekReset()` call being deleted. Nothing inside a single
+    // hold would notice that loss (`test_a_press_after_cancellation...` above covers a repeat
+    // press within the SAME hold, which is a different code path), but a `peekCancelled` left set
+    // from a hold that was still cancelled when the overview closed — the key's release event
+    // never arrives at an unfocused surface, so nothing else clears it — would silently swallow
+    // the very first Space of the NEXT summon. Leaves a hold cancelled, closes without ever
+    // releasing Space, reopens, and presses Space again: a fresh summon must not inherit the
+    // previous one's cancellation.
+    function test_a_fresh_summon_is_not_inert_from_a_previous_cancelled_hold() {
+        keyClick("z"); keyClick("z"); keyClick("z")
+        compare(view.matches.length, 0, "precondition: a query with no match")
+        keyPress(Qt.Key_Space)
+        compare(view.peekCancelled, true, "precondition: the hold is cancelled")
+        view.close(); wait(50); view.open(); wait(400)
+        verify(view.resolveTarget() !== null,
+               "precondition: open() resets the query, so a target exists again")
+        keyPress(Qt.Key_Space)
+        compare(view.peeking, true,
+                "a fresh summon is not held inert by the previous summon's cancellation")
         keyRelease(Qt.Key_Space)
     }
 }
