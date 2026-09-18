@@ -2,7 +2,8 @@
 
 Date: 2026-09-18 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on actions (`actions-omascape` at `da9075b`).
-Status: **approved design, pre-implementation.** Branch `presence`.
+Status: **approved design, pre-implementation; revised 2026-09-18 after review** (a UI-level
+assertion of the real card bounds, marked ✎). Branch `presence`.
 
 ## Goal
 
@@ -157,6 +158,22 @@ readonly property color badgeColor: Qt.rgba(cardColor.r, cardColor.g, cardColor.
   rewriting the test — only the table above.
 - `layout()` is unchanged for the `availW`-missing path — the existing safe-default assertions
   must still pass untouched.
+
+**UI suite (`tests/ui/presence.qml`, the real `Overview` against the stubbed compositor).** ✎
+*(added after review 2026-09-18.)* The pure test above **cannot catch this bug**, which is the
+point: `screenMargin` could be correct, fully tested and simply never wired into `maxCardW` — or
+wired into one of the two bindings and not the other, which is precisely the drift that caused the
+original defect. Only something that measures the real card can tell.
+- At `width: 1920; height: 1080`, open the overview with a default ten-workspace layout and assert
+  `card.width <= 1920 - 2 * Logic.screenMargin(1920)` — i.e. at least 96 px per side, versus the
+  10 px the current code produces. This is the test that would have failed before the fix.
+- Assert `flick.contentWidth <= card.width - 2 * card.pad`, so the canvas binding is checked
+  independently of the card binding. One assertion per binding: neither can be omitted silently.
+- **A tall layout at the same size** — enough monitor groups to drive `canvas.implicitHeight` past
+  `maxCardH` — asserting `card.height <= 1080 - 2 * Logic.screenMargin(1080)` and that the
+  Flickable still scrolls (`contentHeight > flick.height`). This is the only coverage the vertical
+  margin gets; `maxCardH` does not bind in ordinary layouts, so an unwired height binding would
+  otherwise go unnoticed until someone docked a third monitor.
 
 **Visual (manual, both themes):**
 - Light and dark sweep confirming the 0.35 border reads on both without ringing, and that the

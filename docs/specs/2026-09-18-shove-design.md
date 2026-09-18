@@ -2,8 +2,9 @@
 
 Date: 2026-09-18 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on actions (`actions-omascape` at `da9075b`).
-Status: **approved design, pre-implementation. One compositor probe blocks part of it — see
-"Probe required".** Branch `shove`.
+Status: **approved design, pre-implementation; revised 2026-09-18 after review** (three
+corrections, marked ✎). One compositor probe blocks part of it — see "Probe required".
+Branch `shove`.
 
 ## Goal
 
@@ -17,7 +18,9 @@ window two workspaces over without releasing anything.
 **In:** a `Shift`+arrow branch in the key handler; window shove via the existing silent-move
 dispatch; workspace shove branching on the destination's monitor; a new atomic content-swap
 chunk; selection following the shoved thing; `Logic.isActionKey` learning about `Shift`; hint row;
-tests.
+tests. ✎ Added after review: an `effectiveWorkspaceOf(addr)` accessor over `pendingMoves`, the
+hover-consuming latch, a correction to the cursor-survival check at `Overview.qml:1177`, and a
+`tests/ui/shove.qml` suite for the three of those that no pure test can reach.
 
 **Out:** `Shift`+digit (shove to a numbered workspace); shoving with the mouse beyond the existing
 drag-and-drop; wrapping past the grid edges; reordering workspace *numbers* (Hyprland has no such
@@ -29,12 +32,32 @@ dispatcher — see Decisions); shoving the scratchpad workspace itself; undo.
   direction.** A window's container is a workspace; a workspace's container is a monitor. Plain
   arrows move the *view*; `Shift`+arrows move the *thing*.
 
-- **`Shift`+arrow is an ACTION key, not a navigation key.** It reads pointer liveness and leaves
-  it unchanged, exactly as `Ctrl+W` does — so hovering a tile and tapping `Shift+Right` shoves the
-  window you are pointing at. The alternative (treating it as navigation) would clear liveness on
-  entry and silently retarget to the Tab cursor, which is the precise failure `isActionKey` was
-  written to prevent. `Logic.isActionKey` grows a `shift` parameter: `Shift` is deliberately
-  absent from the `chord` mask (`Overview.qml:1497`), so it cannot be inferred and must be passed.
+- **`Shift`+arrow is an ACTION key, and it CONSUMES the hover it read.** ✎ *(revised after review
+  2026-09-18 — the original "reads liveness and leaves it unchanged" was wrong, see below.)*
+  Ordering is the whole of it:
+
+  1. **Reads** pointer liveness, so hovering a tile and tapping `Shift+Right` shoves the window
+     you are pointing at. `Logic.isActionKey` must therefore return true for it, so the blanket
+     `if (!isActionKey(...)) pointerLive = false` at `Overview.qml:1518` does **not** pre-clear.
+     It grows a `shift` parameter: `Shift` is deliberately absent from the `chord` mask
+     (`Overview.qml:1497`), so it cannot be inferred and must be passed.
+  2. **Latches** the resolved target onto the keyboard — `cursorAddress` for a window,
+     `selectedId` for a workspace.
+  3. **Clears** `pointerLive`, *after* resolving.
+
+  Why the clear is mandatory rather than tidy: `resolveTarget()` hit-tests the pointer position
+  afresh on every press (`Overview.qml:445`). Keep liveness and the second `Shift+Right` of a
+  repeat re-hit-tests a *stationary* pointer against a grid the first shove just changed — the
+  window has left, so the press lands on whatever slid under the cursor, or on the origin
+  workspace box. The feature's headline claim would be false on its second keystroke. Latching
+  also solves the other half: a hover-only target has **no** `cursorAddress` at all, so "the
+  cursor follows the window" has nothing to follow until the shove establishes one.
+
+  This is a refinement of the action-key doctrine, not a reversal of it. `Ctrl+W` may leave
+  liveness alone because closing removes its own target; a shove leaves its target alive and
+  somewhere new, so it has to say where. Real pointer movement re-arms liveness through the
+  existing `notePointerMove` path (`Overview.qml:414`), so hovering elsewhere and shoving that
+  works exactly as before — the clear ends a *repeat chain*, not hover targeting.
 
 - **The branch runs before the `finding` split**, so `Shift`+arrow works during a find. Plain
   arrows there drive `navigateMatch`; `Shift`+arrows shove the match. Same target rule, no mode.
@@ -46,13 +69,42 @@ dispatcher — see Decisions); shoving the scratchpad workspace itself; undo.
 
 - **Edges are inert, with no edge logic.** `Logic.navigate` (`logic.js:783`) already returns the
   *current* index when nothing lies in that direction. A shove whose destination equals its origin
-  dispatches nothing. No wrap, deliberately: wrapping would teleport a window from workspace 1 to
-  workspace 10 on a keypress meant to nudge it.
+  dispatches nothing — but it still latches (see `latch()` below), so pressing into an edge and
+  reversing acts on the thing you were pushing. No wrap, deliberately: wrapping would teleport a
+  window from workspace 1 to workspace 10 on a keypress meant to nudge it.
 
 - **Selection follows the shoved thing.** After a window shove the selection moves to the
-  destination workspace and the cursor stays on the moved window; after a workspace shove the
-  selection follows the contents. This is what makes the gesture repeatable, which is the whole
-  reason to have it rather than using the context menu.
+  destination workspace and the cursor holds the moved window; after a workspace shove the
+  selection follows the contents (for a monitor move, contents and id move together, so it stays
+  on the same id). This is what makes the gesture repeatable, which is the whole reason to have it
+  rather than using the context menu.
+
+- **A repeat shove reads the PENDING destination, not the reported one.** ✎ *(added after review
+  2026-09-18.)* `pendingMoves[addr].workspaceId` (`Overview.qml:387`, set at `:894` and `:935`)
+  holds an optimistic destination for up to 1800 ms while `refreshToplevels` is in flight;
+  `_windowByAddress[addr].workspaceId` is what the compositor last *reported*. Shoves can easily
+  outrun a round trip, and a second press that read the reported workspace would compute its
+  origin as the box the window has already left — dispatching a second move to the *same*
+  destination and stalling the chain at one hop. So one accessor decides:
+
+  ```
+  effectiveWorkspaceOf(addr) = pendingMoves[addr] ? pendingMoves[addr].workspaceId
+                                                  : _windowByAddress[addr].workspaceId
+  ```
+
+  The drag path reads `win.workspaceId` directly (`Overview.qml:921`, "model.wsid may still be
+  optimistic") and is right to: a drag begins from a fresh grab, which supersedes pending state by
+  definition. A repeat shove has no grab and must consult it. Each shove `supersedePending`s its
+  own previous entry (`Overview.qml:526`) before writing the new one — the window is going to
+  ws 5 now, not ws 4, and the fresh `window.move` dispatch is correct whether or not the first
+  one has landed.
+
+- **The cursor must survive its own shove.** ✎ *(added after review 2026-09-18.)* The reconcile at
+  `Overview.qml:1177` drops `cursorAddress` when its window's reported workspace differs from
+  `selectedId`. A shove sets `selectedId` to the destination while the compositor still reports
+  the origin, so the very next rebuild would clear the cursor and break the chain. That check
+  moves onto `effectiveWorkspaceOf` as well. This is a **general** correction, not a shove
+  special case: a cursor should not be dropped mid-flight during a drag either.
 
 - **Workspace shoves branch on where the arrow LANDS, not on which arrow it was.** Different
   monitor → move the workspace there. Same monitor → swap contents with it. Direction-keyed rules
@@ -86,6 +138,7 @@ dispatcher — see Decisions); shoving the scratchpad workspace itself; undo.
 | window, no box in that direction| nothing                                                             |
 | workspace, destination on another monitor | move the workspace to that monitor; selection stays on the same id |
 | workspace, destination on the same monitor | swap the two workspaces' contents; selection follows to the destination |
+| workspace, either side empty or synthetic | still swaps — the empty side contributes nothing and the occupied side moves across (see the chunk's case table) |
 | workspace, both empty           | nothing — no chunk is generated, no dispatch is made                |
 | scratchpad row as a destination | valid for a **window** shove (via `wsSelector`), when the row is shown |
 | scratchpad row as the target    | nothing — it has no monitor to move between and no peer to swap with |
@@ -94,31 +147,50 @@ dispatcher — see Decisions); shoving the scratchpad workspace itself; undo.
 ## The QML side — `shoveTarget(dir)`
 
 ```
-t = resolveTarget()                      // pointer-live aware, exactly as closeTarget() is
+t = resolveTarget()                      // reads pointer liveness, exactly as closeTarget() does
 if (!t) return
 
 if (t.kind === "window")
-    w  = _windowByAddress(t.address)
-    i  = Logic.indexOfWorkspace(boxes, w.workspaceId)      // the WINDOW's box
-    j  = Logic.navigate(boxes, i, dir);  if (j === i) return
-    dispatch silent move -> boxes[j].workspaceId           // the drag path's chunk, unchanged
-    optimistic tile update, then reconcile                 // the drag path's tail, unchanged
-    selectedId = boxes[j].workspaceId                      // cursorAddress unchanged: it follows
+    addr = t.address
+    i = Logic.indexOfWorkspace(boxes, effectiveWorkspaceOf(addr))   // PENDING-aware origin
+    j = Logic.navigate(boxes, i, dir);  if (j === i) { latch(); return }
+    dest = boxes[j].workspaceId
+
+    supersedePending(addr)                                 // drop this window's previous optimism
+    pendingMoves[addr] = { workspaceId: dest, pos: null, deadline: Date.now() + 1800 }
+    tilesModel row for addr: wsid = dest                   // optimistic, as the drag path does
+    dispatch silent move -> dest                           // the drag path's chunk, unchanged
+    scheduleRebuild(); reconcileTimer.restart()            // the drag path's tail, unchanged
+
+    cursorAddress = addr                                   // LATCH: may be the first cursor ever,
+    selectedId    = dest                                   //   under a hover-only target
+    pointerLive   = false                                  // end the hit-test chain (see Decisions)
 
 else                                     // workspace
     i = Logic.indexOfWorkspace(boxes, t.id)
     b = boxes[i]
-    j = Logic.navigate(boxes, i, dir);   if (j === i) return
+    j = Logic.navigate(boxes, i, dir);   if (j === i) { latch(); return }
     d = boxes[j]
-    if (b.special || d.special) return
-    if (d.monitorName !== b.monitorName) Logic.workspaceMoveLua(b.workspaceId, d.monitorName)
-    else if (b.windowCount || d.windowCount) Logic.swapWorkspaceContentsLua(b, d)
-    selection follows per the table above
+    if (b.special || d.special) { latch(); return }
+    if (d.monitorName !== b.monitorName)
+        dispatch Logic.workspaceMoveLua(b.workspaceId, d.monitorName)
+        selectedId = b.workspaceId                         // same workspace, new monitor
+    else if (b.windowCount || d.windowCount)
+        dispatch Logic.swapWorkspaceContentsLua(b, d)
+        selectedId = d.workspaceId                         // follow the contents
+    else return                                            // both empty: no chunk, no dispatch
+    setCursor("")                                          // a workspace shove owns no window
+    pointerLive = false
 ```
+
+`latch()` is the no-op-but-still-consume path: an inert shove (edge, scratchpad, both-empty) still
+sets the keyboard target and clears liveness, so pressing into an edge and then reversing acts on
+the thing you were pushing rather than re-hit-testing the pointer.
 
 `Logic.shoveDestination(boxes, origin, dir)` is extracted as a pure function returning
 `{kind: "none" | "window" | "moveMonitor" | "swapContents", ...}` so the branch itself is Tier 1
-tested rather than living inside a QML handler.
+tested rather than living inside a QML handler. It takes the origin *workspace id* — the caller
+resolves `effectiveWorkspaceOf` — so the pure function stays ignorant of pending state.
 
 ## The compositor side — `swapWorkspaceContentsLua(a, b)`
 
@@ -133,15 +205,17 @@ function()
   local failed = {}
   local ok, err = pcall(function()
     local wa, wb = hl.get_workspace("A"), hl.get_workspace("B")
-    if not wa or not wa.get_windows then error("workspace A not found", 0) end
-    local la = snapshot(wa)                       -- addresses, normalised to 0x…
+    -- SYMMETRIC. Neither side errors on a workspace the compositor does not have: a
+    -- synthetic pad workspace is the NORMAL case under the default `workspaces: 10`, and
+    -- either end of a swap can be one. A missing workspace is an empty snapshot, full stop.
+    local la = (wa and wa.get_windows) and snapshot(wa) or {}   -- addresses, normalised to 0x…
     local lb = (wb and wb.get_windows) and snapshot(wb) or {}
     -- BOTH lists are read before ANYTHING moves. Reading B after moving A into it would
     -- find the windows just moved and send them straight back: the swap would be a no-op
     -- that looks like a bug. This ordering is the single load-bearing fact of the chunk.
     for _, addr in ipairs(la) do guarded: window.move{ workspace = "B", follow = false } end
     for _, addr in ipairs(lb) do guarded: window.move{ workspace = "A", follow = false } end
-    <retarget the monitor to B — see "Probe required">
+    if #la > 0 then <retarget the monitor to B — see "Probe required"> end
   end)
   if ok and #failed > 0 then ok, err = false, table.concat(failed, "; ") end
   report('swap workspaces')
@@ -152,9 +226,26 @@ end
 - **Each move is guarded individually**, `closeAllLua`-style: one window refusing must not strand
   the other half of the swap, and failures are reported together as one notification rather than
   one per window.
-- **A destination that does not exist is fine.** `hl.get_workspace("4")` returns nil for a
-  synthetic pad workspace Hyprland never created; `lb` is then `{}` and the swap degenerates to
-  "move all of A to B", which is exactly right. Hyprland creates the workspace on the first move.
+- **Either workspace may be missing, and the two cases are symmetric.** ✎ *(corrected after review
+  2026-09-18 — the first draft copied `closeAllLua`'s `error("workspace not found")` for A, which
+  was wrong: `closeAllLua` is only ever reached from a menu row that requires `windowCount > 1`,
+  so its A always exists. A shove has no such gate, and with the default `workspaces: 10` padding
+  a synthetic never-created workspace is the ordinary case on either side.*) Whichever side is
+  missing contributes `{}`, the swap degenerates to a one-way move, and Hyprland creates the
+  destination on the first `window.move`. The three live cases:
+
+  | A | B | result |
+  |---|---|---|
+  | occupied | occupied | true exchange; monitor retargets to B |
+  | occupied | missing/empty | all of A moves to B; monitor retargets to B |
+  | missing/empty | occupied | all of B moves to A; **no retarget** (see below) |
+
+  Both empty never reaches the chunk — the QML side refuses on `windowCount`.
+- **The retarget is conditional on `#la > 0`**, which is also the defined outcome for an empty
+  `la` that the focus fallback would otherwise have no window to use. The retarget exists so a
+  monitor follows A's contents to B; if A had no contents, nothing went to B and there is nothing
+  to follow. The monitor stays on A — which has just *gained* B's windows, so the user's screen
+  fills rather than emptying. Well defined, and the right picture either way.
 - **Focus is deliberately not restored**, following `workspaceMoveLua`'s precedent: the operation's
   entire purpose is to change which workspace is showing, so re-focusing the previous window would
   undo the thing the user asked for. Only the cursor is warped back.
@@ -171,9 +262,10 @@ script under `tests/integration/` **before** the chunk is written:
    dispatch, no focus side effects.
 2. **Fallback, using only dispatchers already proven:** focus a window that ended up on B.
    `mock_hl.lua:210` records a live-probed fact — *focus carries the workspace* on 0.56.2 — so
-   focusing any window now on B switches to B. The window to focus is the first entry of `la`
-   (a window that was on A and is now on B), not the previously-active window, which may have
-   been on a third workspace entirely.
+   focusing any window now on B switches to B. The window to focus is `la[1]` (a window that was
+   on A and is now on B), not the previously-active window, which may have been on a third
+   workspace entirely. `la[1]` is guaranteed to exist wherever the retarget runs at all: the
+   retarget is gated on `#la > 0` for exactly this reason, so the fallback has no empty case.
 
 If neither lands, the swap still ships without the retarget and the monitor keeps showing A; that
 degradation is a worse gesture, not a broken one, and should be called out rather than papered over.
@@ -192,12 +284,40 @@ degradation is a worse gesture, not a broken one, and should be called out rathe
 - `swapWorkspaceContentsLua` emits no chunk when both workspaces are empty.
 - Shape test: every dispatch in the new chunk goes through `run(`, never bare `hl.dispatch(`.
 
+**UI suite (`tests/ui/shove.qml`, the real `Overview` against the stubbed compositor).** All three
+of the following exist because a pure test cannot reach them — they are about pointer state,
+optimistic state and reconcile timing, none of which `logic.js` knows about. The fixture drives
+reconciliation through explicit `view.rebuild()` calls, so "the compositor has not answered yet"
+is expressed simply by not calling it.
+- **Repeated shove, stationary pointer** (issue 1): hover a window, press `Shift+Right` three
+  times without moving the mouse, rebuild between each. Assert three dispatches moving *the same
+  address* to three successive workspaces — the direct regression for re-hit-testing a stale
+  pointer position.
+- **The first shove establishes a cursor** from a hover-only target: assert `cursorAddress` is ""
+  before and the shoved address after, and that `pointerLive` is false after.
+- **Repeated shove with acknowledgement delayed** (issue 2): press `Shift+Right` twice with *no*
+  rebuild in between, so `_windowByAddress` still reports the origin for both. Assert the second
+  dispatch targets ws origin+2, not origin+1 — the regression for reading reported instead of
+  pending state.
+- **The cursor survives the reconcile** (issue 2): shove, then `view.rebuild()` while the stub
+  still reports the old workspace. Assert `cursorAddress` is unchanged. Without the
+  `effectiveWorkspaceOf` correction at `Overview.qml:1177` this fails.
+- **Pointer movement re-arms hover targeting**: shove, move the pointer over a different tile,
+  shove again, assert the second acted on the newly hovered window — the check that the liveness
+  clear ends a repeat chain rather than disabling hover.
+- **An inert shove still latches**: press into the grid edge from a hover target, assert
+  `cursorAddress` is set and `pointerLive` cleared, then reverse direction and assert the reversal
+  acts on that same window.
+
 **Lua behaviour (`tests/lua-check.sh`, mock `hl`):**
 - Swap of a 2-window A with a 1-window B issues exactly 3 `window.move` dispatches and ends with
   every address on the other workspace.
 - **The ordering case:** A has windows, B is empty. Assert the windows end on B and are *not*
   moved back — the direct regression for reading B after moving A.
 - Swap with a non-existent B moves all of A and issues no moves back.
+- **The symmetric case (issue 3):** A does not exist, B has two windows. Assert both move to A,
+  the chunk raises nothing, and **no retarget dispatch is issued** — the `#la > 0` gate.
+- A swap where A exists but is empty behaves identically to A not existing at all.
 - An injected failure on the second `window.move` still moves the rest and reports one
   notification naming the failed address.
 - `cursor.move` is the last dispatch in the chunk.
