@@ -47,7 +47,7 @@ jump to one — keyboard or mouse.
 - **`mode` setting** (one property, default `full`):
   - `full` — all pinned workspaces for each monitor, empties dimmed (stable positions).
   - `occupied` — only workspaces with windows.
-- **Select:** number keys jump (1-9, `0`=10) · arrow keys move highlight + Enter ·
+- **Select:** number keys jump (1-9, `0`=10) · Tab/Shift+Tab step workspaces, arrows step windows + Enter ·
   mouse click · Esc cancels. Jump via Hyprland dispatch `workspace <id>` · type to find
   (fuzzy, class+title; Enter focuses the window) · Ctrl+S shows the scratchpad row (Enter on
   it brings the scratchpad up) · Ctrl+L arms a workspace for screen sharing.
@@ -355,13 +355,13 @@ Design: `docs/specs/2026-09-10-motion-design.md`.
 
 ## Actions: target, cursor, close, menu (2026-09-17)
 
-A single target rule shared by every action, a Tab-driven window cursor, Ctrl+W, a right-click
+A single target rule shared by every action, an arrow-driven window cursor (Tab until 2026-09-18), Ctrl+W, a right-click
 context menu on tiles/wells/badges (Close, Float/Tile, Fullscreen/Exit, Lock/Unlock, Move to
 ‹monitor›, Swap with ‹monitor›, Close all windows), and a two-tier hint row toggled by `?`.
 Design: `docs/specs/2026-09-15-actions-design.md`.
 
 - **Pointer liveness lives in scene coordinates, not canvas ones.** `Logic.target(input)` prefers
-  a live pointer (the tile or well under it) over the keyboard target (a find match, else the Tab
+  a live pointer (the tile or well under it) over the keyboard target (a find match, else the window
   cursor, else the selected workspace). Liveness itself is tracked by a `HoverHandler` on the
   Flickable viewport recording `point.scenePosition`, because the canvas moves under a stationary
   pointer during edge/wheel scrolling, a card resize and the entrance animation — canvas
@@ -376,8 +376,8 @@ Design: `docs/specs/2026-09-15-actions-design.md`.
   stale before the letter arrived.
 - **A close is a request, not a fact.** The app may prompt, delay or refuse it, and the window
   stays in the model until Hyprland reports it gone. `pendingCloses` (address → deadline, the same
-  1.8 s shape as the drag and fullscreen pending maps) dims the tile, drops it from Tab's cycle
-  order, and turns a second Ctrl+W on it into a no-op instead of a duplicate dispatch — without
+  1.8 s shape as the drag and fullscreen pending maps) dims the tile, drops it from the cursor's
+  reach, and turns a second Ctrl+W on it into a no-op instead of a duplicate dispatch — without
   it, a refused close would look identical to a live window and a repeat press would just resend
   the request.
 - **The menu lives at panel level, not inside the canvas.** The Flickable clips its contents, so a
@@ -415,3 +415,28 @@ the live probe recorded that and skipped both cases by design rather than fabric
 Whether Hyprland's own workspace lookup accepts the `special:…` name form (which Close all on the
 scratchpad row depends on) has likewise never been probed; if it doesn't, that row closes nothing
 and reports "workspace not found" — wrong, but inert and visible, never silent or destructive.
+
+## Tab steps workspaces, arrows step windows (2026-09-18)
+
+Swapped from arrows-for-workspaces / Tab-for-windows. The overview is usually summoned with a
+SUPER chord, and SUPER+TAB is the natural one: the same hand can then keep going on Tab, the way
+Cmd+Tab and Alt+Tab work on macOS and Windows. Tab and Shift+Tab walk the workspaces by number
+(the scratchpad row last), wrapping; from a fresh open the first Tab counts from the focused
+workspace, so it lands on the next one rather than re-selecting the one you are on. The arrows
+move the window cursor spatially (`Logic.navigateWindows`) and never change the workspace.
+
+Windows are arbitrary rectangles, not the uniform grid the cards form, so they get their own
+rule (`_navigateTiles`) rather than the cards' `navigate`: a direction only accepts a neighbour
+that overlaps the selected tile across the axis of travel — Left/Right need vertical overlap,
+Up/Down horizontal. A short tile therefore reaches its taller neighbour even when that
+neighbour's centre lies outside it, and Up from a full-height column stays put instead of
+sidestepping into the stack beside it. Among the neighbours that qualify the nearest leading
+edge wins, so a tile is never jumped over; where a dwindle split leaves two equally near, the
+larger overlap wins and then reading order, so the pick never depends on the order Hyprland
+listed the windows in. A window with nothing touching it in a direction is unreachable that
+way, as in a tiling compositor's own focus movement; the find bar still reaches it.
+
+Windows sharing a centre are visited in reading order (address breaks position ties):
+Right/Down advance, Left/Up go back. At either end, spatial navigation resumes without
+wrapping, so overlapping floating windows are reachable and the cursor can still leave the
+group. With a query, Tab and the arrows keep their find meaning.

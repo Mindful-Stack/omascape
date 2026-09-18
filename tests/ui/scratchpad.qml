@@ -90,7 +90,7 @@ TestCase {
     // workspace -2) instead of the guarded show chunk, and the overlay staying open.
     function test_enter_on_the_scratchpad_box_shows_it_and_closes() {
         ctrlS()
-        keyClick(Qt.Key_Down)                      // ws 1 → the row below: the scratchpad
+        keyClick(Qt.Key_Backtab)                   // back from ws 1 wraps to the scratchpad, last in Tab order
         compare(view.selectedId, -2)
         keyClick(Qt.Key_Return)
         compare(view.compositor.commands.length, 1)
@@ -146,7 +146,7 @@ TestCase {
     }
     // Distinguishes: the box selection lost when the row it sits on is hidden.
     function test_hiding_the_selected_row_moves_the_selection_to_a_real_box() {
-        ctrlS(); keyClick(Qt.Key_Down); compare(view.selectedId, -2)
+        ctrlS(); keyClick(Qt.Key_Backtab); compare(view.selectedId, -2)
         ctrlS()
         verify(view.selectedId !== -2 && view.selectedId !== -1, "selection lands on a workspace")
     }

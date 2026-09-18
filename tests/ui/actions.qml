@@ -272,39 +272,44 @@ TestCase {
         compare(view.compositor.commands.length, 0)
     }
 
-    // Distinguishes: a cursor that follows model order rather than reading order. 0xA is the
-    // left-hand window; a model-order implementation would also answer 0xA here, so the second
-    // Tab is what discriminates — it must reach 0xB, the window to its right.
-    function test_tab_walks_the_selected_workspace_in_reading_order() {
+    // Distinguishes: an arrow that moves the workspace selection instead of the window cursor,
+    // and a cursor that walks model order rather than space. From nothing, Right takes the
+    // first window in reading order; the second Right must reach 0xB, the window to its right,
+    // and a third has nowhere further right to go.
+    function test_arrows_walk_the_selected_workspace_spatially() {
         compare(view.cursorAddress, "")
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         compare(view.cursorAddress, "0xA")
         compare(ringed(), ["0xA"], "exactly one tile carries the ring")
-        keyClick(Qt.Key_Tab)
-        compare(view.cursorAddress, "0xB")
-        keyClick(Qt.Key_Tab)
-        compare(view.cursorAddress, "0xA", "wraps")
-    }
-    // Distinguishes: Shift+Tab treated as Tab. From nothing it must take the LAST window.
-    function test_shift_tab_walks_backwards() {
-        keyClick(Qt.Key_Backtab)
-        compare(view.cursorAddress, "0xB")
-        keyClick(Qt.Key_Backtab)
-        compare(view.cursorAddress, "0xA")
-    }
-    // Distinguishes: a cursor that survives navigation, which would leave a ring on a workspace
-    // the user has navigated away from and make Enter focus a window they cannot see.
-    function test_an_arrow_clears_the_cursor() {
-        keyClick(Qt.Key_Tab)
-        compare(view.cursorAddress, "0xA")
         keyClick(Qt.Key_Right)
+        compare(view.cursorAddress, "0xB")
+        keyClick(Qt.Key_Right)
+        compare(view.cursorAddress, "0xB", "nothing further right: stay")
+        compare(view.selectedId, 1, "the arrows never move the workspace selection")
+    }
+    // Distinguishes: Left treated as Right. From nothing it must take the LAST window.
+    function test_left_walks_backwards() {
+        keyClick(Qt.Key_Left)
+        compare(view.cursorAddress, "0xB")
+        keyClick(Qt.Key_Left)
+        compare(view.cursorAddress, "0xA")
+    }
+    // Distinguishes: a cursor that survives a workspace change, which would leave a ring on a
+    // workspace the user has moved away from and make Enter focus a window they cannot see.
+    function test_tab_clears_the_cursor_and_moves_the_workspace() {
+        keyClick(Qt.Key_Right)
+        compare(view.cursorAddress, "0xA")
+        keyClick(Qt.Key_Tab)
         compare(view.cursorAddress, "")
         compare(ringed(), [])
+        compare(view.selectedId, 2)
+        keyClick(Qt.Key_Backtab)
+        compare(view.selectedId, 1, "Shift+Tab steps back")
     }
     // Distinguishes: Esc collapsing two levels at once. The first Esc must consume only the
     // cursor and leave the overview open.
     function test_escape_unwinds_the_cursor_before_closing() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         keyClick(Qt.Key_Escape)
         compare(view.cursorAddress, "")
         compare(view.opened, true, "the first Escape spends itself on the cursor")
@@ -313,7 +318,7 @@ TestCase {
     }
     // Distinguishes: Enter jumping to the workspace instead of focusing the cursor's window.
     function test_enter_focuses_the_cursor_window() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         keyClick(Qt.Key_Return)
         compare(view.opened, false)
         compare(view.compositor.commands.length, 1)
@@ -323,7 +328,7 @@ TestCase {
     // Distinguishes: Enter ignoring a live pointer — the target rule must apply to Enter too, so
     // a hovered tile beats the cursor.
     function test_enter_prefers_a_hovered_tile_over_the_cursor() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         compare(view.cursorAddress, "0xA")
         hoverTile("0xB")
         keyClick(Qt.Key_Return)
@@ -332,7 +337,7 @@ TestCase {
     // Distinguishes: a cursor kept alive after its window left the selected workspace, which
     // would leave Ctrl+W pointing at a window drawn somewhere else entirely.
     function test_the_cursor_clears_when_its_window_leaves_the_workspace() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         compare(view.cursorAddress, "0xA")
         view.compositor.workspaces = { values: [
             wsRow(1, [client("0xB", "bravo", 900)]),
@@ -344,14 +349,14 @@ TestCase {
     // Distinguishes: find and the cursor coexisting, which would give two rings and an ambiguous
     // Enter.
     function test_a_query_clears_the_cursor() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         keyClick("a")
         compare(view.cursorAddress, "")
         verify(view.query.length > 0)
     }
     // Distinguishes: a cursor that leaks across summons on the kept-loaded component.
     function test_open_clears_the_cursor() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         view.close()
         view.open()
         wait(120)
@@ -374,7 +379,7 @@ TestCase {
         for (var i = 0; i < view.boxes.length; i++) if (view.boxes[i].workspaceId === -2) { idx = i; break }
         verify(idx >= 0, "the scratchpad box must appear once shown")
         view.selectedIndex = idx
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         compare(view.cursorAddress, "0xS")
         keyClick(Qt.Key_Return)
         compare(view.compositor.commands.length, 1)
@@ -398,7 +403,7 @@ TestCase {
     // Distinguishes: Ctrl+W acting on the workspace rather than the cursor's window, and a close
     // that does not advance — the ring must land on the OTHER window, not stay on the closed one.
     function test_ctrl_w_closes_the_cursor_window_and_advances() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         compare(view.cursorAddress, "0xA")
         ctrlW()
         verify(closed("0xA"))
@@ -408,7 +413,7 @@ TestCase {
     // Distinguishes: THE repeated-close bug. With both windows still reported by the compositor,
     // a second Ctrl+W must close 0xB, and a third must close nothing — never cycle back to 0xA.
     function test_repeated_ctrl_w_clears_the_workspace_without_repeating() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         ctrlW(); ctrlW()
         verify(closed("0xA")); verify(closed("0xB"))
         compare(view.cursorAddress, "", "no eligible window is left to ring")
@@ -433,7 +438,7 @@ TestCase {
     // Distinguishes: the parked-mouse rule for a destructive key. The pointer sat over 0xB the
     // whole time; only the key press that came AFTER the move may let it decide.
     function test_ctrl_w_follows_the_most_recent_input_device() {
-        keyClick(Qt.Key_Tab)                 // cursor on 0xA, pointer not live
+        keyClick(Qt.Key_Right)                 // cursor on 0xA, pointer not live
         hoverTile("0xB")                     // pointer moved last
         ctrlW()
         verify(closed("0xB"), "the hovered tile wins")
@@ -443,7 +448,7 @@ TestCase {
     // the hovered window (a no-op, since its close is outstanding) and must NOT fall through to
     // the cursor. An arrow in between is the positive control that the cursor path still works.
     function test_consecutive_action_keys_keep_the_pointer_in_charge() {
-        keyClick(Qt.Key_Tab)                 // cursor on 0xA
+        keyClick(Qt.Key_Right)                 // cursor on 0xA
         hoverTile("0xB")
         ctrlW()
         var n = view.compositor.commands.length
@@ -451,7 +456,7 @@ TestCase {
         compare(view.compositor.commands.length, n, "0xB's close is already outstanding")
         verify(!closed("0xA"))
         keyClick(Qt.Key_Right); keyClick(Qt.Key_Left)   // navigation returns control to the keyboard
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         ctrlW()
         verify(closed("0xA"))
     }
@@ -460,7 +465,7 @@ TestCase {
     // just-dropped window would survive its own close until the 1.8 s deadline.
     function test_closing_supersedes_a_pending_drop() {
         view.pendingMoves["0xA"] = { workspaceId: 2, pos: null, deadline: Date.now() + 1800 }
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         compare(view.cursorAddress, "0xA")
         ctrlW()
         compare(view.pendingMoves["0xA"], undefined, "the optimistic row must not outlive the close")
@@ -468,13 +473,13 @@ TestCase {
     // Distinguishes: a refused close that never lets go. Past the deadline, with the window still
     // reported, the tile must un-dim and become cyclable again.
     function test_a_refused_close_recovers_at_the_deadline() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         ctrlW()
         verify(view.pendingCloses["0xA"] !== undefined)
         view.pendingCloses["0xA"] = Date.now() - 1      // the deadline has passed
         view.rebuild()
         compare(view.pendingCloses["0xA"], undefined)
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Left)                           // the cursor sits on 0xB; 0xA is to its left
         compare(view.cursorAddress, "0xA", "cyclable again")
     }
     // Distinguishes: the middle click drifting from Ctrl+W. Both must go through one path, so the
@@ -492,7 +497,7 @@ TestCase {
     // this a Ctrl+W, Escape, quick re-summon would present the window as ordinary and cyclable,
     // and a second Ctrl+W would dispatch a duplicate close.
     function test_pending_closes_survive_a_quick_reopen() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         ctrlW()
         verify(view.pendingCloses["0xA"] !== undefined)
         view.close(); view.open(); wait(120)
@@ -516,7 +521,7 @@ TestCase {
             wsRow(1, [client("0xA", "alpha", 100), client("0xB", "bravo", 500), client("0xC", "charlie", 900)])
         ] }
         view.rebuild()
-        keyClick(Qt.Key_Tab); keyClick(Qt.Key_Tab); keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right); keyClick(Qt.Key_Right); keyClick(Qt.Key_Right)
         compare(view.cursorAddress, "0xC", "cursor on the third window")
         var p = tileCentre("0xB")
         mouseClick(view, p.x, p.y, Qt.MiddleButton)   // closes the second, not the cursor's window

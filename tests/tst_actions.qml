@@ -115,6 +115,143 @@ TestCase {
     // Reading order is y then x: "b" is to the right of "a" on the same row, "c" is below both.
     // Distinguishes: cycling in model order instead of reading order. The model here is
     // deliberately b,a,c — only a sorted implementation answers a,b,c.
+    // ---- Tab over workspaces, arrows over windows -------------------------------------------
+    function wsBox(id, focused) { return { workspaceId: id, focused: !!focused } }
+
+    // Distinguishes: Tab following layout order (boxes are grouped by monitor) rather than
+    // workspace number, and a first Tab that lands on the workspace you are already on.
+    function test_cycleWorkspace_counts_from_the_focused_workspace_in_number_order() {
+        var boxes = [wsBox(6), wsBox(1), wsBox(2, true), wsBox(7)]
+        compare(Logic.cycleWorkspace(boxes, -1, 1), 0, "from nothing: the one after the focused ws 2 is ws 6")
+        compare(Logic.cycleWorkspace(boxes, 0, 1), 3, "ws 6 -> ws 7")
+        compare(Logic.cycleWorkspace(boxes, 3, 1), 1, "ws 7 wraps to ws 1")
+        compare(Logic.cycleWorkspace(boxes, 1, -1), 3, "Shift+Tab from ws 1 wraps to ws 7")
+    }
+    // Distinguishes: the scratchpad row (id -2) sorting first because its id is negative.
+    function test_cycleWorkspace_puts_the_scratchpad_last() {
+        var boxes = [wsBox(Logic.SCRATCHPAD_ID), wsBox(1, true), wsBox(2)]
+        compare(Logic.cycleWorkspace(boxes, 2, 1), 0, "after the last numbered workspace comes the scratchpad")
+        compare(Logic.cycleWorkspace(boxes, 0, 1), 1, "and after it, round to ws 1")
+    }
+    function test_cycleWorkspace_edge_cases() {
+        compare(Logic.cycleWorkspace([], -1, 1), -1)
+        compare(Logic.cycleWorkspace([wsBox(3), wsBox(4)], -1, 1), 0, "no focused box: start at the first")
+        compare(Logic.cycleWorkspace([wsBox(3), wsBox(4)], -1, -1), 1, "…or the last, going back")
+    }
+    // Distinguishes: arrows that walk reading order instead of space. c sits BELOW a, so Down
+    // from a must reach c even though b comes before c in reading order.
+    function test_navigateWindows_is_spatial() {
+        var tiles = [
+            { address: "a", wsid: 1, x: 0,   y: 0,   w: 400, h: 300 },
+            { address: "b", wsid: 1, x: 500, y: 0,   w: 400, h: 300 },
+            { address: "c", wsid: 1, x: 0,   y: 400, w: 400, h: 300 },
+            { address: "z", wsid: 2, x: 0,   y: 0,   w: 400, h: 300 }
+        ]
+        compare(Logic.navigateWindows(tiles, 1, "a", "down", null), "c")
+        compare(Logic.navigateWindows(tiles, 1, "a", "right", null), "b")
+        compare(Logic.navigateWindows(tiles, 1, "b", "right", null), "b", "nothing further right: stay")
+        compare(Logic.navigateWindows(tiles, 1, "", "right", null), "a", "from nothing: the first window")
+        compare(Logic.navigateWindows(tiles, 1, "", "left", null), "c", "…or the last, going back")
+        compare(Logic.navigateWindows(tiles, 9, "", "right", null), "", "an empty workspace has no target")
+        compare(Logic.navigateWindows(tiles, 1, "a", "down", { c: true }), "a", "a closing window is skipped")
+    }
+
+    function test_navigateWindows_left_reaches_taller_overlapping_neighbours() {
+        // Live dwindle layout: the 2px gap puts the tall neighbour's centre just outside
+        // the short tile. A centre-in-current-row test incorrectly makes Left a no-op.
+        var tiles = [
+            { address: "a", wsid: 2, x: 201, y: 1467, w: 1022, h: 1252 },
+            { address: "b", wsid: 2, x: 1225, y: 1467, w: 1022, h: 625 },
+            { address: "c", wsid: 2, x: 1225, y: 2094, w: 510, h: 625 },
+            { address: "d", wsid: 2, x: 1737, y: 2094, w: 510, h: 312 },
+            { address: "e", wsid: 2, x: 1737, y: 2408, w: 510, h: 311 }
+        ]
+        compare(Logic.navigateWindows(tiles, 2, "b", "left", null), "a")
+        compare(Logic.navigateWindows(tiles, 2, "c", "left", null), "a")
+        compare(Logic.navigateWindows(tiles, 2, "d", "left", null), "c")
+        compare(Logic.navigateWindows(tiles, 2, "e", "left", null), "c")
+        // Mirror the same layout: the fix must work for Right as well.
+        for (var i = 0; i < tiles.length; i++) tiles[i].x = -tiles[i].x - tiles[i].w
+        compare(Logic.navigateWindows(tiles, 2, "b", "right", null), "a")
+        compare(Logic.navigateWindows(tiles, 2, "e", "right", null), "c")
+    }
+
+    function test_navigateWindows_reaches_concentric_windows() {
+        // Deliberately shuffled; all three centres are (300, 300).
+        var tiles = [
+            { address: "c", wsid: 1, x: 200, y: 200, w: 200, h: 200 },
+            { address: "a", wsid: 1, x: 0, y: 0, w: 600, h: 600 },
+            { address: "b", wsid: 1, x: 100, y: 100, w: 400, h: 400 }
+        ]
+        var dirs = ["right", "down", "left", "up"]
+        for (var i = 0; i < dirs.length; i++) {
+            var order = i < 2 ? ["a", "b", "c"] : ["c", "b", "a"]
+            var cursor = ""
+            for (var j = 0; j < order.length; j++) {
+                cursor = Logic.navigateWindows(tiles, 1, cursor, dirs[i], null)
+                compare(cursor, order[j], dirs[i] + " reaches every window")
+            }
+            compare(Logic.navigateWindows(tiles, 1, cursor, dirs[i], null), cursor, "no wrap at the edge")
+        }
+        compare(Logic.navigateWindows(tiles, 1, "a", "right", { b: true }), "c", "skip pending closes")
+        tiles.push({ address: "d", wsid: 1, x: 800, y: 200, w: 200, h: 200 })
+        compare(Logic.navigateWindows(tiles, 1, "a", "right", null), "b", "visit overlapping peers before leaving")
+        compare(Logic.navigateWindows(tiles, 1, "c", "right", null), "d", "resume spatial navigation at the end")
+    }
+
+    function test_navigateWindows_identical_rects_have_a_stable_order() {
+        var tiles = [
+            { address: "c", wsid: 1, x: 0, y: 0, w: 400, h: 300 },
+            { address: "a", wsid: 1, x: 0, y: 0, w: 400, h: 300 },
+            { address: "b", wsid: 1, x: 0, y: 0, w: 400, h: 300 },
+            { address: "aa", wsid: 2, x: 0, y: 0, w: 400, h: 300 }
+        ]
+        compare(Logic.navigateWindows(tiles, 1, "a", "right", null), "b")
+        compare(Logic.navigateWindows(tiles, 1, "b", "right", null), "c")
+        compare(Logic.navigateWindows(tiles, 1, "c", "left", null), "b")
+    }
+
+    function test_navigateWindows_steps_only_to_touching_neighbours() {
+        // The live dwindle layout from the bug report: "a" is a full-height column beside a
+        // stack of four. Nothing sits above or below "a", so Up and Down there must stay put
+        // rather than sidestep, and Right must land on the tile "a" actually touches.
+        var tiles = [
+            { address: "a", wsid: 2, x: 201, y: 1467, w: 922, h: 1252 },
+            { address: "b", wsid: 2, x: 1125, y: 1467, w: 1122, h: 625 },
+            { address: "c", wsid: 2, x: 1125, y: 2094, w: 560, h: 625 },
+            { address: "d", wsid: 2, x: 1687, y: 2094, w: 560, h: 312 },
+            { address: "e", wsid: 2, x: 1687, y: 2408, w: 560, h: 311 }
+        ]
+        var expected = {
+            a: { left: "a", right: "b", up: "a", down: "a" },
+            b: { left: "a", right: "b", up: "b", down: "c" },
+            c: { left: "a", right: "d", up: "b", down: "c" },
+            d: { left: "c", right: "d", up: "b", down: "e" },
+            e: { left: "c", right: "e", up: "d", down: "e" }
+        }
+        var dirs = ["left", "right", "up", "down"]
+        for (var i = 0; i < tiles.length; i++) {
+            for (var j = 0; j < dirs.length; j++) {
+                var from = tiles[i].address
+                compare(Logic.navigateWindows(tiles, 2, from, dirs[j], null),
+                        expected[from][dirs[j]], dirs[j] + " from " + from)
+            }
+        }
+    }
+
+    function test_navigateWindows_ties_go_to_reading_order() {
+        // A dwindle split leaves two neighbours the same distance below "a" with the same
+        // overlap. The choice must not depend on the order the compositor listed them.
+        var tiles = [
+            { address: "c", wsid: 1, x: 500, y: 300, w: 500, h: 200 },
+            { address: "b", wsid: 1, x: 0, y: 300, w: 500, h: 200 },
+            { address: "a", wsid: 1, x: 0, y: 0, w: 1000, h: 298 }
+        ]
+        compare(Logic.navigateWindows(tiles, 1, "a", "down", null), "b")
+        compare(Logic.navigateWindows(tiles, 1, "b", "up", null), "a")
+        compare(Logic.navigateWindows(tiles, 1, "c", "up", null), "a")
+    }
+
     function test_cycleWindows_reading_order() {
         compare(Logic.cycleWindows(rows, 1, "", 1, null), "a")
         compare(Logic.cycleWindows(rows, 1, "a", 1, null), "b")

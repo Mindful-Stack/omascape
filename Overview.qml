@@ -458,7 +458,7 @@ Item {
                               matchAddress: root.selectedMatchAddress,
                               cursorAddress: root.cursorAddress, selectedId: root.selectedId })
     }
-    // ---- Actions: the Tab window cursor ---------------------------------------------------
+    // ---- Actions: the arrow-key window cursor ----------------------------------------------
     // The keyboard's window target inside the selected workspace. "" = none. Mirrored into the
     // tiles model as the `cursor` role so the ring is a binding, not an imperative repaint.
     property string cursorAddress: ""
@@ -480,7 +480,7 @@ Item {
         var out = []
         for (var i = 0; i < tilesModel.count; i++) {
             var t = tilesModel.get(i)
-            out.push({ address: t.address, wsid: t.wsid, x: t.wx, y: t.wy })
+            out.push({ address: t.address, wsid: t.wsid, x: t.wx, y: t.wy, w: t.ww, h: t.wh })
         }
         return out
     }
@@ -489,9 +489,10 @@ Item {
         for (var a in pendingCloses) skip[a] = true
         return skip
     }
-    function cycleCursor(step) {
+    function navigateCursor(dir) {
+        selectFocusedIfNone()
         if (!Logic.hasWs(selectedId)) return
-        setCursor(Logic.cycleWindows(tileRows(), selectedId, cursorAddress, step, closeSkipSet()))
+        setCursor(Logic.navigateWindows(tileRows(), selectedId, cursorAddress, dir, closeSkipSet()))
     }
     // Focus one window and leave: the tile-click path, including the scratchpad raise (focus alone
     // leaves a scratchpad window under whichever floating sibling was last on top).
@@ -1202,11 +1203,23 @@ Item {
         rematchAfterRebuild()   // a query survives rebuilds; windows may have come or gone
     }
 
+    function selectByTab(step) {
+        if (!boxes.length) return
+        selectedIndex = Logic.cycleWorkspace(boxes, selectedIndex, step)
+        ensureSelectedVisible()
+    }
+    // Spatial selection over the boxes. No key reaches it any more -- the arrows step windows --
+    // but it is the one place the grid's geometry drives the selection, and the tests use it.
     function selectByNav(dir) {
         if (!boxes.length) return
         var i = selectedIndex < 0 ? 0 : selectedIndex
         selectedIndex = Logic.navigate(boxes, i, dir)
         ensureSelectedVisible()
+    }
+    // Nothing selected yet (a fresh open) means the workspace you are on.
+    function selectFocusedIfNone() {
+        if (selectedIndex >= 0 || !boxes.length) return
+        for (var i = 0; i < boxes.length; i++) if (boxes[i].focused) { selectedIndex = i; return }
     }
 
     // Nudge the Flickable minimally so the selected box is fully inside the viewport.
@@ -1543,14 +1556,17 @@ Item {
                         if (e.key === Qt.Key_Up) { root.navigateMatch("up"); return }
                         if (e.key === Qt.Key_Down) { root.navigateMatch("down"); return }
                     } else {
-                        if (e.key === Qt.Key_Tab) { root.cycleCursor(1); return }
-                        if (e.key === Qt.Key_Backtab) { root.cycleCursor(-1); return }
+                        // Tab steps workspaces and the arrows step windows: the Cmd+Tab /
+                        // Alt+Tab habit, with the key that summoned the overview under the
+                        // same hand.
+                        if (e.key === Qt.Key_Tab) { root.setCursor(""); root.selectByTab(1); return }
+                        if (e.key === Qt.Key_Backtab) { root.setCursor(""); root.selectByTab(-1); return }
                         if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) { root.setCursor(""); root.jump(e.key - Qt.Key_0); return }
                         if (e.key === Qt.Key_0) { root.setCursor(""); root.jump(10); return }
-                        if (e.key === Qt.Key_Left) { root.setCursor(""); root.selectByNav("left"); return }
-                        if (e.key === Qt.Key_Right) { root.setCursor(""); root.selectByNav("right"); return }
-                        if (e.key === Qt.Key_Up) { root.setCursor(""); root.selectByNav("up"); return }
-                        if (e.key === Qt.Key_Down) { root.setCursor(""); root.selectByNav("down"); return }
+                        if (e.key === Qt.Key_Left) { root.navigateCursor("left"); return }
+                        if (e.key === Qt.Key_Right) { root.navigateCursor("right"); return }
+                        if (e.key === Qt.Key_Up) { root.navigateCursor("up"); return }
+                        if (e.key === Qt.Key_Down) { root.navigateCursor("down"); return }
                     }
                     // `?` is the hint toggle only while there is no query to append to — the
                     // same rule digits already follow — and only while hints are enabled at all;
@@ -1976,7 +1992,8 @@ Item {
                     spacing: Math.round(Style.space(12))
                     Repeater {
                         id: hintKeys
-                        model: [ { k: "1–0", l: "jump" }, { k: "↑ ↓ ← →", l: "move" }, { k: "↵", l: "select" },
+                        model: [ { k: "1–0", l: "jump" }, { k: "tab", l: "workspace" }, { k: "↑ ↓ ← →", l: "window" },
+                                 { k: "↵", l: "select" },
                                  { k: "drag", l: "move window" }, { k: "type", l: "find" },
                                  { k: "esc", l: "close" },
                                  { k: "?", l: root.hintsExpanded ? "less" : "more" } ]
@@ -1991,7 +2008,7 @@ Item {
                     spacing: Math.round(Style.space(12))
                     Repeater {
                         id: hintKeys2
-                        model: [ { k: "tab", l: "window" }, { k: "ctrl+w / mid-click", l: "close" },
+                        model: [ { k: "ctrl+w / mid-click", l: "close" },
                                  { k: "right-click", l: "menu" },
                                  { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" } ]
                         HintCap { foreground: root.foreground; fill: root.wellColor
