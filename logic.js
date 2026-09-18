@@ -828,6 +828,46 @@ function navigate(boxes, currentIndex, dir) {
     return best >= 0 ? best : currentIndex
 }
 
+// Tab order over the workspace boxes: by number, the scratchpad row last, wrapping. With no
+// selection yet it counts from the focused workspace, so the first Tab after opening lands on
+// the one after where you are -- the Cmd+Tab / Alt+Tab habit of "the next thing", not "this".
+// Returns the new index, or -1 when there are no boxes.
+function cycleWorkspace(boxes, currentIndex, step) {
+    if (!boxes || !boxes.length) return -1
+    var order = []
+    for (var i = 0; i < boxes.length; i++) order.push(i)
+    function key(idx) {
+        var id = boxes[idx].workspaceId
+        return isScratchpad(id) ? Infinity : id
+    }
+    order.sort(function (a, b) { return key(a) - key(b) })
+    var pos = order.indexOf(currentIndex)
+    if (pos < 0) {
+        for (var j = 0; j < order.length; j++) if (boxes[order[j]].focused) { pos = j; break }
+    }
+    if (pos < 0) return order[step > 0 ? 0 : order.length - 1]
+    return order[((pos + step) % order.length + order.length) % order.length]
+}
+
+// Arrow keys over the windows of one workspace: spatial, the same rule `navigate` applies to
+// workspace boxes, over the tiles' canvas rects. With no window targeted yet the first press
+// takes the first (or, for left/up, the last) window in reading order. Returns the address, or
+// "" when the workspace has no windows; stays put when there is nothing in that direction.
+function navigateWindows(tiles, wsId, current, dir, skip) {
+    var list = []
+    for (var i = 0; i < tiles.length; i++) {
+        var t = tiles[i]
+        if (t.wsid !== wsId) continue
+        if (skip && skip[t.address]) continue
+        list.push({ address: t.address, x: t.x, y: t.y, w: t.w || 0, h: t.h || 0 })
+    }
+    if (!list.length) return ""
+    var idx = -1
+    for (var j = 0; j < list.length; j++) if (list[j].address === current) { idx = j; break }
+    if (idx < 0) return cycleWindows(tiles, wsId, "", dir === "left" || dir === "up" ? -1 : 1, skip)
+    return list[navigate(list, idx, dir)].address
+}
+
 function hitWorkspace(boxes, px, py) {
     for (var i = 0; i < boxes.length; i++) {
         var b = boxes[i]
@@ -1041,7 +1081,7 @@ function tileAt(candidates, px, py) {
 // workspace happens to be selected: worse than inert. (Query and cursor cannot both be active
 // in the running overview — setQuery() clears the cursor — so this branch never actually needs
 // to choose between them; it is written terminal anyway so a future refactor cannot reopen the
-// fall-through by "simplifying" it back in.) With no query, the Tab cursor, then the selected
+// fall-through by "simplifying" it back in.) With no query, the window cursor, then the selected
 // workspace.
 function target(input) {
     if (input.pointerLive) {
@@ -1195,7 +1235,7 @@ function isModifierKey(key) {
 
 // An ACTION key reads pointer liveness and leaves it unchanged — "do this to what I am pointing
 // at", not "I am on the keyboard now" — so a second Ctrl+W cannot silently switch from the
-// hovered window to the Tab cursor. Everything else is navigation or query intent and clears
+// hovered window to the window cursor. Everything else is navigation or query intent and clears
 // liveness on entry. `chord` is the event's Ctrl/Alt/Meta mask.
 function isActionKey(key, chord, ctrlMask) {
     if (chord === ctrlMask && key === 0x57) return true            // Ctrl+W (Qt.Key_W)

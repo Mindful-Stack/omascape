@@ -326,7 +326,7 @@ TestCase {
     // Distinguishes: restoring via rebuild()'s nearest-position rule (would land on ws 3,
     // the box that took ws 2's position) instead of the focused workspace (ws 1).
     function test_clear_restores_focused_workspace_when_original_is_gone() {
-        keyClick(Qt.Key_Right)                          // box selection: ws 2
+        keyClick(Qt.Key_Tab)                            // box selection: ws 2
         compare(view.selectedId, 2)
         type("foot")                                    // match on ws 3
         compare(view.selectedId, 3)
@@ -337,7 +337,7 @@ TestCase {
     }
     // Distinguishes: preQuerySelectedId re-captured on every edit, or restore ignoring it.
     function test_clear_restores_the_pre_query_workspace() {
-        keyClick(Qt.Key_Right)
+        keyClick(Qt.Key_Tab)
         compare(view.selectedId, 2)
         type("foot")
         compare(view.selectedId, 3)
@@ -388,7 +388,7 @@ TestCase {
     // Distinguishes: restorePreQuerySelection moving selectedIndex without ensureSelectedVisible().
     function test_restore_scrolls_the_pre_query_box_into_view() {
         seedOverflow()
-        for (var i = 0; i < 7; i++) keyClick(Qt.Key_Down)   // walk the selection to the last row
+        for (var i = 0; i < 7; i++) view.selectByNav("down")   // walk the selection to the last row
         compare(view.selectedId, 36)
         verify(boxRowVisible(36))
         type("hay")                                     // match on ws 1: scrolls to the top

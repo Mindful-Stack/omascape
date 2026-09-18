@@ -115,6 +115,47 @@ TestCase {
     // Reading order is y then x: "b" is to the right of "a" on the same row, "c" is below both.
     // Distinguishes: cycling in model order instead of reading order. The model here is
     // deliberately b,a,c — only a sorted implementation answers a,b,c.
+    // ---- Tab over workspaces, arrows over windows -------------------------------------------
+    function wsBox(id, focused) { return { workspaceId: id, focused: !!focused } }
+
+    // Distinguishes: Tab following layout order (boxes are grouped by monitor) rather than
+    // workspace number, and a first Tab that lands on the workspace you are already on.
+    function test_cycleWorkspace_counts_from_the_focused_workspace_in_number_order() {
+        var boxes = [wsBox(6), wsBox(1), wsBox(2, true), wsBox(7)]
+        compare(Logic.cycleWorkspace(boxes, -1, 1), 0, "from nothing: the one after the focused ws 2 is ws 6")
+        compare(Logic.cycleWorkspace(boxes, 0, 1), 3, "ws 6 -> ws 7")
+        compare(Logic.cycleWorkspace(boxes, 3, 1), 1, "ws 7 wraps to ws 1")
+        compare(Logic.cycleWorkspace(boxes, 1, -1), 3, "Shift+Tab from ws 1 wraps to ws 7")
+    }
+    // Distinguishes: the scratchpad row (id -2) sorting first because its id is negative.
+    function test_cycleWorkspace_puts_the_scratchpad_last() {
+        var boxes = [wsBox(Logic.SCRATCHPAD_ID), wsBox(1, true), wsBox(2)]
+        compare(Logic.cycleWorkspace(boxes, 2, 1), 0, "after the last numbered workspace comes the scratchpad")
+        compare(Logic.cycleWorkspace(boxes, 0, 1), 1, "and after it, round to ws 1")
+    }
+    function test_cycleWorkspace_edge_cases() {
+        compare(Logic.cycleWorkspace([], -1, 1), -1)
+        compare(Logic.cycleWorkspace([wsBox(3), wsBox(4)], -1, 1), 0, "no focused box: start at the first")
+        compare(Logic.cycleWorkspace([wsBox(3), wsBox(4)], -1, -1), 1, "…or the last, going back")
+    }
+    // Distinguishes: arrows that walk reading order instead of space. c sits BELOW a, so Down
+    // from a must reach c even though b comes before c in reading order.
+    function test_navigateWindows_is_spatial() {
+        var tiles = [
+            { address: "a", wsid: 1, x: 0,   y: 0,   w: 400, h: 300 },
+            { address: "b", wsid: 1, x: 500, y: 0,   w: 400, h: 300 },
+            { address: "c", wsid: 1, x: 0,   y: 400, w: 400, h: 300 },
+            { address: "z", wsid: 2, x: 0,   y: 0,   w: 400, h: 300 }
+        ]
+        compare(Logic.navigateWindows(tiles, 1, "a", "down", null), "c")
+        compare(Logic.navigateWindows(tiles, 1, "a", "right", null), "b")
+        compare(Logic.navigateWindows(tiles, 1, "b", "right", null), "b", "nothing further right: stay")
+        compare(Logic.navigateWindows(tiles, 1, "", "right", null), "a", "from nothing: the first window")
+        compare(Logic.navigateWindows(tiles, 1, "", "left", null), "c", "…or the last, going back")
+        compare(Logic.navigateWindows(tiles, 9, "", "right", null), "", "an empty workspace has no target")
+        compare(Logic.navigateWindows(tiles, 1, "a", "down", { c: true }), "a", "a closing window is skipped")
+    }
+
     function test_cycleWindows_reading_order() {
         compare(Logic.cycleWindows(rows, 1, "", 1, null), "a")
         compare(Logic.cycleWindows(rows, 1, "a", 1, null), "b")

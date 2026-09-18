@@ -153,7 +153,7 @@ TestCase {
     }
     // Distinguishes: Ctrl+L not writing, writing the wrong selector, or not syncing the new set.
     function test_ctrl_l_arms_and_disarms_the_selected_box() {
-        keyClick(Qt.Key_Right)                         // ws 2
+        keyClick(Qt.Key_Tab)                           // ws 2
         compare(view.selectedId, 2)
         var before = syncs().length
         ctrlL()
@@ -168,7 +168,7 @@ TestCase {
     // Distinguishes: the scratchpad armed by its (dynamic) id instead of its name.
     function test_ctrl_l_on_the_scratchpad_writes_its_name() {
         keyClick("s", Qt.ControlModifier)              // show the row
-        keyClick(Qt.Key_Down)
+        keyClick(Qt.Key_Backtab)                       // back from ws 1 wraps to the scratchpad, last in Tab order
         compare(view.selectedId, -2)
         ctrlL()
         compare(JSON.parse(view.testLocks.writes[0]).armed, ["special:scratchpad"])
@@ -375,7 +375,7 @@ TestCase {
     // Distinguishes: a frame keyed to "some workspace is armed" rather than to the workspace this
     // monitor is actually showing. The positive control moves the monitor onto the armed one.
     function test_frame_hidden_for_an_unarmed_workspace_on_the_same_monitor() {
-        keyClick(Qt.Key_Right)                         // select ws 2
+        keyClick(Qt.Key_Tab)                           // select ws 2
         compare(view.selectedId, 2)
         ctrlL()                                        // arm ws 2; the monitor still shows ws 1
         view.testLocks.setSharing(true)
@@ -388,7 +388,7 @@ TestCase {
     // special-closed payload (`activespecialv2>>,,TEST`) that leaves the frame up.
     function test_frame_follows_an_open_special_workspace() {
         keyClick("s", Qt.ControlModifier)              // show the scratchpad row
-        keyClick(Qt.Key_Down)
+        keyClick(Qt.Key_Backtab)                       // back from ws 1 wraps to the scratchpad, last in Tab order
         compare(view.selectedId, -2)
         ctrlL()                                        // arm special:scratchpad
         view.testLocks.setSharing(true)
@@ -493,7 +493,7 @@ TestCase {
     // Distinguishes: the plain one-shot binding, which keeps reading the object it resolved at
     // creation and never sees the replacement.
     function test_frame_follows_a_monitor_object_replaced_behind_the_same_screen() {
-        keyClick(Qt.Key_Right)                         // select ws 2
+        keyClick(Qt.Key_Tab)                           // select ws 2
         compare(view.selectedId, 2)
         ctrlL()                                        // arm ws 2; the monitor still shows ws 1
         view.testLocks.setSharing(true)
@@ -528,7 +528,7 @@ TestCase {
     // Distinguishes: a drop onto a placeholder box creating an optimistic row (a live capture on
     // a box that must show none) or not dispatching the move.
     function test_drop_onto_a_placeholder_box_dispatches_but_keeps_no_tile() {
-        keyClick(Qt.Key_Right); ctrlL()                // arm ws 2
+        keyClick(Qt.Key_Tab); ctrlL()                  // arm ws 2
         view.testLocks.setSharing(true)
         var before = cmds().length
         dragTo("0xA", 2)
@@ -539,7 +539,7 @@ TestCase {
     }
     // Distinguishes: a pending drop's row surviving the box becoming a placeholder.
     function test_pending_drop_row_is_dropped_when_the_box_becomes_a_placeholder() {
-        keyClick(Qt.Key_Right); ctrlL(); keyClick(Qt.Key_Left)   // arm ws 2, back on ws 1
+        keyClick(Qt.Key_Tab); ctrlL(); keyClick(Qt.Key_Backtab)   // arm ws 2, back on ws 1
         dragTo("0xA", 2)
         compare(row("0xA").wsid, 2, "optimistic row on ws 2 (not sharing yet)")
         verify(view.pendingMoves["0xA"] !== undefined)

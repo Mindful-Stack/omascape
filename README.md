@@ -45,8 +45,10 @@ you, are under [Install](#install).
   monitor's group sits on a faint accent backdrop. Undocked collapses to a single flush group.
 - **Always 1–0.** Workspaces `1`..`10` are always shown, even ones Hyprland has not created yet,
   so every number key has a visible target (`workspaces` in the config, `0` to turn it off).
-- **Fast selection.** Number keys jump (`1`–`9`, `0` = 10), arrow keys move the highlight +
-  `Enter`, click a window to focus it, middle-click to close it. `Esc` or a click outside closes.
+- **Fast selection.** Number keys jump (`1`–`9`, `0` = 10), `Tab`/`Shift+Tab` step through the
+  workspaces (the Cmd+Tab / Alt+Tab habit, so bind the overview to `SUPER+TAB` and it all stays
+  under one hand), the arrow keys step through the windows on the selected one, and `Enter`
+  goes there. Click a window to focus it, middle-click to close it. `Esc` or a click outside closes.
   The overview opens on the focused monitor, and a click anywhere on any *other* monitor closes it
   too — that click only dismisses the overview, it does not reach the window underneath.
 - **Type to find:** any letter starts a fuzzy filter over window class and title; matches ring
@@ -74,7 +76,7 @@ you, are under [Install](#install).
   share is over, rather than flickering whenever the frames pause.
 - **Actions on the spot.** Right-click a window, an empty workspace, or a workspace's number
   badge for a menu: close, float/tile, fullscreen, lock the workspace, move or swap it to another
-  monitor, close every window on it. `Tab`/`Shift+Tab` step a keyboard cursor between windows on
+  monitor, close every window on it. The arrow keys step a keyboard cursor between windows on
   the selected workspace so `Enter` and `Ctrl+W` can act without touching the mouse. Press `?` for
   a second row of key hints covering all of this.
 - **Theme-aware.** Pulls the active Omarchy theme's colors and fonts, so it matches the bar
@@ -193,14 +195,14 @@ Press **SUPER+A**. The overlay opens on your focused monitor.
 | ------------------------ | --------------------------------------------------------- |
 | **SUPER+A**              | Toggle the overlay (open and close)                       |
 | **1–9, 0**               | Jump to that workspace (`0` = 10)                         |
-| **← → ↑ ↓**              | Move the highlight                                        |
+| **Tab / Shift+Tab**      | Next / previous workspace (by number, wrapping; the first Tab goes to the one after yours) |
 | **Enter**                | Jump to the highlighted workspace                         |
 | **Drag a window**        | Drop it on another workspace box to move it there (silent)|
 | **Click a window**       | Focus that window and close the overview                  |
 | **Middle-click a window**| Close that window                                         |
 | **Click an empty box**   | Jump to that workspace                                    |
 | **Click the ⛶ badge**    | Turn fullscreen off for that window (overview stays open) |
-| **Tab / Shift+Tab** (query empty) | Move a keyboard cursor to the next / previous window on the selected workspace |
+| **← → ↑ ↓** (query empty) | Move a keyboard cursor between the windows on the selected workspace |
 | **Ctrl+W**               | Close the targeted window (hovered, cursored, or the selected find match) |
 | **Right-click** a window, workspace, or its number badge | Open the actions menu — close, float/tile, fullscreen, lock, move/swap monitors, close all |
 | **?**                    | Show / hide a second row of key hints                      |
@@ -446,7 +448,7 @@ shell and checking behavior. Before opening a PR, confirm:
 
 - [ ] `omarchy plugin validate .` passes.
 - [ ] SUPER+A opens and closes the overlay; `Esc` and click-outside close it.
-- [ ] Number keys `1`–`0` jump to the right workspace; arrows + `Enter` work; click works.
+- [ ] Number keys `1`–`0` jump to the right workspace; Tab + `Enter` work; arrows step windows; click works.
 - [ ] The window mini-map roughly matches your real window layout.
 - [ ] It re-themes correctly after `omarchy theme next` (or any theme switch).
 - [ ] If you have a second monitor: the two-row layout and per-monitor mini-map coordinates
