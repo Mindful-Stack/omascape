@@ -508,4 +508,71 @@ TestCase {
         compare(view.testPeek.shown, true, "a fresh press after the release peeks")
         keyRelease(Qt.Key_Space)
     }
+
+    // Distinguishes: opening the close-all confirmation cancelling a held peek — a separate call
+    // site from openMenu()'s, and one nothing else in this file exercises. Calls
+    // openCloseAllConfirm() directly (rather than walking a menu to "Close all") because the
+    // dialog opening is the thing under test, not how a user would reach it — that path is
+    // Actions::test_close_all_from_the_window_menu_opens_the_confirmation's job.
+    function test_opening_the_close_all_confirm_cancels_the_hold() {
+        var t = view.resolveTarget()
+        verify(t !== null && t.kind === "workspace", "precondition: the target is a workspace")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        view.openCloseAllConfirm(t.id)
+        compare(view.confirmOpen, true, "precondition: the dialog actually opened")
+        compare(view.peekCancelled, true, "opening it cancels the hold")
+        compare(view.testPeek.shown, false, "and the peek yielded")
+        view.cancelCloseAllConfirm()
+        compare(view.testPeek.shown, false, "dismissing the dialog does not bring it back")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: peekedKey pinned to the target at PRESS time rather than following a
+    // mid-hold retarget. Peeks window A (the Tab cursor's first stop), retargets onto B with a
+    // second Tab while still held, then closes B — the window the layer is ACTUALLY showing, not
+    // the one it started on. Without onPeekTargetChanged keeping peekedKey in step with the
+    // retarget, it would still read "w:A" here, wmap would still have an entry for A (A was never
+    // touched), the model check would see nothing gone, and this would wrongly stay open — even
+    // though what's on screen (B) just vanished.
+    function test_closing_the_retargeted_window_cancels_the_hold() {
+        keyClick(Qt.Key_Tab)
+        var first = view.cursorAddress
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.peekTarget.address, first, "precondition: peeking the first window")
+        keyClick(Qt.Key_Tab)
+        var second = view.cursorAddress
+        verify(second !== first, "precondition: Tab retargeted to a different window")
+        compare(view.testPeek.peekTarget.address, second, "precondition: the peek followed to it")
+        compare(view.peekedKey, "w:" + second, "precondition: peekedKey names the CURRENT target")
+        // Close the retargeted window (second); the original (first) survives untouched.
+        view.compositor.workspaces = { values: [
+            wsRow(1, [client(first, "alpha", 100)]),
+            wsRow(2, [client("0xC", "charlie", 100)])
+        ] }
+        view.rebuild()
+        compare(view.peekCancelled, true, "closing the window the peek actually shows must cancel")
+        compare(view.testPeek.shown, false)
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: peekAbort() latching the cancel with no hold in flight (review fix). A modal
+    // that opens and closes without Space ever being pressed must not leave the NEXT press dead —
+    // reproduced by a right-click that opens a menu, Escape to dismiss it, then holding Space
+    // fresh. Before the fix, openMenu()'s peekAbort() call unconditionally set peekCancelled
+    // regardless of whether a key was down to suppress, and only a real Space release — which
+    // never happens in this sequence — clears it, so the very next, unrelated press was silently
+    // swallowed until one stray press+release cycle happened to arm it.
+    function test_a_menu_opened_and_dismissed_without_space_does_not_dead_the_next_press() {
+        var p = tileCentre("0xA")
+        mousePress(view, p.x, p.y, Qt.RightButton); mouseRelease(view, p.x, p.y, Qt.RightButton)
+        wait(30)
+        compare(view.menuOpen, true, "precondition: the menu opened")
+        keyClick(Qt.Key_Escape)
+        compare(view.menuOpen, false, "precondition: Escape dismissed it")
+        compare(view.peekCancelled, false, "no Space was ever down: nothing should be latched")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true, "a fresh hold must open, not be swallowed by a stale cancel")
+        keyRelease(Qt.Key_Space)
+    }
 }
