@@ -81,6 +81,13 @@ dev machine cannot do:
       scratchpad row depends on — unprobed; if it's rejected, that row closes nothing and reports
       "workspace not found" instead of silently doing the wrong thing.
 
+### 11. ~~Card presence: screen margin and elevation~~ ✅ done (2026-09-18)
+`Logic.screenMargin` (5%, floored at 16) replaces two drifted absolute constants; card border
+and a deeper shadow. Fixes a grid that sat 10 px from the edge on a 1920-logical screen (a 4K
+panel at 2x) — reported by a tester, never visible on the author's 2048-logical one, where
+`maxCellW` clamps first. See `docs/specs/2026-09-18-card-presence-design.md`. The border and
+shadow are **unswept by eye** as of this entry.
+
 ## Maintenance gotchas (verified in-session)
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell
   rescanPlugins` reloads the registry but NOT the live QML component.
@@ -108,7 +115,7 @@ dev machine cannot do:
 - Coalesced refresh: an event while the settle timer runs *owes* a refresh on the next tick.
   Never skip it — a request already in flight cannot contain the change the event announces
   (the nested-compositor un-fullscreen case catches this).
-- **Every new compositor chunk must raise the count guard in `tests/lua-check.sh`** (currently 23)
+- **Every new compositor chunk must raise the count guard in `tests/lua-check.sh`** (currently 24)
   — it fails the build if fewer chunks than expected parse, which is the only thing standing
   between a chunk that silently failed to generate and a green test run.
 - **Right-button presses must stay out of the drag release path.** `onReleased` submits a drop or

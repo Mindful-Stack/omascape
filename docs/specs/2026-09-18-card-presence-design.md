@@ -2,8 +2,8 @@
 
 Date: 2026-09-18 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on actions (`actions-omascape` at `da9075b`).
-Status: **approved design, pre-implementation; revised 2026-09-18 after review** (a UI-level
-assertion of the real card bounds, marked ✎). Branch `presence`.
+Status: **implemented 2026-09-18** (branch `presence`), except the opt-in accent tint, which is
+deliberately deferred. The border and shadow have not yet been swept by eye.
 
 ## Goal
 
