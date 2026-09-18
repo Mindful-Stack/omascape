@@ -62,8 +62,13 @@ Item {
 
     // Peek reuses this delegate at ~3x grid size (docs/specs/2026-09-18-peek-design.md). Two
     // grid-only affordances are opted out of there rather than forked into a second delegate:
-    // the icon fallback's 40px cap, which reads as a postage stamp in a 60% box, and the hover
-    // title chip, which belongs to a tile you can click — a peek is not a click target.
+    // the icon fallback's 40px cap, which reads as a postage stamp in a 60% box, and hover
+    // itself. `decorated: false` gates the whole response at the HoverHandler rather than
+    // per-consumer, so it drops the title chip, the 1.03 lift and the in-layer z raise
+    // together — a peek is not a click target, so none of the three apply to it. Only ever set
+    // this false on a non-interactive instance: on a grid tile it would also shrink that
+    // tile's action hit-test rect, which is read off the *painted* scale/z
+    // (Overview.tileCandidates), back to bare model geometry.
     property int iconMax: 40
     property bool decorated: true
 
