@@ -67,6 +67,33 @@ case("tiled insert replays float → move → cursor → un-float and restores c
   eq(#hl.__notifications, 0, "no error reported")
   eq(hl.__cursor.x, 5, "cursor restored")
 end)
+-- The dragged window is usually the ACTIVE one: you focus a window, summon the overview and drag
+-- it somewhere else. Restoring focus to it after the move is what took the user with it — focus
+-- carries the workspace (probed live on 0.56.2; it is the ONLY step of this chunk that moves the
+-- active workspace), so a drop onto a workspace nothing is showing yanked the desktop over to it,
+-- the one thing `follow = false` promises not to do. Caught by the nested rig, 2026-09-18
+-- (tests/integration/drag.sh, "active workspace changed").
+case("tiled insert of the active window leaves the active workspace alone", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  hl.__active_window = hl.__windows["0xabc"]        -- the dragged window has focus
+  run("TILED_INSERT", hl)
+  eq(hl.__windows["0xabc"].workspace.id, 3, "the window still moves")
+  eq(hl.__active_workspace.id, 1, "the drag must not take the user to the target workspace")
+  eq(hl.__cursor.x, 5, "cursor still restored")
+end)
+-- The other half of the same rule: a window that never left the workspace IS still refocused, so
+-- a re-tile inside the workspace you are looking at does not silently hand focus to whatever the
+-- float raised. Same-workspace insert (0xabc already on 3, which is also the active one), with
+-- focus on the anchor: the float takes focus off it, and the restore must put it back.
+case("tiled insert still restores focus to a window that stayed put", function()
+  local windows = tiledWindows()
+  windows["0xabc"].workspace = { id = 3 }           -- dragged window already on the target
+  local hl = Mock.new({ windows = windows, active_workspace = { id = 3 } })
+  hl.__active_window = windows["0xdef"]             -- the anchor holds focus, and never moves
+  run("TILED_INSERT", hl)
+  eq(hl.__active_window.address, "0xdef", "focus restored to the untouched window")
+  eq(hl.__active_workspace.id, 3, "and the user stays where they were")
+end)
 case("tiled insert: cursor move throws → window is NOT left floating, config restored, error reported", function()
   local hl = Mock.new({ windows = tiledWindows() })
   hl.__fail_on = "cursor.move"; hl.__fail_nth = 1   -- the placement move; the final cursor restore must still work
