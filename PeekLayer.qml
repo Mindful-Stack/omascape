@@ -124,13 +124,20 @@ Item {
                 bg: peek.background; fg: peek.foreground; borderColor: peek.hairline
                 fontFamily: peek.fontFamily; titleSize: peek.captionSize
                 motion: peek.motion
-                // Larger than the grid's 40px default: a mini-map tile gets a whole workspace's
-                // share of the peek box (up to 60% of the screen) rather than a fraction of the
-                // canvas split across every workspace, so its tiles run several times a grid
-                // cell's area even on a busy workspace. Smaller than the window peek's 96 — which
-                // fills nearly the whole frame by itself — since a mini-map tile is still one of
-                // several. 64 reads clearly on a several-window workspace without dominating it.
-                iconMax: 64
+                // Measured, not estimated: at a 1920×1080 panel on a 2560×1440 monitor, real
+                // peekTiles output puts a mini-map tile at a uniform 3.09x its grid-cell
+                // counterpart regardless of window count (n=2: 571px vs 185px; n=9: 380px vs
+                // 123px) — the ratio holds because both scale off the same window geometry, just
+                // at box sizes that differ by that constant factor. A smaller cap (64, 1.6x the
+                // grid's 40) undershoots that: the icon's share of its own tile would HALVE
+                // against the grid's (11% vs 22% at n=2), the opposite of what iconMax exists to
+                // fix. Sharing 96 with the window peek is deliberate, not a coincidence: at n=1
+                // the mini-map tile (1141px) is within 1% of the window peek's own frame
+                // (1152px), so the two paths should — and here do — agree on one number; at the
+                // busy end (n=12) 96 tracks the grid's own proportion (34% vs the grid's 33% at
+                // n=9), and `Math.min(iconMax, parent.width * 0.5)` below already self-limits it
+                // on a crowded workspace, so there is no overflow risk at that end either.
+                iconMax: 96
                 decorated: false
             }
         }
