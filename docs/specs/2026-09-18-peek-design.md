@@ -301,3 +301,71 @@ and cannot press a key):
   and stays gone while the key is held.
 - Hold `Space`, right-click, and confirm the menu opens with no peek behind it and none returns
   on dismiss.
+
+## Verified facts (live, 2026-09-18)
+
+Probed on this machine (Hyprland 0.56.2, nested instance on an offset headless output, `hyprctl`,
+`quickshell`, `foot`, `jq`, `wtype` and `grim` all present) with `tests/integration/peek-probe.sh`,
+via `mise run test-integration`. This probe covers exactly the four claims no offscreen tier can
+reach — it is IPC-driven (`tests/integration/drag.qml`'s `dragtest` handler calling
+`overview.peekHold()`/`peekRelease()`/`peekState()`/`peekRows()`/`selectWs()` directly), so it
+proves the layer, the mini-map and cancellation-by-geometry, but **not** `Space`'s own key
+routing — that is the offscreen UI suite's job, and (for a real held key) case 4 below. It does
+**not** exercise every scenario the "Tier 2 (nested Hyprland)" list above names (no `Tab`-while-
+held retargeting, no close-from-another-client, no right-click-while-held) — those remain
+unverified live and are candidates for a future extension of this probe, not claims this run
+makes.
+
+Verbatim output of the final run:
+
+```
+PASS 1: a peek hold changed no compositor state
+PASS 2: mini-map rows do not overlap (fullscreen modes [2,0])
+PASS 3: the peek's content changed between frames (live capture)
+FACT 4: before={"peeking":false,"key":"","cancelled":false} held={"peeking":true,"key":"s:1","cancelled":false} after={"peeking":false,"key":"","cancelled":false}
+PASS 4: a 2s held Space opened one peek and closed on release
+peek-probe: done
+```
+
+- **Case 1 — the peek changes no compositor state: PASS, and genuinely diffed.** `hc clients -j`,
+  `hc workspaces -j` and `hc monitors -j`, each `jq -S`-sorted and projected to the fields that
+  cannot legitimately churn, were byte-identical before and after a `peekHold`/`peekRelease`
+  round trip. Confirms the spec's strongest claim: the peek dispatches nothing.
+- **Case 2 — the mini-map places a fullscreen window in its recovered slot: PASS, after fixing a
+  real race the first two runs exposed.** With one window toggled fullscreen (`mode='fullscreen',
+  action='toggle'` — see the dispatcher note below) and one left tiled, `peekRows()` reported two
+  non-overlapping rows with `fullscreen` modes `[2,0]`. The **first two live runs** (before the
+  fix) reported `[0,0]` — both rows tiled — which still passed the non-overlap `jq` assertion for
+  the trivial reason that ordinary tiles never overlap; the fullscreen slot-recovery path was
+  never actually exercised. Root cause: `peekRows()`, unlike this same file's `drop()`/
+  `dropPoint()`/`unfullscreen()`, read `overview._windows` without a preceding `overview.rebuild()`
+  — a synchronous IPC call racing Quickshell's own debounced `onRawEvent -> scheduleRebuild()`
+  auto-refresh, which had not yet absorbed the fullscreen toggle. Adding `overview.rebuild()` to
+  `peekRows()` (matching the other read handlers) closed the race; three consecutive follow-up
+  runs (plus the final run above) all reported `[2,0]`. **Tooling note:** the brief's original
+  script text dispatched `window.fullscreen` with a bare `action = "on"|"off"`; that form is not
+  attested anywhere else in this repo (production `logic.js:603`, `fullscreen.sh`,
+  `probe-fullscreen.sh` all use `{ mode = "fullscreen", action = "toggle" }`), so the probe uses
+  the same toggle form here instead of introducing an unverified dispatcher call.
+- **Case 3 — live pixels: PASS.** Two `grim` captures 1.2s apart, during one held peek of a `foot`
+  window running `while :; do date +%N; sleep 0.2; done`, were binary-different
+  (`cmp` disagreed). A single frame would have passed against the icon fallback too; requiring two
+  *differing* frames is what actually distinguishes a live `ScreencopyView` capture from a static
+  placeholder.
+- **Case 4 — real auto-repeat: PASS, and genuinely measured, not assumed.** `wtype -P space` (key
+  down) held for 2s, then `wtype -p space` (key up), against the real nested compositor. The FACT
+  line shows `peeking` went `false -> true -> false` across the hold — a real `wtype` virtual
+  keyboard press **does** reach the overlay's key handler on this build and **does** open a peek
+  that survives the full 2s hold without the auto-repeat guard mis-firing, closing cleanly on
+  release. This was the case flagged most likely to come back `UNVERIFIED` (nothing in this repo
+  had driven the overview with real keys before); it did not, but the probe's `UNVERIFIED 4`
+  branch is left in place and is not dead code — a future kernel/compositor/Quickshell change that
+  breaks virtual-keyboard delivery to this surface would trip it, and the branch has been
+  exercised for its "prints UNVERIFIED and skips the PASS line" behavior by manual inspection of
+  the script's control flow (the brief's original draft printed `UNVERIFIED` and then fell through
+  to an unconditional `PASS 4` regardless — fixed here to a proper if/elif so the two outcomes are
+  mutually exclusive).
+- **Not run this session:** offscreen Tier 1 (`167 passed, 0 failed`) and the offscreen UI suite
+  (`288 passed, 0 failed`, 8 suites) were re-run via `mise run test` immediately before this probe
+  and are unaffected by it — this task touches only `tests/integration/*`, no production QML or
+  `logic.js`.
