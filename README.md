@@ -1,12 +1,26 @@
 # Omascape
 
 A workspace overview overlay for [Omarchy](https://omarchy.org)'s Quickshell shell.
-Press **SUPER+P** to get a visual, spatial overview of every workspace — grouped by
+Press **SUPER+A** to get a visual, spatial overview of every workspace — grouped by
 monitor, with a **live thumbnail** of each window in its real position — then jump to a
 workspace, or **drag a window onto another workspace** to move it there.
 
 Built to replace the dead `walker`-based `workspace-picker.sh` after Omarchy Quattro
 removed `walker`.
+
+```bash
+omarchy plugin add https://github.com/Mindful-Stack/omascape.git --enable
+```
+
+Then bind a key, because Omascape only appears when you toggle it. Add this to
+`~/.config/hypr/bindings.lua` and run `hyprctl reload`:
+
+```lua
+o.bind("SUPER + A", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
+```
+
+Full instructions, including the classic `.conf` syntax and a script that adds the bind for
+you, are under [Install](#install).
 
 ![Omascape open over omarchy.org: two monitor groups, live thumbnails of every window](preview.webp)
 
@@ -134,18 +148,30 @@ omarchy plugin list | grep omascape
 
 ### 2. Bind a key to toggle it
 
-Omascape only appears when you toggle it, so bind a key. **SUPER+P** is the intended bind.
+Omascape only appears when you toggle it, so bind a key. **SUPER+A** is the intended bind, and
+it is unbound in a stock Omarchy Quattro.
+
+Omarchy plugins cannot register keybinds themselves, and Omascape will not edit your Hyprland
+config behind your back, so this step is yours. Either add the line below by hand, or run the
+script that ships with the plugin, which appends exactly that one line, backs the file up first,
+and refuses to add a second copy:
+
+```bash
+~/.config/omarchy/plugins/se.mindfulstack.omascape/scripts/add-keybind.sh
+# or pick your own key:
+~/.config/omarchy/plugins/se.mindfulstack.omascape/scripts/add-keybind.sh "SUPER + P"
+```
 
 If your Omarchy uses the Lua binding config (`~/.config/hypr/bindings.lua`):
 
 ```lua
-o.bind("SUPER + P", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
+o.bind("SUPER + A", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
 ```
 
 If you use plain Hyprland config (`~/.config/hypr/bindings.conf` or `hyprland.conf`):
 
 ```ini
-bind = SUPER, P, exec, omarchy-shell shell toggle se.mindfulstack.omascape
+bind = SUPER, A, exec, omarchy-shell shell toggle se.mindfulstack.omascape
 ```
 
 Then reload Hyprland so the bind takes effect:
@@ -156,11 +182,11 @@ hyprctl reload
 
 ### 3. Use it
 
-Press **SUPER+P**. The overlay opens on your focused monitor.
+Press **SUPER+A**. The overlay opens on your focused monitor.
 
 | Key / action             | Effect                                                    |
 | ------------------------ | --------------------------------------------------------- |
-| **SUPER+P**              | Toggle the overlay (open and close)                       |
+| **SUPER+A**              | Toggle the overlay (open and close)                       |
 | **1–9, 0**               | Jump to that workspace (`0` = 10)                         |
 | **← → ↑ ↓**              | Move the highlight                                        |
 | **Enter**                | Jump to the highlighted workspace                         |
@@ -195,7 +221,7 @@ omarchy plugin update se.mindfulstack.omascape
 omarchy plugin remove se.mindfulstack.omascape
 ```
 
-…then delete the SUPER+P bind you added and `hyprctl reload`.
+…then delete the SUPER+A bind you added and `hyprctl reload`.
 
 ### Migrating from Omyview
 
@@ -246,7 +272,7 @@ to create the runtime directory). No packages are installed and nothing is downl
 
 ### Troubleshooting
 
-- **Nothing happens on SUPER+P.** Check the plugin is `enabled` (`omarchy plugin list |
+- **Nothing happens on SUPER+A.** Check the plugin is `enabled` (`omarchy plugin list |
   grep omascape`) and that your bind targets the exact id `se.mindfulstack.omascape`. Re-run
   `hyprctl reload` after editing the bind.
 - **`summon: plugin not enabled` in the shell log.** Run `omarchy plugin enable
@@ -360,6 +386,7 @@ Contributions are welcome — bug reports, fixes, and the roadmap items in `ROAD
 | `SoftShadow.qml`    | Shadow under floating tiles.                                            |
 | `logic.js`          | Pure logic: geometry, reconcile, Lua chunk generation. Unit-tested.     |
 | `tests/`            | Tier 1 logic + UI tests (`mise run test`), Lua chunk suite, integration. |
+| `scripts/`          | `add-keybind.sh`, which appends the toggle bind to your Hyprland config. |
 | `DESIGN.md`         | What it does and why.                                                   |
 | `docs/specs/`       | One design doc per feature (find, scratchpad, lock, …).                 |
 | `ROADMAP.md`        | What's next.                                                            |
@@ -406,7 +433,7 @@ There's no unit-test harness — this is a visual overlay, so "testing" means re
 shell and checking behavior. Before opening a PR, confirm:
 
 - [ ] `omarchy plugin validate .` passes.
-- [ ] SUPER+P opens and closes the overlay; `Esc` and click-outside close it.
+- [ ] SUPER+A opens and closes the overlay; `Esc` and click-outside close it.
 - [ ] Number keys `1`–`0` jump to the right workspace; arrows + `Enter` work; click works.
 - [ ] The window mini-map roughly matches your real window layout.
 - [ ] It re-themes correctly after `omarchy theme next` (or any theme switch).
