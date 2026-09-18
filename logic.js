@@ -209,8 +209,16 @@ function layout(input) {
         Math.floor((availW - (cols - 1) * gap) / cols)))
     // Cell height follows each group's own monitor (see the group loop), so the picture is
     // identical whichever screen has focus; `cell.h` reports the focused monitor's for reference.
+    // A monitor whose logical size is not positive is not a screen to draw at scale: Quickshell
+    // hands the plugin a placeholder monitor (every field zeroed) for a workspace Hyprland
+    // reports on no monitor at all, and 0/0 is NaN. Falling back to the default aspect the same
+    // way a missing monitor does keeps the whole layout finite, in the spirit of availW's own
+    // guard above — a NaN here reaches every box, the canvas and the card, and a card with a NaN
+    // height paints nothing at all (found on a real desktop, 2026-09-18). The view drops those
+    // placeholders before they ever get here (Overview.buildInput); this is the floor under it.
     function cellHeightFor(mon) {
-        var aspect = mon ? _monLogical(mon).w / _monLogical(mon).h : (16 / 10)
+        var l = mon ? _monLogical(mon) : null
+        var aspect = (l && l.w > 0 && l.h > 0) ? l.w / l.h : (16 / 10)
         return Math.round(cw / aspect)
     }
     var ch = cellHeightFor(monByName[input.focusedMonitorName])

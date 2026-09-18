@@ -27,6 +27,33 @@ TestCase {
         return null
     }
 
+    // A workspace bound to no monitor ("monitor": "?" in hyprctl) makes Quickshell hand the
+    // plugin a placeholder monitor of that name with everything zeroed. Its logical size is
+    // 0x0, and 0/0 is NaN: before this was guarded, that NaN aspect flowed into the cell
+    // height, every box and group height in the layout, the canvas and finally the card, which
+    // a Rectangle paints as nothing at all — the overview mapped its surface, took focus and
+    // drew a scrim over an invisible card (found on a real desktop, 2026-09-18).
+    function phantom() {
+        return { name: "?", x: 0, y: 0, width: 0, height: 0, scale: 0, reserved: [0,0,0,0], transform: 0 }
+    }
+    function test_a_monitorless_workspace_never_yields_NaN_geometry() {
+        var r = Logic.layout({ monitors:[edp(), phantom()],
+            workspaces:[{id:1,monitorName:"eDP-1",focused:true,occupied:true},
+                        {id:2,monitorName:"eDP-1",focused:false,occupied:false},
+                        {id:6,monitorName:"?",focused:false,occupied:false}],
+            windows:[], focusedMonitorName:"eDP-1", availW:1632, params:params })
+        verify(isFinite(r.canvasSize.h), "canvas height must be finite, got " + r.canvasSize.h)
+        verify(isFinite(r.canvasSize.w), "canvas width must be finite, got " + r.canvasSize.w)
+        verify(isFinite(r.cell.h), "cell height must be finite, got " + r.cell.h)
+        for (var i = 0; i < r.boxes.length; i++) {
+            var b = r.boxes[i]
+            verify(isFinite(b.h) && b.h > 0, "box " + b.workspaceId + " height " + b.h)
+            verify(isFinite(b.y), "box " + b.workspaceId + " y " + b.y)
+        }
+        for (var g = 0; g < r.groups.length; g++)
+            verify(isFinite(r.groups[g].h), "group " + r.groups[g].monitorName + " height " + r.groups[g].h)
+    }
+
     // wide anchor: availW 1632 => cols 5, cw 320, ch 200 (eDP aspect 1.6)
     function test_cell_size_and_boxes_wide() {
         var r = Logic.layout({ monitors:[edp()],

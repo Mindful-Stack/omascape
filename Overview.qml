@@ -280,6 +280,19 @@ Item {
         var activeByMon = {}
         for (var i = 0; i < hmons.length; i++) {
             var m = hmons[i]
+            // Not every entry in Hyprland.monitors is a screen. A workspace Hyprland reports on
+            // no monitor ("monitor": "?" — a persistent rule whose monitor is absent, or one left
+            // behind by an unplugged display) makes Quickshell materialise a placeholder monitor
+            // of that name with every field zeroed, and it arrives here the moment a refresh
+            // touches that workspace. Admitted as a screen it turns a one-display machine
+            // multi-monitor (chip bands, group insets) and, worse, its 0x0 logical size divides
+            // 0 by 0 for the group's cell aspect: the NaN reaches the canvas and the card, and a
+            // card with a NaN height paints NOTHING — the overview mapped its surface, took
+            // focus, drew the scrim and showed no picture (found on a real desktop, 2026-09-18).
+            // Skipped here rather than filtered in layout() so `monNames`, `activeByMon` and the
+            // menu's monitor list all agree on what a monitor is; workspaces naming one then take
+            // the "?" path buildInput already has, and layout() leaves them out.
+            if (!(m.width > 0 && m.height > 0)) continue
             mons.push({ name: m.name, x: m.x, y: m.y, width: m.width, height: m.height,
                         scale: m.scale, reserved: m.lastIpcObject ? m.lastIpcObject.reserved : [0,0,0,0],
                         transform: m.lastIpcObject ? m.lastIpcObject.transform : 0 })
