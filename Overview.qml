@@ -1464,13 +1464,24 @@ Item {
 
         // A 28% shadow reads on light themes but vanishes on dark ones (Tokyo Night sweep),
         // so the alpha follows the card's luminance.
+        // Deeper than SoftShadow's defaults because this is the one surface that must lift off
+        // the desktop now that there is real air around it. Overridden at the USE SITE, so
+        // SoftShadow.qml's defaults — and therefore WindowTile's own blur: 12 — are untouched.
         SoftShadow { target: card; scale: card.scale; opacity: card.opacity
-                     color: Qt.rgba(0, 0, 0, root.darkTheme ? 0.55 : 0.28) }
+                     blur: 48; offset: Qt.vector2d(0, 12)
+                     color: Qt.rgba(0, 0, 0, root.darkTheme ? 0.65 : 0.38) }
         Rectangle {
             id: card
             anchors.centerIn: parent
             radius: root.cardRadius
             color: root.background
+            // With real air around the card it must read as elevated rather than as a lighter
+            // rectangle. Accent-derived rather than a fixed neutral: a black hairline looks like
+            // a bug on a light card and a white one vanishes on it. `accent` is already
+            // `selText` and already tracks the theme, so this needs no new colour. One logical
+            // px is two device px at 2x — crisp at exactly the scale that reported the problem.
+            border.width: 1
+            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
             opacity: 0        // the entrance brings it in; panel.visible follows this
             readonly property int pad: Math.round(Style.space(12))
             // Space under the grid for the key hints or, while a query is active, the find
