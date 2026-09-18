@@ -382,11 +382,23 @@ Item {
     // ones: an edge/wheel scroll, a card resize or the entrance scale all move the canvas under a
     // stationary pointer, and none of those is the user pointing at something new.
     property bool pointerLive: false
+    // The first hover report of a summon is the surface mapping under wherever the pointer already
+    // rests: a position, not a move. Its coordinates need not match the ones left from the last
+    // summon — the first summon after start-up has none, and between summons the overview is
+    // unmapped and is told nothing about the pointer — so the same-position early return below
+    // cannot recognise it on its own. Without this, a keyboard summon armed the pointer and Ctrl+W
+    // acted on whatever the resting cursor happened to cover. Only the FIRST report of a summon,
+    // and only while the surface is still mapping (`pointerPrime`), establishes the position that
+    // way; a real move emits a stream of reports, so one made during that window still arms
+    // liveness a pixel later, and one made after it arms immediately.
+    property bool pointerPrimed: false
     property real pointerSceneX: 0
     property real pointerSceneY: 0
+    Timer { id: pointerPrime; interval: 300 }   // the mapping window; restarted by open()
     function notePointerMove(sp) {
-        if (sp.x === pointerSceneX && sp.y === pointerSceneY) return
+        if (sp.x === pointerSceneX && sp.y === pointerSceneY) { pointerPrimed = true; return }
         pointerSceneX = sp.x; pointerSceneY = sp.y
+        if (!pointerPrimed && pointerPrime.running) { pointerPrimed = true; return }
         pointerLive = true
     }
     // The pointer in canvas coordinates, derived only here and only at resolve time.
@@ -1206,11 +1218,14 @@ Item {
         // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
         // "most recent input device wins" means the device that summoned the overview, not
-        // wherever the mouse was left resting the last time it closed. Only the flag resets:
+        // wherever the mouse was left resting the last time it closed. Only the flags reset:
         // pointerSceneX/Y are left alone, so if the real pointer has not moved at all since the
         // last close, the next onPointChanged/notePointerMove sees the SAME position and does not
-        // spuriously flip liveness back on (see notePointerMove's early-return guard).
-        pointerLive = false
+        // spuriously flip liveness back on (see notePointerMove's early-return guard); and where
+        // it does differ — the mouse moved while the overview was unmapped, or this is the first
+        // summon of the session — the mapping's own hover report is taken as the position to
+        // measure the next move against, not as that move (see pointerPrimed).
+        pointerLive = false; pointerPrimed = false; pointerPrime.restart()
         _showVisuals(true)                         // before the first rebuild: layout motion is gated on it
         rebuild()          // instant paint from current data
         flick.contentX = 0; flick.contentY = 0   // fresh scroll every open (kept-loaded state would otherwise leak the last offset)

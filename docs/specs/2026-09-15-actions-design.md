@@ -419,7 +419,7 @@ workspace is the moved one (their coordinates are meaningless on another monitor
 does nothing, right presses open nothing. A cursor window that is dragged elsewhere is no longer on
 the selected workspace after the drop, so the cursor clears on the rebuild.
 
-`Overview` gains: `pointerLive: bool`, `pointerSceneX/Y: real`, `cursorAddress: string`,
+`Overview` gains: `pointerLive: bool`, `pointerPrimed: bool`, `pointerSceneX/Y: real`, `cursorAddress: string`,
 `pendingCloses: var`, `menuOpen: bool`, `menuTarget: var`, `menuItems: var`, `menuIndex: int`,
 `menuX/Y: real`, `menuDismissKey: int`, `hintsExpanded: bool`.
 
@@ -439,6 +439,19 @@ against, and zeroing them makes the next hover reconciliation read as motion rel
 which flips `pointerLive` straight back to true and defeats the reset. Clearing `pointerLive` alone,
 with `notePointerMove`'s same-position early return, is what actually delivers the intended
 behaviour — the keyboard owns the target after a summon until the mouse really moves.
+
+✎ **The same-position early return is not enough on its own** (found in review, 2026-09-18). It
+only recognises a resting pointer whose stored position still matches: the first summon after
+start-up has no stored position at all, and a mouse moved while the overview was closed left none
+that matches either — between summons the surface is unmapped and the overview is told nothing
+about the pointer. In both cases the hover report the *mapping itself* produces under a perfectly
+stationary pointer reads as motion, arms `pointerLive`, and a keyboard summon followed by Ctrl+W
+closes whatever the resting cursor covers. So a summon **establishes the pointer's position
+without counting it as movement**: `open()` clears `pointerPrimed` and starts a 300 ms
+`pointerPrime` window, and the first report to arrive inside that window stores its coordinates and
+returns. Only the first, and only inside the window — a real move emits a stream of reports, so a
+move made while the surface is still mapping arms liveness on its next event, and any move after
+the window arms it at once.
 
 ## Hints — two tiers
 
@@ -470,6 +483,9 @@ only while a query is active.
   valid the moment the keyboard is used again).
 - **Scroll under a stationary pointer** (wheel, or edge scroll after a drop): the scene point did
   not change, so the pointer is not made live by it.
+- **Summon with the mouse resting anywhere** (first one after start-up, or after the mouse moved
+  while the overview was closed): the mapping's hover report establishes the position, it does not
+  arm the pointer, so the keyboard keeps the target until the mouse really moves.
 - **Menu open, target changes underneath**: dismissed or updated on the rebuild (Staleness).
 - **Menu open, overview toggled with SUPER+P**: `close()` dismisses it.
 - **Move/Swap to a monitor unplugged between the rebuild and the click**: the chunk's `run()`
@@ -527,7 +543,8 @@ window onto the floated window**, so "restores focus" has something to restore.
   the tile; **parked-mouse rule**: a synthetic pointer move over a tile then a key press → Ctrl+W
   acts on the keyboard target; a pointer move after the key → Ctrl+W acts on the hovered tile; a
   lone Ctrl press then W with the pointer parked over a tile since the last move → the hovered
-  tile; **consecutive action keys**: with window H hovered (pointer live) and a Tab cursor on
+  tile; a reopen after the pointer moved while the overview was closed leaves the pointer *not*
+  live, and a hover afterwards still arms it; **consecutive action keys**: with window H hovered (pointer live) and a Tab cursor on
   window C, Ctrl+W then Ctrl+W dispatches one close for H and none for C, and Enter after a
   hover focuses H not C, while an arrow in between makes the next Ctrl+W act on C; a scroll under
   a stationary pointer does not make it live; right press on a tile opens the

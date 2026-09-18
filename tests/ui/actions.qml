@@ -61,20 +61,15 @@ TestCase {
         v.compositor.monitors = { values: [mon, mon2] }
     }
     function init() {
-        // Compensates for a gap between this fixture and the real (kept-loaded) shell: every test
-        // gets a BRAND NEW Overview instance (createTemporaryObject), so pointerSceneX/Y start at
-        // their (0, 0) declared default rather than carrying over the real scene position the way
-        // a single kept-loaded instance would across a close/reopen. QtQuickTest also runs this
-        // file's functions in ALPHABETICAL order, not declaration order, so a test earlier in that
-        // order that ends with the real synthetic cursor resting over a tile (e.g.
-        // test_a_lone_modifier_press_changes_nothing) leaves it there on the one real QQuickWindow
-        // this whole file shares. The next test's fresh instance then sees its very first
-        // onPointChanged report a position that differs from ITS OWN (0, 0) default — even though
-        // the real pointer never moved during that test — and notePointerMove reads that as motion.
-        // open()'s own `pointerLive = false` (production fix for the same-instance case) cannot
-        // help here: it runs before that first onPointChanged arrives. Parking the real cursor off
-        // any tile before each test is what actually breaks the chain; it changes nothing the
-        // suite asserts about liveness, only which stray motion is allowed to count.
+        // The one real QQuickWindow this whole file shares keeps the synthetic cursor wherever the
+        // previous test left it, and QtQuickTest runs these functions in ALPHABETICAL order, not
+        // declaration order — so a test that ends with the cursor resting on a tile (e.g.
+        // test_a_lone_modifier_press_changes_nothing) hands the next one a pointer already parked
+        // there. That test's fresh Overview then primes on exactly those coordinates when it opens
+        // (notePointerMove), and its own hoverTile() for the same tile moves the pointer nowhere:
+        // no motion, no liveness, and every pointer-targeting assertion below fails for a reason
+        // that has nothing to do with the code under test. Parking the cursor off any tile first
+        // makes each test's own hover a real move; it changes nothing the suite asserts.
         mouseMove(tc, -50, -50)
         view = createTemporaryObject(overview, tc)
         verify(view !== null)
@@ -160,6 +155,29 @@ TestCase {
         compare(view.pointerLive, false, "a keyboard re-summon must not inherit the old hover")
         var t = view.resolveTarget()
         compare(t.kind, "workspace"); compare(t.id, 1)
+    }
+    // Distinguishes: liveness armed by the hover report the surface's own mapping produces. On the
+    // first summon after start-up, or any summon after the mouse moved while the overview was
+    // closed, that report carries a position the stored one does not match — motion by
+    // notePointerMove's reckoning, though the pointer has been resting still the whole time, so
+    // Ctrl+W closed whatever the cursor happened to be over. Moving the cursor while closed is
+    // what makes the reopen's first report differ: the panel is invisible then, so nothing about
+    // that move is reported, exactly as on the real desktop where the overview sees no pointer at
+    // all between summons.
+    function test_a_pointer_moved_while_closed_is_position_not_motion() {
+        hoverTile("0xB")
+        compare(view.pointerLive, true)
+        view.close()
+        var p = tileCentre("0xA")
+        mouseMove(view, p.x, p.y)   // the real pointer moves with nothing listening
+        view.open()
+        wait(400)
+        compare(view.pointerLive, false, "the mapping's own hover report is not pointer motion")
+        var t = view.resolveTarget()
+        compare(t.kind, "workspace"); compare(t.id, 1)
+        hoverTile("0xB")            // and a real move afterwards still arms it
+        compare(view.pointerLive, true)
+        compare(view.resolveTarget().address, "0xB")
     }
 
     // ---- key classes ---------------------------------------------------------------------
