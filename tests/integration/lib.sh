@@ -63,8 +63,51 @@ QtObject {
     function space(px) { return px }
 }
 QML
-    printf 'module qs.Ui\nUnused 1.0 Unused.qml\n' > "$tmp/Ui/qmldir"
+    printf 'module qs.Ui\nUnused 1.0 Unused.qml\nConfirmDialog 1.0 ConfirmDialog.qml\n' > "$tmp/Ui/qmldir"
     printf 'import QtQuick\nItem {}\n' > "$tmp/Ui/Unused.qml"
+    # Ui/ConfirmDialog stub, for the same reason tests/ui/prepare.py writes one: Overview.qml
+    # instantiates the shell's own component (/usr/share/omarchy/shell/Ui/ConfirmDialog.qml,
+    # behind Close all), and it imports qs.Commons for its theme, which this fixture has none of.
+    # Without it the fixture does not merely lose the dialog — `Overview` itself is an unavailable
+    # type and every script here dies at load with "ConfirmDialog is not a type".
+    # The properties Overview binds are reproduced, and `handleKey` faithfully, so a script that
+    # drives Close all through the one key catcher sees the real key behaviour. The card layout,
+    # the theme and the buttons' own hit areas are not: nothing at this tier clicks a button.
+    cat > "$tmp/Ui/ConfirmDialog.qml" <<'QML'
+import QtQuick
+Item {
+    id: root
+    property bool opened: false
+    property string message: ""
+    property string cancelText: "Cancel"
+    property string confirmText: "Confirm"
+    property int selectedIndex: 1
+    property color background: "#222"
+    property color foreground: "#ddd"
+    property color scrim: "#000"
+    property color selectedBackground: "#444"
+    property color selectedText: "#fff"
+    property string fontFamily: ""
+    property int cornerRadius: 8
+    signal canceled()
+    signal confirmed()
+    function handleKey(event) {
+        if (!root.opened) return false
+        if (event.key === Qt.Key_Escape) { root.canceled(); return true }
+        else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right ||
+                 event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+            root.selectedIndex = root.selectedIndex === 0 ? 1 : 0
+            return true
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            if (root.selectedIndex === 0) root.canceled(); else root.confirmed()
+            return true
+        }
+        return false
+    }
+    visible: opened
+    MouseArea { anchors.fill: parent; enabled: root.opened; onClicked: root.canceled() }
+}
+QML
     cp "$src"/*.qml "$src/logic.js" "$tmp/"   # every component the plugin ships (SoftShadow, OmascapeConfig, ...)
     cp "$src/tests/integration/drag.qml" "$tmp/shell.qml"
     HYPRLAND_INSTANCE_SIGNATURE="$nested" WAYLAND_DISPLAY="$socket" quickshell -p "$tmp/shell.qml" > "$tmp/qs.log" 2>&1 & qs_pid=$!
