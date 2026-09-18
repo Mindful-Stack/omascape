@@ -587,12 +587,18 @@ TestCase {
 
     // Distinguishes: a right press that opens nothing, or that opens the workspace menu because
     // the press fell through the tile to the well beneath it.
+    //
+    // 0xA sits on workspace 1, which is occupied and single-monitor and unarmed, so a window's
+    // menu now also carries its workspace's group below a separator (addendum 2026-09-17): Close
+    // all lands with Close (grouped by verb), Lock/Unlock below the line, no Move/Swap rows (one
+    // monitor only).
     function test_right_press_on_a_tile_opens_the_window_menu() {
         rightPressTile("0xA")
         compare(view.menuOpen, true)
         compare(view.menuTarget.kind, "window")
         compare(view.menuTarget.address, "0xA")
-        compare(menuIds(), ["close", "float", "fullscreen"])
+        compare(menuIds(), ["close", "closeAll", "float", "fullscreen", "separator", "lock"])
+        compare(view.menuItems[4].separator, true)
     }
     // Distinguishes: a right press that also starts a drag — the drag machinery accepts the
     // right button now, and only an explicit left-button check keeps it out.
@@ -665,11 +671,14 @@ TestCase {
         keyClick(Qt.Key_Return)
         compare(view.menuOpen, false, "activation dismisses first")
     }
-    // Distinguishes: a highlight that does not wrap from "none" to the last row.
+    // Distinguishes: a highlight that does not wrap from "none" to the last row — and, now that
+    // the window menu ends with a workspace group below a separator, one that lands ON the
+    // separator instead of skipping past it to the real last row (lock, index 5).
     function test_up_from_no_highlight_takes_the_last_row() {
         rightPressTile("0xA")
         keyClick(Qt.Key_Up)
-        compare(view.menuIndex, 2)
+        compare(view.menuIndex, 5)
+        compare(menuIds()[5], "lock")
     }
     // Distinguishes: Esc closing the overview instead of spending itself on the menu.
     function test_escape_dismisses_the_menu_only() {
@@ -740,7 +749,9 @@ TestCase {
             for (var i = 0; i < item.children.length; i++) collect(item.children[i])
         }
         collect(view.testPanel)
-        compare(rows.length, 3, "one delegate per item")
+        // 6 items (close, closeAll, float, fullscreen, separator, lock), but the separator gets
+        // no "menuRow" node at all — it is a border, not a row, with no MouseArea to click.
+        compare(rows.length, 5, "one delegate per item, the separator excluded")
         var c = rows[0].mapToItem(view, rows[0].width / 2, rows[0].height / 2)
         mouseClick(view, c.x, c.y, Qt.LeftButton)
         compare(view.menuOpen, false)
@@ -750,15 +761,32 @@ TestCase {
     // elsewhere must relabel the row, keeping the highlight on the same item.
     function test_a_rebuild_updates_the_items_and_keeps_the_highlight() {
         rightPressTile("0xA")
-        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down)
-        compare(menuIds()[1], "float")
-        compare(view.menuIndex, 1)
+        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down)
+        compare(menuIds()[2], "float")
+        compare(view.menuIndex, 2)
         var c = client("0xA", "alpha", 100); c.floating = true
         view.compositor.workspaces = { values: [
             wsRow(1, [c, client("0xB", "bravo", 900)]), wsRow(2, [client("0xC", "charlie", 100)]) ] }
         view.rebuild()
-        compare(menuIds()[1], "tile", "the row follows the compositor")
-        compare(view.menuIndex, 1, "the highlight stays on the same item")
+        compare(menuIds()[2], "tile", "the row follows the compositor")
+        compare(view.menuIndex, 2, "the highlight stays on the same item")
+    }
+    // Distinguishes: the separator counted differently by the id-match/position-fallback code
+    // than by the item list itself — the addendum's own warning (docs/specs/2026-09-15-actions-
+    // design.md, "The menu", 2026-09-17): a toggle AFTER the separator (lock <-> unlock, which
+    // this window's own workspace group carries) is exactly the row whose id changes on the very
+    // refresh that must keep the highlight in place, so an off-by-one here would land the
+    // highlight ON the separator (index 4) instead of the real row (index 5).
+    function test_a_rebuild_keeps_the_highlight_on_a_toggle_row_past_the_separator() {
+        view.testLocks.loadArmed([])
+        rightPressTile("0xA")
+        compare(menuIds(), ["close", "closeAll", "float", "fullscreen", "separator", "lock"])
+        keyClick(Qt.Key_Up)   // "up from none" lands on the last row: lock, index 5
+        compare(view.menuIndex, 5)
+        view.testLocks.loadArmed(["1"])   // armed elsewhere: the rebuild must relabel lock -> unlock
+        view.rebuild()
+        compare(menuIds()[5], "unlock", "the row follows the compositor")
+        compare(view.menuIndex, 5, "the highlight must land on the row itself, not the separator")
     }
     // Distinguishes: a menu left open over a target that no longer exists, whose activation would
     // then dispatch for a dead address.
@@ -824,20 +852,24 @@ TestCase {
     }
 
     // Distinguishes: a menu row that dispatches the wrong chunk, or none. "Float" must send the
-    // float chunk for THIS address.
+    // float chunk for THIS address. Index 2: close(0), closeAll(1), float(2) — Close all now
+    // sits between Close and Float (addendum 2026-09-17).
     function test_the_float_row_dispatches_the_float_chunk() {
         rightPressTile("0xA")
-        compare(menuIds()[1], "float")
-        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return)
+        compare(menuIds()[2], "float")
+        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return)
         verify(dispatched("window.float"))
         verify(dispatched("address:0xA"))
         verify(dispatched('action = "on"'), "the id names the state to set, not a toggle")
     }
     // Distinguishes: Fullscreen sending mode 0 (the badge's direction) instead of entering, and a
     // wiring mixup that sent the chunk for the wrong window (menuTarget vs. some other address).
+    // Index 3: close(0), closeAll(1), float(2), fullscreen(3).
     function test_the_fullscreen_row_enters_fullscreen() {
         rightPressTile("0xA")
-        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return)
+        compare(menuIds()[3], "fullscreen")
+        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down)
+        keyClick(Qt.Key_Return)
         verify(dispatched("window.fullscreen"))
         verify(dispatched("address:0xA"))
         compare(view.pendingFullscreen["0xA"].mode, 2)
@@ -847,7 +879,7 @@ TestCase {
     function test_a_window_action_supersedes_a_pending_drop() {
         view.pendingMoves["0xA"] = { workspaceId: 2, pos: null, deadline: Date.now() + 1800 }
         rightPressTile("0xA")
-        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return)
+        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return)
         compare(view.pendingMoves["0xA"], undefined)
     }
 
@@ -904,6 +936,8 @@ TestCase {
     }
     // Distinguishes: Close all leaving a just-dropped window's optimistic row behind — the
     // compositor closes it (it reads the workspace's own list), so the row must go with it.
+    // Now routed through the confirmation dialog (addendum 2026-09-17): selecting Close all opens
+    // it rather than dispatching at once, so this test also confirms before checking the effect.
     function test_close_all_clears_a_pending_drop_into_that_workspace() {
         view.pendingMoves["0xC"] = { workspaceId: 1, pos: null, deadline: Date.now() + 1800 }
         var b = view.boxForWs(1)
@@ -913,9 +947,125 @@ TestCase {
         verify(i >= 0, "workspace 1 has windows")
         for (var k = 0; k <= i; k++) keyClick(Qt.Key_Down)
         keyClick(Qt.Key_Return)
+        compare(view.confirmOpen, true, "Close all must ask first")
+        compare(view.compositor.commands.length, 0, "nothing dispatched before confirming")
+        keyClick(Qt.Key_Right); keyClick(Qt.Key_Return)   // move onto Confirm, then confirm
+        compare(view.confirmOpen, false)
         verify(dispatched("close all") || dispatched("window.close"))
         compare(view.pendingMoves["0xC"], undefined, "the dropped window's row must not outlive it")
         verify(view.pendingCloses["0xA"] !== undefined, "windows already on the workspace too")
+    }
+
+    // ---- Close all: confirmation (addendum 2026-09-17) -------------------------------------
+    // Selects "Close all windows" from an already-open menu and returns the row's index, so every
+    // test below shares the same setup instead of repeating the down-count arithmetic.
+    function selectCloseAll() {
+        var i = menuIds().indexOf("closeAll")
+        verify(i >= 0, "closeAll must be offered: " + menuIds().join(","))
+        for (var k = 0; k <= i; k++) keyClick(Qt.Key_Down)
+        keyClick(Qt.Key_Return)
+    }
+    // Distinguishes: Close all dispatching straight away instead of opening the dialog first —
+    // reached here through the WINDOW menu's group (below the separator), the entry point the
+    // addendum exists for.
+    function test_close_all_from_the_window_menu_opens_the_confirmation() {
+        rightPressTile("0xA")
+        selectCloseAll()
+        compare(view.menuOpen, false, "activation dismisses the menu first")
+        compare(view.confirmOpen, true)
+        compare(view.compositor.commands.length, 0, "nothing dispatched yet")
+    }
+    // Distinguishes: a confirmation that only APPEARS to gate the action but dispatches anyway,
+    // or that dispatches for the wrong workspace. Mutation target: bypassing openCloseAllConfirm
+    // and calling closeAllOn directly would still pass every OTHER test in this file if this one
+    // did not check `compositor.commands.length` before confirming.
+    function test_close_all_cancel_dispatches_nothing() {
+        rightPressTile("0xA")
+        selectCloseAll()
+        keyClick(Qt.Key_Escape)
+        compare(view.confirmOpen, false)
+        compare(view.compositor.commands.length, 0, "Escape must not close anything")
+        compare(view.opened, true, "cancelling the dialog must not close the overview either")
+        compare(view.pendingCloses["0xA"], undefined)
+        compare(view.pendingCloses["0xB"], undefined)
+    }
+    // Distinguishes: a dialog that defaults to the destructive option — pressing Return the
+    // instant the dialog opens, before touching Left/Right, must land on Cancel, not Close all.
+    function test_close_all_confirm_defaults_to_cancel() {
+        rightPressTile("0xA")
+        selectCloseAll()
+        compare(view.confirmOpen, true)
+        keyClick(Qt.Key_Return)   // no Left/Right first
+        compare(view.confirmOpen, false)
+        compare(view.compositor.commands.length, 0, "the default selection must be Cancel, not Close all")
+    }
+    // Distinguishes: a confirmation that opens but never actually gates the dispatch — the two
+    // things "genuinely blocks the close" requires: nothing sent before confirming (the cancel
+    // test above), and the RIGHT thing sent after. Every window on the workspace must be closed,
+    // not just the one the menu was opened from.
+    function test_close_all_confirmed_closes_every_window_on_the_workspace() {
+        rightPressTile("0xA")
+        selectCloseAll()
+        keyClick(Qt.Key_Right); keyClick(Qt.Key_Return)
+        compare(view.confirmOpen, false)
+        // Close all is ONE chunk that enumerates the workspace inside the compositor, so the
+        // dispatched text names the workspace and never a literal address — closed() is for the
+        // single-close path and would be structurally unsatisfiable here. What proves the action
+        // ran is the chunk going out, and the optimistic close state the overview set for every
+        // window it expects to lose.
+        verify(dispatched("get_workspace(\"1\")"), "the close-all chunk was dispatched")
+        verify(view.pendingCloses["0xA"] !== undefined)
+        verify(view.pendingCloses["0xB"] !== undefined)
+    }
+    // Distinguishes: the confirmation gating only the window-menu entry point, leaving the well
+    // and badge menus (the ones the spec calls out by name) to dispatch straight away. A well
+    // fully covered by tiles has no pixel of its own left to right-click (the reason the badge
+    // opener exists at all — see test_right_press_on_the_workspace_badge_opens_the_workspace_menu),
+    // so this calls the well MouseArea's own handler, `openWorkspaceMenu`, directly: it is exactly
+    // what a real press on bare well delivers, with no pixel-hunting fragility.
+    function test_close_all_gate_from_the_well_menu() {
+        view.openWorkspaceMenu(1, { x: 100, y: 100 })
+        compare(view.menuTarget.kind, "workspace")
+        selectCloseAll()
+        compare(view.confirmOpen, true, "the well menu must ask first too")
+        compare(view.compositor.commands.length, 0)
+        keyClick(Qt.Key_Right); keyClick(Qt.Key_Return)
+        verify(dispatched("get_workspace(\"1\")"), "confirming from the well menu runs it too")
+        verify(view.pendingCloses["0xA"] !== undefined)
+    }
+    function test_close_all_gate_from_the_badge_menu() {
+        var b = view.boxForWs(1)
+        var p = view.testCanvas.mapToItem(view, b.x + 12, b.y + 12)   // the badge, +6,+6
+        rightPress(p.x, p.y)
+        compare(view.menuTarget.kind, "workspace")
+        selectCloseAll()
+        compare(view.confirmOpen, true, "the badge menu must ask first too")
+        compare(view.compositor.commands.length, 0)
+        keyClick(Qt.Key_Escape)
+        compare(view.compositor.commands.length, 0, "cancelling from the badge menu's route closes nothing")
+    }
+    // Distinguishes: keys leaking past the dialog to the (already-dismissed) menu branch or to
+    // find/typing — the dialog must own every key ahead of the menu branch (docs/specs/2026-09-
+    // 15-actions-design.md, "Close all asks first"). A letter is neither Escape/Left/Right/Enter,
+    // so the real ConfirmDialog.handleKey would not consume it either — but the catcher must
+    // still swallow it rather than letting it fall through to `setQuery`.
+    function test_confirm_dialog_owns_keys_ahead_of_everything_else() {
+        rightPressTile("0xA")
+        selectCloseAll()
+        keyClick("a")
+        compare(view.confirmOpen, true, "an unhandled key must not dismiss the dialog")
+        compare(view.query, "", "and must not leak through to start a query")
+        compare(view.compositor.commands.length, 0)
+    }
+    // Distinguishes: a dialog whose outer scrim does not cancel (the real Ui/ConfirmDialog's own
+    // click-anywhere-cancels MouseArea, reproduced in the offscreen stub — see tests/ui/prepare.py).
+    function test_confirm_dialog_scrim_click_cancels() {
+        rightPressTile("0xA")
+        selectCloseAll()
+        mouseClick(view, 8, 8, Qt.LeftButton)
+        compare(view.confirmOpen, false)
+        compare(view.compositor.commands.length, 0)
+        compare(view.opened, true)
     }
 
     // `seedTwoMonitors(v)` ALREADY EXISTS in tests/ui/actions.qml — Task 10 added it when

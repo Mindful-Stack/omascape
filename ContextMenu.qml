@@ -27,6 +27,10 @@ Item {
     readonly property int rowH: Math.round(fontSize * 2.2)
     readonly property int padV: 5
     readonly property int padH: 10
+    // The separator is a border, not a row: thin, no label, not hoverable or activatable (see
+    // the Repeater delegate below — it gets no MouseArea at all, not just a disabled one).
+    readonly property int sepH: 9
+    function rowHeight(it) { return (it && it.separator) ? sepH : rowH }
 
     // Fades in/out on motion.fast with the hover curve, the same treatment the drop wash and the
     // match ring already get, so the menu appears the way everything else in the overview does.
@@ -44,7 +48,11 @@ Item {
     // Width follows the longest rendered row, plus the fixed 150 floor so a menu with a couple of
     // short items still reads as a menu rather than a stub.
     width: Math.max(150, measure.implicitWidth + 2 * padH)
-    height: items.length * rowH + 2 * padV
+    height: {
+        var h = 2 * padV
+        for (var i = 0; i < items.length; i++) h += rowHeight(items[i])
+        return h
+    }
 
     // Hidden twin of the visible row's Text below: one child per item, each carrying the SAME
     // text expression, font.family and font.pixelSize as the visible row — including the glyph,
@@ -58,7 +66,9 @@ Item {
         id: measure
         visible: false
         Repeater {
-            model: menu.items
+            // The separator carries no label — it contributes nothing to the width measurement,
+            // only to the row Repeater below (as a border, not a row).
+            model: menu.items.filter(function (it) { return !it.separator })
             Text {
                 required property var modelData
                 font.family: menu.fontFamily; font.pixelSize: menu.fontSize
@@ -82,36 +92,61 @@ Item {
         width: parent.width
         Repeater {
             model: menu.items
-            Rectangle {
-                id: row
-                objectName: "menuRow"
+            // One delegate per item, separator included — the SAME array Logic.menuNavigate and
+            // Overview's highlight-preservation fallback walk, so a separator's position is
+            // never counted differently here than it is there. Only a non-separator gets the
+            // interactive "menuRow" Rectangle (a real one, not merely hidden): the separator's
+            // border below is the whole of its visual, with no MouseArea at all — not hoverable,
+            // not activatable, and never a keyboard landing place (Logic.menuNavigate skips it).
+            Item {
+                id: cell
                 required property var modelData
                 // This delegate's own `index` (its position in `menu.items`) and `menu.index`
                 // (the keyboard highlight) are two different things that happen to share a name.
-                // Every reference below is qualified (`row.index` vs `menu.index`) on purpose —
+                // Every reference below is qualified (`cell.index` vs `menu.index`) on purpose —
                 // an unqualified `index` inside this delegate would silently resolve to the
                 // delegate's own, not the highlight.
                 required property int index
-                width: menu.width; height: menu.rowH
-                color: row.index === menu.index ? menu.selBackground : "transparent"
-                radius: 4
-                Text {
+                width: menu.width
+                height: menu.rowHeight(cell.modelData)
+
+                Rectangle {
+                    // A border, not a row: a thin hairline centred in the separator's slot.
+                    visible: cell.modelData.separator === true
                     anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
                               leftMargin: menu.padH; rightMargin: menu.padH }
-                    text: (row.modelData.glyph ? row.modelData.glyph + "  " : "") + row.modelData.label
-                    color: row.index === menu.index ? menu.selText : menu.foreground
-                    font.family: menu.fontFamily; font.pixelSize: menu.fontSize
-                    elide: Text.ElideRight
+                    height: 1
+                    color: Qt.rgba(menu.foreground.r, menu.foreground.g, menu.foreground.b, 0.16)
                 }
-                MouseArea {
+
+                Rectangle {
+                    id: row
+                    objectName: cell.modelData.separator === true ? "" : "menuRow"
+                    visible: cell.modelData.separator !== true
                     anchors.fill: parent
-                    hoverEnabled: true
-                    // Rows activate on press. Right AND left accepted: right because the menu
-                    // itself is opened with a right press, left because that is the ordinary way
-                    // to pick a context-menu item.
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onEntered: menu.hoverRow(row.index)
-                    onPressed: menu.activated(String(row.modelData.id))
+                    color: cell.index === menu.index ? menu.selBackground : "transparent"
+                    radius: 4
+                    Text {
+                        anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
+                                  leftMargin: menu.padH; rightMargin: menu.padH }
+                        text: (cell.modelData.glyph ? cell.modelData.glyph + "  " : "") + cell.modelData.label
+                        color: cell.index === menu.index ? menu.selText : menu.foreground
+                        font.family: menu.fontFamily; font.pixelSize: menu.fontSize
+                        elide: Text.ElideRight
+                    }
+                    MouseArea {
+                        // Only instantiated under the non-separator Rectangle, and that
+                        // Rectangle is invisible for a separator slot — invisible items take no
+                        // part in hit testing, so a separator cannot be hovered or pressed.
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        // Rows activate on press. Right AND left accepted: right because the menu
+                        // itself is opened with a right press, left because that is the ordinary
+                        // way to pick a context-menu item.
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onEntered: menu.hoverRow(cell.index)
+                        onPressed: menu.activated(String(cell.modelData.id))
+                    }
                 }
             }
         }

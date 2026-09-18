@@ -560,8 +560,13 @@ Item {
     }
     function menuContext() {
         if (!menuTarget) return null
-        if (menuTarget.kind === "window")
-            return { win: _windowByAddress[menuTarget.address] || null, box: null, monitors: monitorList() }
+        if (menuTarget.kind === "window") {
+            var w = _windowByAddress[menuTarget.address] || null
+            // The window's OWN workspace box, not the selected one (docs/specs/2026-09-15-
+            // actions-design.md, "The menu", addendum 2026-09-17): the workspace rows a window's
+            // menu carries act on where the window actually lives.
+            return { win: w, box: w ? boxForWs(w.workspaceId) : null, monitors: monitorList() }
+        }
         return { win: null, box: boxForWs(menuTarget.id), monitors: monitorList() }
     }
     function refreshMenuItems() {
@@ -604,10 +609,12 @@ Item {
         if (id) runMenuAction(id, tgt)
     }
     // Every key while the menu is open. Up/Down stay inside it; everything else leaves it, and
-    // the key that leaves owns its own auto-repeats until released.
+    // the key that leaves owns its own auto-repeats until released. Logic.menuNavigate takes the
+    // item list, not a count, so it can step past a separator — not hoverable, not activatable,
+    // and never a landing place even when wrapping off either end.
     function menuKey(e) {
-        if (e.key === Qt.Key_Up) { menuIndex = Logic.menuNavigate(menuItems.length, menuIndex, -1); return }
-        if (e.key === Qt.Key_Down) { menuIndex = Logic.menuNavigate(menuItems.length, menuIndex, 1); return }
+        if (e.key === Qt.Key_Up) { menuIndex = Logic.menuNavigate(menuItems, menuIndex, -1); return }
+        if (e.key === Qt.Key_Down) { menuIndex = Logic.menuNavigate(menuItems, menuIndex, 1); return }
         menuDismissKey = e.key
         if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) menuActivate(menuIndex)
         else menuDismiss()
@@ -621,26 +628,63 @@ Item {
         if (tgt.kind === "window") {
             var addr = tgt.address
             if (id === "close") { closeWindow(addr, addr === cursorAddress); return }
-            supersedePending(addr)
-            if (id === "float" || id === "tile") {
-                Hyprland.dispatch(Logic.setFloatLua(addr, id === "float"))
-            } else if (id === "fullscreen" || id === "unfullscreen") {
-                var mode = id === "fullscreen" ? 2 : 0
-                pendingFullscreen[addr] = { mode: mode, deadline: Date.now() + 1800 }
-                // Only the EXIT direction hides anything optimistically: there is no badge to hide
-                // when entering, and the slot changes when fresh geometry lands.
-                setTileRoles(addr, { fsPending: mode === 0 })
-                Hyprland.dispatch(Logic.setFullscreenLua(addr, mode))
-            } else return
-            scheduleRebuild()
-            reconcileTimer.restart()
+            if (id === "float" || id === "tile" || id === "fullscreen" || id === "unfullscreen") {
+                supersedePending(addr)
+                if (id === "float" || id === "tile") {
+                    Hyprland.dispatch(Logic.setFloatLua(addr, id === "float"))
+                } else {
+                    var mode = id === "fullscreen" ? 2 : 0
+                    pendingFullscreen[addr] = { mode: mode, deadline: Date.now() + 1800 }
+                    // Only the EXIT direction hides anything optimistically: there is no badge to
+                    // hide when entering, and the slot changes when fresh geometry lands.
+                    setTileRoles(addr, { fsPending: mode === 0 })
+                    Hyprland.dispatch(Logic.setFullscreenLua(addr, mode))
+                }
+                scheduleRebuild()
+                reconcileTimer.restart()
+                return
+            }
+            // Everything else reaching a window's menu is a row from its WORKSPACE'S group,
+            // below the separator (docs/specs/2026-09-15-actions-design.md, "The menu", addendum
+            // 2026-09-17) — it acts on the window's own workspace, not the selected one.
+            var w = _windowByAddress[addr]
+            if (!w) return
+            runWorkspaceMenuAction(id, w.workspaceId)
             return
         }
-        var wsId = tgt.id
+        runWorkspaceMenuAction(id, tgt.id)
+    }
+    // The rows every workspace-acting menu shares, whichever menu (window, well or badge) they
+    // were reached through. Close all asks first (below): every entry point goes through the
+    // same confirmation, so the guarantee does not depend on which one was used.
+    function runWorkspaceMenuAction(id, wsId) {
         if (id === "lock" || id === "unlock") { lockSet(wsId, id === "lock"); return }
-        if (id === "closeAll") { closeAllOn(wsId); return }
+        if (id === "closeAll") { openCloseAllConfirm(wsId); return }
         if (id.indexOf("move:") === 0) { moveWorkspace(wsId, id.slice(5)); return }
         if (id.indexOf("swap:") === 0) { swapWorkspace(wsId, id.slice(5)); return }
+    }
+    // ---- Close all: confirmation ----------------------------------------------------------
+    // ✎ Close all asks first (added 2026-09-17): a mis-aimed pick closes every window on a
+    // workspace irreversibly, with no per-application save prompt for anything already saved.
+    // Gates EVERY entry point (window menu, well, badge) — runWorkspaceMenuAction is the one
+    // place all three converge, so the guarantee holds regardless of which menu was used.
+    property bool confirmOpen: false
+    property int confirmCloseAllWs: -1
+    function openCloseAllConfirm(wsId) {
+        if (!Logic.hasWs(wsId)) return
+        confirmCloseAllWs = wsId
+        confirmDialog.selectedIndex = 0   // default to Cancel: this is the destructive path
+        confirmOpen = true
+    }
+    function cancelCloseAllConfirm() {
+        confirmOpen = false
+        confirmCloseAllWs = -1
+    }
+    function confirmCloseAllConfirmed() {
+        confirmOpen = false
+        var wsId = confirmCloseAllWs
+        confirmCloseAllWs = -1
+        closeAllOn(wsId)
     }
     // Hint tiers. Kept on the component (keepLoaded), so the preference survives a summon but
     // not a shell restart; deliberately not written to config — it is a transient affordance.
@@ -1152,7 +1196,7 @@ Item {
         targetScreen = focusedScreen(); hideScratchpad(); selectedIndex = -1; opened = true
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
-        resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0
+        resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
         // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
         // "most recent input device wins" means the device that summoned the overview, not
@@ -1170,7 +1214,7 @@ Item {
     }
     function close() {
         if (!opened) return                        // a click on the scrim mid-fade is not a second close
-        endDrag(); menuDismiss()
+        endDrag(); menuDismiss(); cancelCloseAllConfirm()
         // settleTimer is open-only; reconcileTimer keeps running (bounded by the 1.8 s
         // deadlines): it clears optimistic display state (pendingMoves / fsPending / pendingCloses)
         // so a re-summon inside that window shows authoritative state, and with keepLoaded the
@@ -1418,6 +1462,11 @@ Item {
                     e.accepted = true
                     // Lone modifiers belong to no class (see Logic.isModifierKey).
                     if (Logic.isModifierKey(e.key)) return
+                    // The confirmation dialog owns every key while it is open, ahead of the menu
+                    // branch: this plugin has exactly one focus item, so everything is routed
+                    // through here. `handleKey`'s own return is not consulted — while the dialog
+                    // is open nothing else may act on the key, consumed or not.
+                    if (root.confirmOpen) { confirmDialog.handleKey(e); return }
                     // The menu owns every key while it is open — checked before `finding`, so a
                     // letter dismisses instead of extending the query.
                     if (root.menuOpen) { root.menuKey(e); return }
@@ -1970,6 +2019,24 @@ Item {
                 root.menuDismiss()
                 root.runMenuAction(id, tgt)
             }
+        }
+        // Close all asks first (docs/specs/2026-09-15-actions-design.md, "The menu", addendum
+        // 2026-09-17): the shell's own Ui/ConfirmDialog, themed with everything else, gating
+        // Close all from every entry point (window menu, well, badge — runWorkspaceMenuAction is
+        // where all three converge). Above the menu (z), and keys are routed to it ahead of the
+        // menu branch in keyCatcher — its own scrim MouseArea (inside ConfirmDialog.qml) already
+        // consumes any press on it, so it needs no panel-sized catcher of its own the way the
+        // menu does.
+        ConfirmDialog {
+            id: confirmDialog
+            anchors.fill: parent
+            z: 200
+            opened: root.confirmOpen
+            message: "Close all windows on workspace " + root.wsLabel(root.confirmCloseAllWs) + "?"
+            confirmText: "Close all"
+            cancelText: "Cancel"
+            onCanceled: root.cancelCloseAllConfirm()
+            onConfirmed: root.confirmCloseAllConfirmed()
         }
     }
 }

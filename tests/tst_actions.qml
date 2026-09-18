@@ -140,19 +140,59 @@ TestCase {
         verify(!Logic.focusStealingEvent(""))
     }
 
+    // menuNavigate takes the ITEM LIST, not a count (docs/specs/2026-09-15-actions-design.md,
+    // "The menu", addendum 2026-09-17: the separator needs the list to know what to skip).
+    // `items(n)` builds n plain, non-separator rows; `sepItems(spec)` marks the `true` slots as
+    // separators (no id).
+    function items(n) { var a = []; for (var i = 0; i < n; i++) a.push({ id: "i" + i }); return a }
+    function sepItems(spec) {
+        return spec.map(function (isSep, i) { return isSep ? { separator: true } : { id: "i" + i } })
+    }
+
     // Distinguishes: a menu highlight that does not wrap, or that starts anywhere but the ends.
     function test_menuNavigate() {
-        compare(Logic.menuNavigate(3, -1, 1), 0)
-        compare(Logic.menuNavigate(3, -1, -1), 2)
-        compare(Logic.menuNavigate(3, 2, 1), 0)
-        compare(Logic.menuNavigate(3, 0, -1), 2)
-        compare(Logic.menuNavigate(0, -1, 1), -1)
+        var l = items(3)
+        compare(Logic.menuNavigate(l, -1, 1), 0)
+        compare(Logic.menuNavigate(l, -1, -1), 2)
+        compare(Logic.menuNavigate(l, 2, 1), 0)
+        compare(Logic.menuNavigate(l, 0, -1), 2)
+        compare(Logic.menuNavigate([], -1, 1), -1)
     }
     // Distinguishes: wrap arithmetic that fails when step magnitude exceeds the count.
     // With a three-item menu, step = -5 must use normalized modulo, not the naive form.
     function test_menuNavigate_wrap_arithmetic_with_large_step() {
-        compare(Logic.menuNavigate(3, 0, 5), 2)   // Forward wrap with large step
-        compare(Logic.menuNavigate(3, 0, -5), 1)  // Backward wrap with large step
+        var l = items(3)
+        compare(Logic.menuNavigate(l, 0, 5), 2)   // Forward wrap with large step
+        compare(Logic.menuNavigate(l, 0, -5), 1)  // Backward wrap with large step
+    }
+    // Distinguishes: a menuNavigate that does not skip a separator at all — the highlight would
+    // land right on it. Stepping from either neighbour must reach past it to the far side.
+    function test_menuNavigate_skips_a_separator_in_the_middle() {
+        var l = sepItems([false, false, true, false])   // i0, i1, SEP, i3
+        compare(Logic.menuNavigate(l, 1, 1), 3, "down from i1 must skip the separator at 2")
+        compare(Logic.menuNavigate(l, 3, -1), 1, "up from i3 must skip the separator at 2")
+    }
+    // Distinguishes: wrap arithmetic that lands exactly on a separator sitting at the array's
+    // edge — the case a plain modulo wrap (with no skip loop) hits first.
+    function test_menuNavigate_never_wraps_onto_a_separator() {
+        var lead = sepItems([true, false, false])        // SEP, i1, i2
+        compare(Logic.menuNavigate(lead, 1, -1), 2, "wrap back from i1 must reach the LAST item, not the leading separator")
+        compare(Logic.menuNavigate(lead, 2, 1), 1, "wrap forward from the last item must skip the leading separator")
+        var trail = sepItems([false, false, true])        // i0, i1, SEP
+        compare(Logic.menuNavigate(trail, 1, 1), 0, "wrap forward from i1 must skip the trailing separator")
+        compare(Logic.menuNavigate(trail, 0, -1), 1, "wrap back from i0 must reach the last non-separator")
+    }
+    // Distinguishes: "from none" (-1) landing on a leading/trailing separator instead of stepping
+    // past it to the first (down) or last (up) real row.
+    function test_menuNavigate_from_none_skips_a_leading_or_trailing_separator() {
+        compare(Logic.menuNavigate(sepItems([true, false]), -1, 1), 1, "down from none must skip a leading separator")
+        compare(Logic.menuNavigate(sepItems([false, true]), -1, -1), 0, "up from none must skip a trailing separator")
+    }
+    // Distinguishes: an infinite loop (or a thrown error) when every item is a separator — a
+    // degenerate case that must resolve to "no highlight" rather than hang or crash.
+    function test_menuNavigate_all_separators_is_degenerate() {
+        compare(Logic.menuNavigate([{ separator: true }], -1, 1), -1)
+        compare(Logic.menuNavigate([{ separator: true }, { separator: true }], 0, 1), -1)
     }
 
     function ids(items) { return items.map(function (i) { return i.id }) }
@@ -193,6 +233,55 @@ TestCase {
     function test_menuItems_without_a_window_is_empty() {
         compare(Logic.menuItems({ kind: "window", address: "0xA" }, { win: null, monitors: oneMon }).length, 0)
         compare(Logic.menuItems(null, { monitors: oneMon }).length, 0)
+    }
+
+    // ---- addendum 2026-09-17: a window's menu also carries its workspace's group -----------
+    // Distinguishes: Close all landing below the separator with the rest of the workspace group
+    // (grouped by SCOPE) instead of staying with Close (grouped by VERB, which is what the
+    // addendum actually specifies) — and a menu missing the group entirely when a box IS given.
+    function test_menuItems_window_with_workspace_box_adds_closeAll_and_the_group() {
+        compare(ids(Logic.menuItems({ kind: "window", address: "0xA" },
+                                    { win: win({}), box: box({}), monitors: oneMon })),
+                ["close", "closeAll", "float", "fullscreen", "separator", "lock"])
+    }
+    // Distinguishes: a separator item that is not marked `separator: true` (so a naive
+    // implementation of Logic.menuNavigate treating it as an ordinary row would go undetected by
+    // an id-only check), and Move/Swap missing from the group.
+    function test_menuItems_window_group_carries_move_and_swap_too() {
+        var out = Logic.menuItems({ kind: "window", address: "0xA" },
+                                   { win: win({}), box: box({}), monitors: twoMon })
+        compare(ids(out), ["close", "closeAll", "float", "fullscreen", "separator",
+                           "lock", "move:HDMI-A-1", "swap:HDMI-A-1"])
+        var sep = out[4]
+        compare(sep.separator, true)
+        verify(!sep.id || sep.id === "separator", "the separator must not double as an activatable row")
+    }
+    // Distinguishes: a window's own workspace box treated as the SELECTED workspace's box
+    // instead — the addendum's whole point. window.workspaceId names where the group's rows
+    // apply; ctx.box is what the caller (Overview.boxForWs(win.workspaceId)) must have looked up.
+    function test_menuItems_window_group_reflects_its_OWN_workspace_not_a_different_one() {
+        var out = Logic.menuItems({ kind: "window", address: "0xA" },
+                                   { win: win({}), box: box({ armed: true }), monitors: oneMon })
+        var lock = out[out.length - 1]
+        compare(lock.id, "unlock", "the box passed in ctx is what must be reflected, armed or not")
+    }
+    // Distinguishes: hiding a group leaving a dangling separator with nothing under it — here by
+    // construction Lock/Unlock is unconditional, so this also pins that the separator is added
+    // if, and only if, the group is non-empty.
+    function test_menuItems_window_without_a_workspace_box_has_no_group_or_separator() {
+        var out = Logic.menuItems({ kind: "window", address: "0xA" },
+                                   { win: win({}), box: null, monitors: oneMon })
+        compare(ids(out), ["close", "float", "fullscreen"])
+        verify(out.every(function (i) { return !i.separator }), "no box: no separator either")
+    }
+    // Distinguishes: Close all offered on a window group unconditionally, ignoring `occupied` —
+    // defensive, since a window's own workspace box is occupied by construction, but the window
+    // branch re-derives it from `wb.occupied` independently of the workspace-target branch and
+    // must honour the same rule.
+    function test_menuItems_window_group_closeAll_still_follows_occupied() {
+        var out = Logic.menuItems({ kind: "window", address: "0xA" },
+                                   { win: win({}), box: box({ occupied: false }), monitors: oneMon })
+        compare(ids(out), ["close", "float", "fullscreen", "separator", "lock"])
     }
 
     // Distinguishes: Move/Swap offered on a single-monitor machine, where they mean nothing.

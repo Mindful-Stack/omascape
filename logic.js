@@ -1045,10 +1045,21 @@ function cycleWindows(tiles, wsId, current, step, skip) {
 }
 
 // Menu highlight movement: wrapping, and from "none" onto the first (down) or last (up) row.
-function menuNavigate(count, index, step) {
+// Takes the ITEM LIST, not a count, so it can step past a separator (`{ separator: true }`, no
+// id, not hoverable or activatable): the highlight must never land on one, whether arrived at by
+// stepping or by wrapping off either end. `index < 0` ("none") is treated as sitting just before
+// index 0 (stepping down) or just after the last index (stepping up), so the same wrap-and-skip
+// loop below handles every case uniformly.
+function menuNavigate(items, index, step) {
+    var count = items.length
     if (!(count > 0)) return -1
-    if (index < 0) return step > 0 ? 0 : count - 1
-    return ((index + step) % count + count) % count
+    var i = index < 0 ? (step > 0 ? 0 : count - 1)
+                       : ((index + step) % count + count) % count
+    for (var n = 0; n < count; n++) {
+        if (!items[i].separator) return i
+        i = ((i + step) % count + count) % count
+    }
+    return -1   // degenerate: every item is a separator
 }
 
 // Monitor names are interpolated into quoted Lua strings inside the move/swap chunks. Anything
@@ -1062,31 +1073,19 @@ function validMonitorName(name) { return typeof name === "string" && MONITOR_NAM
 // stay pure and the monitor chips and the menu can never disagree about which glyph a monitor gets.
 function monitorGlyph(name) { return /^(eDP|LVDS|DSI)/i.test(name) ? "\u{F0322}" : "\u{F0379}" }
 
-// The rows a context menu shows for `tgt`. Pure: `ctx` carries the window record
-// (`_windowByAddress`), the box record (`layout()`'s own output) and the monitor list, all
-// re-read on every rebuild, so an open menu follows the compositor rather than a snapshot.
-// Anything that does not apply is HIDDEN, never greyed, and every id names the state it will
-// set — never a toggle, so a stale activation is at worst a no-op inside the compositor.
-function menuItems(tgt, ctx) {
-    if (!tgt || !ctx) return []
+// Lock/Unlock, Move to <monitor>, Swap with <monitor> — the rows that act on a workspace as a
+// CONTAINER. Shared by the workspace-target menu (below) and the window-target menu's group
+// below the separator (docs/specs/2026-09-15-actions-design.md, "The menu", addendum
+// 2026-09-17). Never includes Close all: each caller places that row itself, since window and
+// workspace targets put it in different positions (see menuItems).
+function workspaceMenuRows(b, monitors) {
     var out = []
-    if (tgt.kind === "window") {
-        var w = ctx.win
-        if (!w) return []                               // gone: the caller dismisses on an empty list
-        out.push({ id: "close", label: "Close" })
-        out.push(w.floating ? { id: "tile", label: "Tile" } : { id: "float", label: "Float" })
-        out.push(fullscreenMode(w) > 0 ? { id: "unfullscreen", label: "Exit fullscreen" }
-                                       : { id: "fullscreen", label: "Fullscreen" })
-        return out
-    }
-    var b = ctx.box
-    if (!b) return []
     out.push(b.armed ? { id: "unlock", label: "Unlock" } : { id: "lock", label: "Lock" })
     // Monitor operations need a workspace the compositor actually has, on a machine with
     // somewhere to send it. The scratchpad has no monitor of its own to move between.
     var others = []
     if (!b.special && !b.synthetic) {
-        var mons = ctx.monitors || []
+        var mons = monitors || []
         for (var i = 0; i < mons.length; i++) {
             var n = mons[i] ? mons[i].name : null
             if (!validMonitorName(n) || n === b.monitorName) continue
@@ -1100,6 +1099,47 @@ function menuItems(tgt, ctx) {
     if (b.active)
         for (var s = 0; s < others.length; s++)
             out.push({ id: "swap:" + others[s], label: "Swap with " + others[s], glyph: monitorGlyph(others[s]) })
+    return out
+}
+
+// The rows a context menu shows for `tgt`. Pure: `ctx` carries the window record
+// (`_windowByAddress`), the box record (`layout()`'s own output — the WINDOW's own workspace
+// box for a window target, ✎ 2026-09-17, not necessarily the selected one) and the monitor
+// list, all re-read on every rebuild, so an open menu follows the compositor rather than a
+// snapshot. Anything that does not apply is HIDDEN, never greyed, and every id names the state
+// it will set — never a toggle, so a stale activation is at worst a no-op inside the compositor.
+function menuItems(tgt, ctx) {
+    if (!tgt || !ctx) return []
+    var out = []
+    if (tgt.kind === "window") {
+        var w = ctx.win
+        if (!w) return []                               // gone: the caller dismisses on an empty list
+        out.push({ id: "close", label: "Close" })
+        // ✎ Close all sits with Close, not below the line: the grouping is by verb (both close
+        // things), not by scope. Needs the window's OWN workspace box, which may be null (the
+        // workspace vanished a settle tick before this refresh) — in that case there is simply
+        // no workspace group at all, never a dangling "Close all" or a separator with nothing
+        // under it.
+        var wb = ctx.box
+        if (wb && wb.occupied) out.push({ id: "closeAll", label: "Close all windows" })
+        out.push(w.floating ? { id: "tile", label: "Tile" } : { id: "float", label: "Float" })
+        out.push(fullscreenMode(w) > 0 ? { id: "unfullscreen", label: "Exit fullscreen" }
+                                       : { id: "fullscreen", label: "Fullscreen" })
+        // ✎ A window's menu also carries its workspace's actions, below a separator. Lock/Unlock
+        // is unconditional (see workspaceMenuRows), so whenever `wb` exists this group is never
+        // empty — the separator therefore never has nothing under it.
+        if (wb) {
+            var wsRows = workspaceMenuRows(wb, ctx.monitors)
+            if (wsRows.length) {
+                out.push({ id: "separator", separator: true })
+                out = out.concat(wsRows)
+            }
+        }
+        return out
+    }
+    var b = ctx.box
+    if (!b) return []
+    out = workspaceMenuRows(b, ctx.monitors)
     if (b.occupied) out.push({ id: "closeAll", label: "Close all windows" })
     return out
 }
