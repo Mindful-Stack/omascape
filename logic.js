@@ -184,6 +184,19 @@ function padWorkspaces(workspaces, count, focusedMonitorName) {
     return out
 }
 
+// Breathing room between the picker and the screen edge, both axes. A FRACTION, because the two
+// absolute constants this replaces (`availCanvasW`'s `- 16` and the card's `- 16` / `- 64`) were
+// sized for a ~1600-logical card: at 1920 logical — a 4K panel at 2x, and the commonest laptop
+// logical width there is — they left the grid 10 px from the edge. Floored so a genuinely narrow
+// screen keeps today's behaviour rather than losing its margin altogether. Guarded like every
+// other layout input: a NaN here would reach the card as a zero-size Rectangle, i.e. an invisible
+// overlay that still holds keyboard focus.
+function screenMargin(px) {
+    var n = Number(px)
+    if (!isFinite(n) || n <= 0) return 16
+    return Math.round(Math.max(16, n * 0.05))
+}
+
 function layout(input) {
     var P = input.params
     var monByName = _index(input.monitors, "name")
