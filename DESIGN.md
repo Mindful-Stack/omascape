@@ -423,5 +423,20 @@ SUPER chord, and SUPER+TAB is the natural one: the same hand can then keep going
 Cmd+Tab and Alt+Tab work on macOS and Windows. Tab and Shift+Tab walk the workspaces by number
 (the scratchpad row last), wrapping; from a fresh open the first Tab counts from the focused
 workspace, so it lands on the next one rather than re-selecting the one you are on. The arrows
-move the window cursor spatially (`Logic.navigateWindows`, the same rule `navigate` applies to
-boxes) and never change the workspace. With a query, Tab and the arrows keep their find meaning.
+move the window cursor spatially (`Logic.navigateWindows`) and never change the workspace.
+
+Windows are arbitrary rectangles, not the uniform grid the cards form, so they get their own
+rule (`_navigateTiles`) rather than the cards' `navigate`: a direction only accepts a neighbour
+that overlaps the selected tile across the axis of travel — Left/Right need vertical overlap,
+Up/Down horizontal. A short tile therefore reaches its taller neighbour even when that
+neighbour's centre lies outside it, and Up from a full-height column stays put instead of
+sidestepping into the stack beside it. Among the neighbours that qualify the nearest leading
+edge wins, so a tile is never jumped over; where a dwindle split leaves two equally near, the
+larger overlap wins and then reading order, so the pick never depends on the order Hyprland
+listed the windows in. A window with nothing touching it in a direction is unreachable that
+way, as in a tiling compositor's own focus movement; the find bar still reaches it.
+
+Windows sharing a centre are visited in reading order (address breaks position ties):
+Right/Down advance, Left/Up go back. At either end, spatial navigation resumes without
+wrapping, so overlapping floating windows are reachable and the cursor can still leave the
+group. With a query, Tab and the arrows keep their find meaning.

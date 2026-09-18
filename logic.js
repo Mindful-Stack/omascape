@@ -828,6 +828,46 @@ function navigate(boxes, currentIndex, dir) {
     return best >= 0 ? best : currentIndex
 }
 
+// How much two spans overlap; 0 or less when they only touch (a gap-less split still leaves
+// a pixel between the rects) or miss entirely.
+function _span(a, aLen, b, bLen) { return Math.min(a + aLen, b + bLen) - Math.max(a, b) }
+
+// Reading order over tiles: top row first, then left to right, address last so two windows
+// with the same rect still have one stable order.
+function _readingOrder(a, b) {
+    return (a.y - b.y) || (a.x - b.x) || (a.address < b.address ? -1 : a.address > b.address ? 1 : 0)
+}
+
+// Spatial arrow navigation over real window rects. The workspace cards are a uniform grid, so
+// `navigate` may take the nearest box in a direction and merely prefer the closest column;
+// windows are arbitrary rects, where that rule sidesteps — Up from a full-height column lands
+// on whatever sits beside it. So a direction here only accepts a neighbour that OVERLAPS the
+// selected tile across the axis of travel: left/right need vertical overlap, up/down need
+// horizontal overlap. Among those the nearest leading edge wins, so a neighbour is never
+// jumped over; a dwindle split can leave two neighbours equally near, and those ties go to
+// the larger overlap and then to reading order. Returns the new index, or the current one
+// when nothing in that direction touches the tile.
+function _navigateTiles(tiles, currentIndex, dir) {
+    if (currentIndex < 0 || currentIndex >= tiles.length) return currentIndex
+    var horizontal = dir === "left" || dir === "right"
+    if (!horizontal && dir !== "up" && dir !== "down") return currentIndex
+    var back = dir === "left" || dir === "up", c = tiles[currentIndex]
+    var best = currentIndex, bestDist = Infinity, bestOverlap = 0
+    for (var i = 0; i < tiles.length; i++) {
+        if (i === currentIndex) continue
+        var t = tiles[i]
+        var lead = horizontal ? t.x - c.x : t.y - c.y
+        if (back ? lead >= 0 : lead <= 0) continue
+        var overlap = horizontal ? _span(c.y, c.h, t.y, t.h) : _span(c.x, c.w, t.x, t.w)
+        if (overlap <= 0) continue
+        var dist = Math.abs(lead), better = dist < bestDist
+        if (!better && dist === bestDist)
+            better = overlap > bestOverlap || (overlap === bestOverlap && _readingOrder(t, tiles[best]) < 0)
+        if (better) { best = i; bestDist = dist; bestOverlap = overlap }
+    }
+    return best
+}
+
 // Tab order over the workspace boxes: by number, the scratchpad row last, wrapping. With no
 // selection yet it counts from the focused workspace, so the first Tab after opening lands on
 // the one after where you are -- the Cmd+Tab / Alt+Tab habit of "the next thing", not "this".
@@ -849,8 +889,8 @@ function cycleWorkspace(boxes, currentIndex, step) {
     return order[((pos + step) % order.length + order.length) % order.length]
 }
 
-// Arrow keys over the windows of one workspace: spatial, the same rule `navigate` applies to
-// workspace boxes, over the tiles' canvas rects. With no window targeted yet the first press
+// Arrow keys over the windows of one workspace: spatial over the tiles' canvas rects, by the
+// touching-neighbour rule of `_navigateTiles`. With no window targeted yet the first press
 // takes the first (or, for left/up, the last) window in reading order. Returns the address, or
 // "" when the workspace has no windows; stays put when there is nothing in that direction.
 function navigateWindows(tiles, wsId, current, dir, skip) {
@@ -865,7 +905,21 @@ function navigateWindows(tiles, wsId, current, dir, skip) {
     var idx = -1
     for (var j = 0; j < list.length; j++) if (list[j].address === current) { idx = j; break }
     if (idx < 0) return cycleWindows(tiles, wsId, "", dir === "left" || dir === "up" ? -1 : 1, skip)
-    return list[navigate(list, idx, dir)].address
+    // Centred floating windows can share a centre despite having different sizes. None is
+    // spatially left/right/above/below another, so visit those peers in reading order first.
+    // Do not wrap: the next press at either end must still be able to leave the group.
+    var center = _center(list[idx]), peers = []
+    for (var k = 0; k < list.length; k++) {
+        var p = _center(list[k])
+        if (p.x === center.x && p.y === center.y) peers.push(list[k])
+    }
+    peers.sort(_readingOrder)
+    var step = dir === "left" || dir === "up" ? -1 : dir === "right" || dir === "down" ? 1 : 0
+    for (var n = 0; n < peers.length; n++) {
+        if (peers[n].address === current && n + step >= 0 && n + step < peers.length)
+            return peers[n + step].address
+    }
+    return list[_navigateTiles(list, idx, dir)].address
 }
 
 function hitWorkspace(boxes, px, py) {
@@ -1111,9 +1165,7 @@ function cycleWindows(tiles, wsId, current, step, skip) {
         list.push(t)
     }
     if (!list.length) return ""
-    list.sort(function (a, b) {
-        return (a.y - b.y) || (a.x - b.x) || (a.address < b.address ? -1 : a.address > b.address ? 1 : 0)
-    })
+    list.sort(_readingOrder)
     var idx = -1
     for (var j = 0; j < list.length; j++) if (list[j].address === current) { idx = j; break }
     if (idx < 0) return (step > 0 ? list[0] : list[list.length - 1]).address
