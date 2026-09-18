@@ -633,4 +633,13 @@ TestCase {
         compare(view.testPeek.shown, true, "a fresh press must not be dead from a stale flag")
         keyRelease(Qt.Key_Space)
     }
+
+    // Distinguishes: a peek that is undiscoverable. Space is not a key anyone guesses, and it is
+    // the only gesture in the overview with no visible affordance at all.
+    function test_the_hint_row_advertises_the_peek() {
+        var found = false
+        for (var i = 0; i < view.testHintModel.length; i++)
+            if (String(view.testHintModel[i].k).toLowerCase().indexOf("space") >= 0) found = true
+        verify(found, "the primary hint row must name the peek key")
+    }
 }

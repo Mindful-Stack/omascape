@@ -2230,6 +2230,7 @@ Item {
                         model: [ { k: "1–0", l: "jump" }, { k: "tab", l: "workspace" }, { k: "↑ ↓ ← →", l: "window" },
                                  { k: "↵", l: "select" },
                                  { k: "drag", l: "move window" }, { k: "type", l: "find" },
+                                 { k: "hold space", l: "peek" },
                                  { k: "esc", l: "close" },
                                  { k: "?", l: root.hintsExpanded ? "less" : "more" } ]
                         HintCap { foreground: root.foreground; fill: root.wellColor
