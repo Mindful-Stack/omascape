@@ -1464,12 +1464,13 @@ Item {
 
         // A 28% shadow reads on light themes but vanishes on dark ones (Tokyo Night sweep),
         // so the alpha follows the card's luminance.
-        // Deeper than SoftShadow's defaults because this is the one surface that must lift off
-        // the desktop now that there is real air around it. Overridden at the USE SITE, so
-        // SoftShadow.qml's defaults — and therefore WindowTile's own blur: 12 — are untouched.
+        // SoftShadow's own defaults (blur 28, offset 0,6). A deeper shadow was tried on this
+        // branch — blur 48, offset (0,12), alpha 0.65/0.38 — on the reasoning that the card must
+        // lift off the desktop now that there is real air around it. Reverted after looking at
+        // it: raising blur, offset and alpha together was too much, and the border added below
+        // already does the lifting the deeper shadow was for. Doing both was double.
         SoftShadow { target: card; scale: card.scale; opacity: card.opacity
-                     blur: 48; offset: Qt.vector2d(0, 12)
-                     color: Qt.rgba(0, 0, 0, root.darkTheme ? 0.65 : 0.38) }
+                     color: Qt.rgba(0, 0, 0, root.darkTheme ? 0.55 : 0.28) }
         Rectangle {
             id: card
             anchors.centerIn: parent
