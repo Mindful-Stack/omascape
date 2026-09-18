@@ -318,12 +318,16 @@ Item {
             }
             var wsId = special ? Logic.SCRATCHPAD_ID : ws.id
             var mon = ws.monitor
-            // The scratchpad record only: Hyprland can report a monitor the layout will never
-            // know about (already removed, or none at all), which for a numbered workspace's "?"
-            // fallback means layout() silently skips it — but the scratchpad row must still
-            // appear, so fall back to the focused monitor by name instead.
-            var monName = special ? ((mon && monNames[mon.name]) ? mon.name : focusedMonitorName)
-                                  : (mon ? mon.name : "?")
+            // Hyprland can name a monitor the layout will never know about: one already removed,
+            // the zeroed placeholder it reports for a workspace on no monitor at all (the monitor
+            // loop above drops those), or no monitor field whatsoever. Such a workspace belongs in
+            // the focused monitor's group, never in one of its own — it still has a key, and
+            // `workspaces: N` promises a well for every key whether or not Hyprland has created
+            // that workspace. Dropping it takes more than itself down: padWorkspaces leans each
+            // synthetic id on the nearest lower REAL one's monitor, so a homeless workspace 6
+            // silently swallows the wells for 7, 8 and 9 too (found on a real desktop,
+            // 2026-09-18). The scratchpad row has always taken this same fallback.
+            var monName = (mon && monNames[mon.name]) ? mon.name : focusedMonitorName
             var wsSel = Logic.wsSelector(wsId)
             var wsArmed = locks.isArmed(wsSel), wsPlaceholder = locks.placeholder(wsSel)
             wss.push({ id: wsId, monitorName: monName, special: special,

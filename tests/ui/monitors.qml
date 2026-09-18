@@ -39,8 +39,9 @@ TestCase {
         v.compositor.workspaces = { values: [
             wsRow(1, mon, [client("0xA", "alpha", 100)]),
             wsRow(2, mon, []),
-            // The workspace that names the placeholder. Hyprland has created it, but it is on
-            // no monitor, so nothing shows it and the overview must not try to draw it.
+            // The workspace that names the placeholder. Hyprland has created it and it keeps its
+            // key, but no screen is showing it — so the overview draws its well in the focused
+            // monitor's group rather than in one of the placeholder's own.
             wsRow(6, phantomMon(), [])
         ] }
     }
@@ -75,15 +76,37 @@ TestCase {
         for (var i = 0; i < view.groups.length; i++) names.push(view.groups[i].monitorName)
         compare(names.indexOf("?"), -1, "a placeholder must not own a group: " + names.join(","))
     }
-    // Distinguishes: the workspace on the placeholder drawn anyway, at whatever geometry the
-    // fallback aspect produces. Nothing shows workspace 6, so the overview shows no well for it;
-    // the padding that fills in 1–0 is what puts a well at that id, on a real monitor.
-    function test_the_workspace_on_a_placeholder_keeps_finite_geometry() {
+    function boxIds() {
+        var ids = []
+        for (var i = 0; i < view.boxes.length; i++) ids.push(view.boxes[i].workspaceId)
+        ids.sort(function (a, b) { return a - b })
+        return ids
+    }
+    // Distinguishes: a monitorless workspace dropped from the picture instead of shown. It has a
+    // key like any other and SUPER+6 jumps to it, so it gets a well — on the focused monitor,
+    // since the one it names is not on screen anywhere. Every box keeps finite geometry and none
+    // claims the placeholder's name.
+    function test_a_workspace_on_no_monitor_still_gets_a_well() {
+        compare(boxIds().indexOf(6) !== -1, true, "no well for workspace 6: " + boxIds().join(","))
         for (var i = 0; i < view.boxes.length; i++) {
             var b = view.boxes[i]
             verify(isFinite(b.h) && b.h > 0, "box " + b.workspaceId + " height " + b.h)
             verify(isFinite(b.y), "box " + b.workspaceId + " y " + b.y)
-            compare(b.monitorName === "?", false, "box " + b.workspaceId + " sits on a placeholder")
+            compare(b.monitorName, "TEST", "box " + b.workspaceId + " sits on " + b.monitorName)
         }
+    }
+    // Distinguishes: THE regression a naive "skip what has no monitor" produces (reported on a
+    // real desktop, 2026-09-18). `workspaces: N` promises a well for every key 1–0 whether or not
+    // Hyprland has created it, and padWorkspaces leans each synthetic id on the nearest lower
+    // REAL one's monitor — so a real workspace 6 that names a monitor nothing knows takes 7, 8
+    // and 9 down with it, and the grid stops at the ids below it.
+    function test_padding_fills_every_key_past_a_monitorless_workspace() {
+        view.testConfig.workspaces = 10
+        view.rebuild()
+        wait(50)
+        compare(boxIds(), [1,2,3,4,5,6,7,8,9,10])
+        for (var i = 0; i < view.boxes.length; i++)
+            compare(view.boxes[i].monitorName, "TEST",
+                    "box " + view.boxes[i].workspaceId + " sits on " + view.boxes[i].monitorName)
     }
 }
