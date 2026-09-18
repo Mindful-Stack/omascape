@@ -254,8 +254,12 @@ Item {
     // the scratchpad group is extra and always carries its own chip.
     readonly property bool multiMonitor: groups.filter(function (g) { return !g.special }).length > 1
     // Card interior logical width available to the canvas: panel.width (logical, not
-    // screen.width*dpr) minus the card's own padding and a little breathing room.
-    readonly property real availCanvasW: panel.width > 0 ? panel.width - 2 * card.pad - 16 : 1600
+    // screen.width*dpr) minus the card's own padding and the screen margin. Shares
+    // Logic.screenMargin with the card's own caps below so the two cannot drift apart — they
+    // previously disagreed by 2 * card.pad, which is how the grid came to sit 10 px from the
+    // edge of a 1920-logical screen (a 4K panel at 2x).
+    readonly property real availCanvasW:
+        panel.width > 0 ? panel.width - 2 * card.pad - 2 * Logic.screenMargin(panel.width) : 1600
     onAvailCanvasWChanged: if (opened) rebuild()
 
     function focusedScreen() {
@@ -1488,9 +1492,13 @@ Item {
             }
             // Cap the card to the screen so the Flickable viewport can be smaller than the
             // content (`availCanvasW` already keeps canvas width <= this, minus the degenerate
-            // narrow-screen case, which is expected to 2-D scroll per the spec).
-            readonly property real maxCardW: panel.width > 0 ? panel.width - 16 : 1616
-            readonly property real maxCardH: panel.height > 0 ? panel.height - 64 : 900
+            // narrow-screen case, which is expected to 2-D scroll per the spec). Because
+            // availCanvasW is exactly this minus 2 * pad, the WIDTH cap never binds on grid
+            // width — the only thing that reaches it is the hint row, which is deliberately
+            // allowed to widen a narrow card so the key hints are not clipped. The HEIGHT cap
+            // does real work whenever there are enough monitor groups to overflow.
+            readonly property real maxCardW: panel.width  > 0 ? panel.width  - 2 * Logic.screenMargin(panel.width)  : 1616
+            readonly property real maxCardH: panel.height > 0 ? panel.height - 2 * Logic.screenMargin(panel.height) : 900
             // The hint row never widens past the screen (maxCardW still caps it), but it does
             // widen a narrow card: a layout with few/narrow workspaces must not clip the eight
             // key hints against the card edge.
