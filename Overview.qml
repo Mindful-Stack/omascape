@@ -316,6 +316,12 @@ Item {
             wss.push({ id: wsId, monitorName: monName, special: special,
                        focused: ws.id === focusedWsId,
                        occupied: ws.toplevels && ws.toplevels.values.length > 0,
+                       // Close all is offered only above ONE window (see Logic.workspaceMenuRows):
+                       // on a single-window workspace it is Close by another name. Counted from
+                       // the same toplevel list `occupied` comes from, so the two can never
+                       // disagree, and counted even behind a lock placeholder — the placeholder
+                       // hides the windows from find and drag, not from the compositor.
+                       windowCount: ws.toplevels ? ws.toplevels.values.length : 0,
                        armed: wsArmed, placeholder: wsPlaceholder,
                        // Compared against the REAL id, before the scratchpad remap: a special
                        // workspace is reported as `specialWorkspace`, never `activeWorkspace`.
@@ -338,7 +344,7 @@ Item {
         if (scratchpadShown && !haveScratch) {
             wsSel = Logic.wsSelector(Logic.SCRATCHPAD_ID)
             wss.push({ id: Logic.SCRATCHPAD_ID, monitorName: focusedMonitorName, special: "scratchpad",
-                       focused: false, occupied: false,
+                       focused: false, occupied: false, windowCount: 0,
                        armed: locks.isArmed(wsSel), placeholder: locks.placeholder(wsSel), active: false })
         }
         // padWorkspaces() fills gaps with synthetic (empty) records that carry no armed/

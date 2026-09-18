@@ -597,8 +597,32 @@ TestCase {
         compare(view.menuOpen, true)
         compare(view.menuTarget.kind, "window")
         compare(view.menuTarget.address, "0xA")
-        compare(menuIds(), ["close", "closeAll", "float", "fullscreen", "separator", "lock"])
-        compare(view.menuItems[4].separator, true)
+        compare(menuIds(), ["close", "float", "fullscreen", "separator", "lock", "closeAll"])
+        compare(view.menuItems[3].separator, true)
+    }
+    // ✎ 2026-09-18. Distinguishes: the window COUNT never reaching the menu. Logic.menuItems is
+    // pure and its own tests hand it a windowCount directly, so they pass whether or not
+    // buildInput actually counts the toplevels and layout() actually carries the number onto the
+    // box boxForWs() returns. This drives the whole path: workspace 2 holds exactly one window
+    // (0xC, see seed), so its menu must omit Close all while workspace 1's two-window menu
+    // offers it. A rule keyed on `occupied`, or a count lost anywhere in between, shows the row
+    // on both.
+    function test_a_lone_window_is_offered_no_close_all_anywhere() {
+        rightPressTile("0xC")
+        compare(view.menuTarget.kind, "window")
+        compare(menuIds(), ["close", "float", "fullscreen", "separator", "lock"],
+                "one window on the workspace: Close all would just be Close")
+        keyClick(Qt.Key_Escape)
+        // The same workspace reached as a workspace, through its well: same threshold.
+        var b = view.boxForWs(2)
+        var p = view.testCanvas.mapToItem(view, b.x + 12, b.y + 12)
+        rightPress(p.x, p.y)
+        compare(view.menuTarget.kind, "workspace")
+        compare(menuIds().indexOf("closeAll"), -1, "the well menu applies the same rule")
+        keyClick(Qt.Key_Escape)
+        // Positive control: two windows on workspace 1, so the row IS offered there.
+        rightPressTile("0xA")
+        verify(menuIds().indexOf("closeAll") >= 0, "two windows: " + menuIds().join(","))
     }
     // Distinguishes: a right press that also starts a drag — the drag machinery accepts the
     // right button now, and only an explicit left-button check keeps it out.
@@ -673,12 +697,12 @@ TestCase {
     }
     // Distinguishes: a highlight that does not wrap from "none" to the last row — and, now that
     // the window menu ends with a workspace group below a separator, one that lands ON the
-    // separator instead of skipping past it to the real last row (lock, index 5).
+    // separator instead of skipping past it to the real last row (closeAll, index 5).
     function test_up_from_no_highlight_takes_the_last_row() {
         rightPressTile("0xA")
         keyClick(Qt.Key_Up)
         compare(view.menuIndex, 5)
-        compare(menuIds()[5], "lock")
+        compare(menuIds()[5], "closeAll")
     }
     // Distinguishes: Esc closing the overview instead of spending itself on the menu.
     function test_escape_dismisses_the_menu_only() {
@@ -749,7 +773,7 @@ TestCase {
             for (var i = 0; i < item.children.length; i++) collect(item.children[i])
         }
         collect(view.testPanel)
-        // 6 items (close, closeAll, float, fullscreen, separator, lock), but the separator gets
+        // 6 items (close, float, fullscreen, separator, lock, closeAll), but the separator gets
         // no "menuRow" node at all — it is a border, not a row, with no MouseArea to click.
         compare(rows.length, 5, "one delegate per item, the separator excluded")
         var c = rows[0].mapToItem(view, rows[0].width / 2, rows[0].height / 2)
@@ -761,32 +785,32 @@ TestCase {
     // elsewhere must relabel the row, keeping the highlight on the same item.
     function test_a_rebuild_updates_the_items_and_keeps_the_highlight() {
         rightPressTile("0xA")
-        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down)
-        compare(menuIds()[2], "float")
-        compare(view.menuIndex, 2)
+        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down)
+        compare(menuIds()[1], "float")
+        compare(view.menuIndex, 1)
         var c = client("0xA", "alpha", 100); c.floating = true
         view.compositor.workspaces = { values: [
             wsRow(1, [c, client("0xB", "bravo", 900)]), wsRow(2, [client("0xC", "charlie", 100)]) ] }
         view.rebuild()
-        compare(menuIds()[2], "tile", "the row follows the compositor")
-        compare(view.menuIndex, 2, "the highlight stays on the same item")
+        compare(menuIds()[1], "tile", "the row follows the compositor")
+        compare(view.menuIndex, 1, "the highlight stays on the same item")
     }
     // Distinguishes: the separator counted differently by the id-match/position-fallback code
     // than by the item list itself — the addendum's own warning (docs/specs/2026-09-15-actions-
     // design.md, "The menu", 2026-09-17): a toggle AFTER the separator (lock <-> unlock, which
     // this window's own workspace group carries) is exactly the row whose id changes on the very
     // refresh that must keep the highlight in place, so an off-by-one here would land the
-    // highlight ON the separator (index 4) instead of the real row (index 5).
+    // highlight ON the separator (index 3) instead of the real row (index 4).
     function test_a_rebuild_keeps_the_highlight_on_a_toggle_row_past_the_separator() {
         view.testLocks.loadArmed([])
         rightPressTile("0xA")
-        compare(menuIds(), ["close", "closeAll", "float", "fullscreen", "separator", "lock"])
-        keyClick(Qt.Key_Up)   // "up from none" lands on the last row: lock, index 5
-        compare(view.menuIndex, 5)
+        compare(menuIds(), ["close", "float", "fullscreen", "separator", "lock", "closeAll"])
+        keyClick(Qt.Key_Up); keyClick(Qt.Key_Up)   // none -> closeAll (5) -> lock (4)
+        compare(view.menuIndex, 4)
         view.testLocks.loadArmed(["1"])   // armed elsewhere: the rebuild must relabel lock -> unlock
         view.rebuild()
-        compare(menuIds()[5], "unlock", "the row follows the compositor")
-        compare(view.menuIndex, 5, "the highlight must land on the row itself, not the separator")
+        compare(menuIds()[4], "unlock", "the row follows the compositor")
+        compare(view.menuIndex, 4, "the highlight must land on the row itself, not the separator")
     }
     // Distinguishes: a menu left open over a target that no longer exists, whose activation would
     // then dispatch for a dead address.
@@ -852,23 +876,23 @@ TestCase {
     }
 
     // Distinguishes: a menu row that dispatches the wrong chunk, or none. "Float" must send the
-    // float chunk for THIS address. Index 2: close(0), closeAll(1), float(2) — Close all now
-    // sits between Close and Float (addendum 2026-09-17).
+    // float chunk for THIS address. Index 1: close(0), float(1) — Close all moved out from
+    // between them into the workspace group (addendum 2026-09-18).
     function test_the_float_row_dispatches_the_float_chunk() {
         rightPressTile("0xA")
-        compare(menuIds()[2], "float")
-        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return)
+        compare(menuIds()[1], "float")
+        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return)
         verify(dispatched("window.float"))
         verify(dispatched("address:0xA"))
         verify(dispatched('action = "on"'), "the id names the state to set, not a toggle")
     }
     // Distinguishes: Fullscreen sending mode 0 (the badge's direction) instead of entering, and a
     // wiring mixup that sent the chunk for the wrong window (menuTarget vs. some other address).
-    // Index 3: close(0), closeAll(1), float(2), fullscreen(3).
+    // Index 2: close(0), float(1), fullscreen(2).
     function test_the_fullscreen_row_enters_fullscreen() {
         rightPressTile("0xA")
-        compare(menuIds()[3], "fullscreen")
-        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down)
+        compare(menuIds()[2], "fullscreen")
+        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down)
         keyClick(Qt.Key_Return)
         verify(dispatched("window.fullscreen"))
         verify(dispatched("address:0xA"))
@@ -943,10 +967,7 @@ TestCase {
         var b = view.boxForWs(1)
         var p = view.testCanvas.mapToItem(view, b.x + 12, b.y + 12)
         rightPress(p.x, p.y)
-        var i = menuIds().indexOf("closeAll")
-        verify(i >= 0, "workspace 1 has windows")
-        for (var k = 0; k <= i; k++) keyClick(Qt.Key_Down)
-        keyClick(Qt.Key_Return)
+        selectCloseAll()
         compare(view.confirmOpen, true, "Close all must ask first")
         compare(view.compositor.commands.length, 0, "nothing dispatched before confirming")
         keyClick(Qt.Key_Right); keyClick(Qt.Key_Return)   // move onto Confirm, then confirm
@@ -960,9 +981,14 @@ TestCase {
     // Selects "Close all windows" from an already-open menu and returns the row's index, so every
     // test below shares the same setup instead of repeating the down-count arithmetic.
     function selectCloseAll() {
-        var i = menuIds().indexOf("closeAll")
-        verify(i >= 0, "closeAll must be offered: " + menuIds().join(","))
-        for (var k = 0; k <= i; k++) keyClick(Qt.Key_Down)
+        var ids = menuIds()
+        var i = ids.indexOf("closeAll")
+        verify(i >= 0, "closeAll must be offered: " + ids.join(","))
+        // Steps DOWN until the highlight actually arrives, rather than pressing a precomputed
+        // number of times: the menu skips the separator, so presses and indices are not
+        // one-to-one and a count would overshoot past the row it was aiming for.
+        for (var k = 0; k <= ids.length && view.menuIndex !== i; k++) keyClick(Qt.Key_Down)
+        compare(view.menuIndex, i, "the highlight must reach the Close all row")
         keyClick(Qt.Key_Return)
     }
     // Distinguishes: Close all dispatching straight away instead of opening the dialog first —

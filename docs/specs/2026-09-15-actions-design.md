@@ -216,10 +216,10 @@ active, monitorName) and the monitor list. Hidden, never greyed:
 | workspace | Lock / Unlock              | always; label by `armed`                                    |
 | workspace | Move to ‹monitor›          | one per *other* monitor, glyph as the chips (laptop/screen); not on the scratchpad, not on a synthetic (uncreated) workspace, never with one monitor |
 | workspace | Swap with ‹monitor›        | as Move, and ✎ only when the workspace is **active on its monitor** (`box.active`) |
-| workspace | Close all windows          | `occupied` only                                             |
+| workspace | Close all windows          | ✎ `box.windowCount > 1` only (2026-09-18; was `occupied`)    |
 
 Order as listed. Windows on a placeholder box have no tiles, so no menu; the well's menu still
-offers Lock/Unlock (and Close all if occupied). Item ids: `close`, `float`, `tile`, `fullscreen`,
+offers Lock/Unlock (and Close all above more than one window). Item ids: `close`, `float`, `tile`, `fullscreen`,
 `unfullscreen`, `lock`, `unlock`, `move:<monitor>`, `swap:<monitor>`, `closeAll` — the id carries
 the intended *state*, never a toggle.
 
@@ -247,20 +247,33 @@ now offers the workspace actions too, so any window is a route to its own worksp
 | row | group |
 |-----|-------|
 | Close | the window, and what it contains |
-| Close all windows | ″ |
 | Float / Tile | ″ |
 | Fullscreen / Exit fullscreen | ″ |
 | *(separator)* | |
 | Lock / Unlock | the workspace as a container |
 | Move to ‹monitor› | ″ |
 | Swap with ‹monitor› | ″ |
+| Close all windows | ″ |
 
-**Close all sits with Close, not below the line.** The grouping is by verb — both close things —
-rather than by scope, which is why it is the one workspace action above the separator. That puts a
-workspace-destroying item one row under a window-closing one, on the same menu, reached by the
-pointer that was already imprecise enough to motivate this change. The mitigation is a
-**confirmation** (below), chosen over hiding the item, because splitting the same menu's contents by
-where the user happened to click is its own kind of surprise.
+✎ **Close all sits below the line, last in the workspace group** (2026-09-18, reversing this same
+addendum's first answer). It was briefly placed beside Close, grouped by verb — both close things.
+Grouping by **scope** is the better rule: nothing that acts on every window on the workspace should
+sit among the rows that act on the one window the menu was opened on, one row under Close, reached
+by the pointer that was already imprecise enough to motivate this addendum. Last in the group also
+puts it as far from Close as the menu allows. The **confirmation** below stays; the two mitigations
+are independent, and the destructive row now has both.
+
+✎ **Close all needs more than one window** (2026-09-18). Above a single window it is Close wearing a
+longer label and a confirmation dialog, and offering both invites picking the heavier one by
+accident. The old rule — the workspace is `occupied` — was true of any workspace holding a window at
+all, which on a *window's* menu is the ordinary case rather than the exception. The box therefore
+carries `windowCount`, counted from the same toplevel list `occupied` comes from so the two can
+never disagree, and the row appears only above `windowCount > 1`. A box with no count at all hides
+the row: `undefined > 1` is false, so the destructive row fails closed.
+
+The threshold is applied in `Logic.workspaceMenuRows`, the single builder both the window menu's
+group and the well/badge menu use, so the two cannot disagree about what a workspace offers or in
+what order.
 
 The workspace rows act on **the window's own workspace**, which is not necessarily the selected one
 — `ctx` therefore carries that box for a window target, where it used to be null.

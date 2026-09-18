@@ -178,7 +178,8 @@ function padWorkspaces(workspaces, count, focusedMonitorName) {
     for (var id = 1; id <= count; id++) {
         if (id in monById) continue
         var host = hostFor(id); if (!host) continue
-        out.push({ id: id, monitorName: host, focused: false, occupied: false, synthetic: true })
+        out.push({ id: id, monitorName: host, focused: false, occupied: false, windowCount: 0,
+                   synthetic: true })
     }
     return out
 }
@@ -240,6 +241,9 @@ function layout(input) {
                 var box = { workspaceId: chunk[c].id, monitorName: name, monFocused: focusedGroup,
                             special: "", x: inset + c * (cw + gap), y: y, w: cw, h: gch,
                             focused: !!chunk[c].focused, occupied: !!chunk[c].occupied,
+                            // How many windows the workspace holds, not merely whether it holds
+                            // any: Close all needs more than one (see workspaceMenuRows).
+                            windowCount: chunk[c].windowCount | 0,
                             armed: !!chunk[c].armed, placeholder: !!chunk[c].placeholder,
                             // Menu eligibility (docs/specs/2026-09-15-actions-design.md): Move and
                             // Swap need a workspace the compositor actually has, and Swap needs it
@@ -278,6 +282,7 @@ function layout(input) {
                      special: sws.special, x: inset + Math.round((rowW - 2 * inset - cw) / 2), y: y, w: cw,
                      h: cellHeightFor(monByName[sws.monitorName]),
                      focused: !!sws.focused, occupied: !!sws.occupied,
+                     windowCount: sws.windowCount | 0,
                      armed: !!sws.armed, placeholder: !!sws.placeholder,
                      // A special workspace is never a monitor's `activeWorkspace` (it is reported
                      // separately as `specialWorkspace`), and it is never a pad slot.
@@ -1073,11 +1078,11 @@ function validMonitorName(name) { return typeof name === "string" && MONITOR_NAM
 // stay pure and the monitor chips and the menu can never disagree about which glyph a monitor gets.
 function monitorGlyph(name) { return /^(eDP|LVDS|DSI)/i.test(name) ? "\u{F0322}" : "\u{F0379}" }
 
-// Lock/Unlock, Move to <monitor>, Swap with <monitor> — the rows that act on a workspace as a
-// CONTAINER. Shared by the workspace-target menu (below) and the window-target menu's group
-// below the separator (docs/specs/2026-09-15-actions-design.md, "The menu", addendum
-// 2026-09-17). Never includes Close all: each caller places that row itself, since window and
-// workspace targets put it in different positions (see menuItems).
+// Lock/Unlock, Move to <monitor>, Swap with <monitor>, Close all windows — the rows that act on
+// a workspace as a CONTAINER. Shared by the workspace-target menu (below) and the window-target
+// menu's group below the separator (docs/specs/2026-09-15-actions-design.md, "The menu",
+// addenda 2026-09-17 and 2026-09-18), so the two can never disagree about what a workspace
+// offers or in what order.
 function workspaceMenuRows(b, monitors) {
     var out = []
     out.push(b.armed ? { id: "unlock", label: "Unlock" } : { id: "lock", label: "Lock" })
@@ -1099,6 +1104,11 @@ function workspaceMenuRows(b, monitors) {
     if (b.active)
         for (var s = 0; s < others.length; s++)
             out.push({ id: "swap:" + others[s], label: "Swap with " + others[s], glyph: monitorGlyph(others[s]) })
+    // ✎ Close all needs MORE THAN ONE window (2026-09-18), not merely an occupied workspace:
+    // above a single window it is Close wearing a longer label and a confirmation dialog, and
+    // offering both invites picking the heavier one by accident. Last in the group, the furthest
+    // row from the window menu's own Close.
+    if (b.windowCount > 1) out.push({ id: "closeAll", label: "Close all windows" })
     return out
 }
 
@@ -1115,19 +1125,17 @@ function menuItems(tgt, ctx) {
         var w = ctx.win
         if (!w) return []                               // gone: the caller dismisses on an empty list
         out.push({ id: "close", label: "Close" })
-        // ✎ Close all sits with Close, not below the line: the grouping is by verb (both close
-        // things), not by scope. Needs the window's OWN workspace box, which may be null (the
-        // workspace vanished a settle tick before this refresh) — in that case there is simply
-        // no workspace group at all, never a dangling "Close all" or a separator with nothing
-        // under it.
-        var wb = ctx.box
-        if (wb && wb.occupied) out.push({ id: "closeAll", label: "Close all windows" })
         out.push(w.floating ? { id: "tile", label: "Tile" } : { id: "float", label: "Float" })
         out.push(fullscreenMode(w) > 0 ? { id: "unfullscreen", label: "Exit fullscreen" }
                                        : { id: "fullscreen", label: "Fullscreen" })
-        // ✎ A window's menu also carries its workspace's actions, below a separator. Lock/Unlock
-        // is unconditional (see workspaceMenuRows), so whenever `wb` exists this group is never
-        // empty — the separator therefore never has nothing under it.
+        // ✎ A window's menu also carries its workspace's actions, below a separator — Close all
+        // among them (2026-09-18, reversing the 2026-09-17 addendum that put it beside Close):
+        // grouped by SCOPE, so nothing acting on every window sits among the rows acting on this
+        // one. Needs the window's OWN workspace box, which may be null (the workspace vanished a
+        // settle tick before this refresh) — then there is simply no group. Lock/Unlock is
+        // unconditional (see workspaceMenuRows), so whenever `wb` exists the group is non-empty
+        // and the separator never has nothing under it.
+        var wb = ctx.box
         if (wb) {
             var wsRows = workspaceMenuRows(wb, ctx.monitors)
             if (wsRows.length) {
@@ -1139,9 +1147,7 @@ function menuItems(tgt, ctx) {
     }
     var b = ctx.box
     if (!b) return []
-    out = workspaceMenuRows(b, ctx.monitors)
-    if (b.occupied) out.push({ id: "closeAll", label: "Close all windows" })
-    return out
+    return workspaceMenuRows(b, ctx.monitors)
 }
 
 // A press of a modifier key ALONE. It belongs to no class: it must not drive the menu (Ctrl then

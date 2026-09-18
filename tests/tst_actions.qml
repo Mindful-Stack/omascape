@@ -202,8 +202,10 @@ TestCase {
         return base
     }
     function box(o) {
-        var base = { workspaceId: 1, monitorName: "eDP-1", occupied: true, armed: false,
-                     placeholder: false, special: "", synthetic: false, active: true }
+        // windowCount 2 by default: the interesting default is a workspace that CAN offer Close
+        // all, so a test that cares about the single-window rule has to say so explicitly.
+        var base = { workspaceId: 1, monitorName: "eDP-1", occupied: true, windowCount: 2,
+                     armed: false, placeholder: false, special: "", synthetic: false, active: true }
         for (var k in o) base[k] = o[k]
         return base
     }
@@ -236,13 +238,15 @@ TestCase {
     }
 
     // ---- addendum 2026-09-17: a window's menu also carries its workspace's group -----------
-    // Distinguishes: Close all landing below the separator with the rest of the workspace group
-    // (grouped by SCOPE) instead of staying with Close (grouped by VERB, which is what the
-    // addendum actually specifies) — and a menu missing the group entirely when a box IS given.
-    function test_menuItems_window_with_workspace_box_adds_closeAll_and_the_group() {
+    // Distinguishes (✎ 2026-09-18): Close all staying beside Close, where it was until the
+    // 2026-09-18 addendum moved it into the workspace group — the row acts on every window on
+    // the workspace, so it belongs below the line with the rest of them, not among the rows
+    // that act on the one window the menu was opened on. Also: a menu missing the group
+    // entirely when a box IS given.
+    function test_menuItems_window_with_workspace_box_adds_the_group_with_closeAll_in_it() {
         compare(ids(Logic.menuItems({ kind: "window", address: "0xA" },
                                     { win: win({}), box: box({}), monitors: oneMon })),
-                ["close", "closeAll", "float", "fullscreen", "separator", "lock"])
+                ["close", "float", "fullscreen", "separator", "lock", "closeAll"])
     }
     // Distinguishes: a separator item that is not marked `separator: true` (so a naive
     // implementation of Logic.menuNavigate treating it as an ordinary row would go undetected by
@@ -250,9 +254,9 @@ TestCase {
     function test_menuItems_window_group_carries_move_and_swap_too() {
         var out = Logic.menuItems({ kind: "window", address: "0xA" },
                                    { win: win({}), box: box({}), monitors: twoMon })
-        compare(ids(out), ["close", "closeAll", "float", "fullscreen", "separator",
-                           "lock", "move:HDMI-A-1", "swap:HDMI-A-1"])
-        var sep = out[4]
+        compare(ids(out), ["close", "float", "fullscreen", "separator",
+                           "lock", "move:HDMI-A-1", "swap:HDMI-A-1", "closeAll"])
+        var sep = out[3]
         compare(sep.separator, true)
         verify(!sep.id || sep.id === "separator", "the separator must not double as an activatable row")
     }
@@ -262,8 +266,8 @@ TestCase {
     function test_menuItems_window_group_reflects_its_OWN_workspace_not_a_different_one() {
         var out = Logic.menuItems({ kind: "window", address: "0xA" },
                                    { win: win({}), box: box({ armed: true }), monitors: oneMon })
-        var lock = out[out.length - 1]
-        compare(lock.id, "unlock", "the box passed in ctx is what must be reflected, armed or not")
+        compare(ids(out), ["close", "float", "fullscreen", "separator", "unlock", "closeAll"],
+                "the box passed in ctx is what must be reflected, armed or not")
     }
     // Distinguishes: hiding a group leaving a dangling separator with nothing under it — here by
     // construction Lock/Unlock is unconditional, so this also pins that the separator is added
@@ -274,13 +278,14 @@ TestCase {
         compare(ids(out), ["close", "float", "fullscreen"])
         verify(out.every(function (i) { return !i.separator }), "no box: no separator either")
     }
-    // Distinguishes: Close all offered on a window group unconditionally, ignoring `occupied` —
-    // defensive, since a window's own workspace box is occupied by construction, but the window
-    // branch re-derives it from `wb.occupied` independently of the workspace-target branch and
-    // must honour the same rule.
-    function test_menuItems_window_group_closeAll_still_follows_occupied() {
+    // ✎ 2026-09-18. Distinguishes: Close all offered on a window whose workspace holds only that
+    // window, where it is Close under a longer label and a confirmation dialog. This is the
+    // ORDINARY case for a window menu (one window on a workspace is the common shape), so a
+    // rule keyed on `occupied` — true for any workspace with a window at all — would leave it
+    // showing almost everywhere it should not.
+    function test_menuItems_window_group_has_no_closeAll_above_a_lone_window() {
         var out = Logic.menuItems({ kind: "window", address: "0xA" },
-                                   { win: win({}), box: box({ occupied: false }), monitors: oneMon })
+                                   { win: win({}), box: box({ windowCount: 1 }), monitors: oneMon })
         compare(ids(out), ["close", "float", "fullscreen", "separator", "lock"])
     }
 
@@ -305,7 +310,8 @@ TestCase {
     // scratchpad — neither has a monitor to move between.
     function test_menuItems_synthetic_and_scratchpad_have_no_monitor_items() {
         compare(ids(Logic.menuItems({ kind: "workspace", id: 3 },
-                                    { box: box({ synthetic: true, occupied: false, active: false }), monitors: twoMon })),
+                                    { box: box({ synthetic: true, occupied: false, windowCount: 0,
+                                                 active: false }), monitors: twoMon })),
                 ["lock"])
         compare(ids(Logic.menuItems({ kind: "workspace", id: -2 },
                                     { box: box({ special: "scratchpad", active: false }), monitors: twoMon })),
@@ -314,7 +320,26 @@ TestCase {
     // Distinguishes: "Close all windows" offered on an empty workspace.
     function test_menuItems_close_all_needs_windows() {
         compare(ids(Logic.menuItems({ kind: "workspace", id: 1 },
-                                    { box: box({ occupied: false }), monitors: oneMon })), ["lock"])
+                                    { box: box({ occupied: false, windowCount: 0 }), monitors: oneMon })),
+                ["lock"])
+    }
+    // ✎ 2026-09-18. Distinguishes: a rule keyed on "has any windows" rather than "has more than
+    // one" — the well and badge menus must apply the same threshold the window menu does, since
+    // both now build their rows from workspaceMenuRows. One window is Close, not Close all.
+    function test_menuItems_close_all_needs_more_than_one_window() {
+        compare(ids(Logic.menuItems({ kind: "workspace", id: 1 },
+                                    { box: box({ windowCount: 1 }), monitors: oneMon })), ["lock"])
+        compare(ids(Logic.menuItems({ kind: "workspace", id: 1 },
+                                    { box: box({ windowCount: 2 }), monitors: oneMon })),
+                ["lock", "closeAll"])
+    }
+    // ✎ 2026-09-18. Distinguishes: a box built before windowCount existed, or one whose count
+    // never reached layout() — `undefined > 1` is false, so the row is hidden rather than
+    // offered on a workspace whose size is unknown. The destructive row fails closed.
+    function test_menuItems_close_all_hidden_when_the_count_is_missing() {
+        var b = box({}); delete b.windowCount
+        compare(ids(Logic.menuItems({ kind: "workspace", id: 1 }, { box: b, monitors: oneMon })),
+                ["lock"])
     }
     // Distinguishes: a lock item whose label does not follow the armed state.
     function test_menuItems_lock_label_follows_the_armed_state() {
