@@ -193,7 +193,19 @@ function padWorkspaces(workspaces, count, focusedMonitorName) {
 // the real monitor, never off `box`, so the same slot is recovered at cell size and at peek size
 // and only the final _tileRect mapping differs. That is what makes peek/grid parity a property of
 // the code rather than of a test.
+//
+// Preconditions the caller owns, not this function: every window in `wins` belongs to the SAME
+// workspace (`others` is built from all of `wins` with no workspace filter of its own), and none
+// of them is on a lock placeholder workspace — a placeholder shows no tile and takes no capture
+// (spec: Rendering). `layout` enforces the placeholder rule itself, with its own
+// `gbox.placeholder` filter in the grouping pass below; `buildInput` (Overview.qml) independently
+// excludes a placeholder workspace's windows from `input.windows` further upstream, before
+// `layout` ever sees them. A caller with its own window list — the peek's mini-map — has no
+// `layout`-side filter to lean on, so it is standing on the `buildInput` guarantee alone; keep
+// that in mind before handing this function a window list built some other way. `mon` missing is
+// handled here directly (see the guard below) since a placeholder box's monitor can be absent.
 function _placeWindows(wins, mon, box, P) {
+    if (!mon) return []   // no usable monitor to place against — degrade rather than throw in _usableRect
     // Tiled windows that are not fullscreen or maximized, in usable-rect-local coords: what a
     // fullscreen window's slot is recovered from (see recoverSlot).
     var R = _usableRect(mon), others = []
@@ -354,7 +366,7 @@ function layout(input) {
     }
     var tiles = []
     for (var wsk in winsByWs) {
-        var kbox = boxByWs[winsByWs[wsk][0].workspaceId]
+        var kbox = boxByWs[wsk]
         tiles = tiles.concat(_placeWindows(winsByWs[wsk], monByName[kbox.monitorName], kbox, P))
     }
     return { canvasSize: { w: canvasW, h: y }, boxes: boxes, tiles: tiles,

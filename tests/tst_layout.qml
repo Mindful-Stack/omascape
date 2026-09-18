@@ -410,7 +410,7 @@ TestCase {
                   floating: false, fullscreen: 2, cls: "full", title: "full" },
                 { address: "0xR", workspaceId: 1, ax: 1024, ay: 26, sw: 1024, sh: 1254,
                   floating: false, fullscreen: 0, cls: "right", title: "right" },
-                { address: "0xL", workspaceId: 1, ax: 400, ay: 300, sw: 300, sh: 200,
+                { address: "0xFloat", workspaceId: 1, ax: 400, ay: 300, sw: 300, sh: 200,
                   floating: true, fullscreen: 0, cls: "floaty", title: "floaty" }
             ],
             focusedMonitorName: "eDP-1", availW: 1632, params: params })
@@ -418,7 +418,7 @@ TestCase {
             for (var i = 0; i < r.tiles.length; i++) if (r.tiles[i].address === a) return r.tiles[i]
             fail("no tile row for " + a); return null
         }
-        var f = row("0xF"), rt = row("0xR"), fl = row("0xL")
+        var f = row("0xF"), rt = row("0xR"), fl = row("0xFloat")
         compare(f.fullscreen, 2, "fullscreen mode survives")
         compare(f.layer, 1, "a RECOVERABLE fullscreen window stays on the tiled layer, not the backdrop")
         compare(rt.fullscreen, 0); compare(rt.layer, 1)
