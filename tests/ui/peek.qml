@@ -3,11 +3,14 @@ import QtTest
 
 // Offscreen UI suite for the peek spec (docs/specs/2026-09-18-peek-design.md). The fixture
 // (tests/ui/prepare.py) runs the real Overview with only the compositor stubbed, so key routing,
-// target resolution and model reconciliation are production code here.
+// target resolution and model reconciliation are production code here. This file currently holds
+// fixture-health tests only (Task 6); key routing, targeting and cancellation behaviour tests
+// land on top of it in Tasks 7 and 8.
 //
 // What this tier CANNOT show: ScreencopyView has no content offscreen — no compositor, no
-// toplevel handles — so every peeked tile falls back to its icon. Every assertion below is on
-// geometry, counts or state. "The capture appeared" is a Tier 2 check (tests/integration/).
+// toplevel handles — so every peeked tile falls back to its icon. Every assertion below (and in
+// the behaviour tests to come) is on geometry, counts or state. "The capture appeared" is a
+// Tier 2 check (tests/integration/).
 TestCase {
     id: tc
     name: "Peek"
@@ -29,6 +32,8 @@ TestCase {
     }
     // A floating scratchpad window on Hyprland's own dynamic special-workspace id, named so
     // buildInput() remaps it onto Logic.SCRATCHPAD_ID (-2). Mirrors tests/ui/scratchpad.qml.
+    // Unused in this file's own tests: Task 8 peeks the scratchpad row specifically to exercise
+    // the negative workspace id through the peek's identity round-trip. Keep it.
     function scratchRow(hyprId, addr, cls) {
         return { id: hyprId, name: "special:scratchpad", monitor: mon,
                  toplevels: { values: [{ lastIpcObject: { address: addr, at: [900, 1500],
@@ -88,8 +93,12 @@ TestCase {
 
     // Distinguishes: a fixture whose keys never reach keyCatcher — the failure mode that makes
     // every key test below pass vacuously. Escape on an empty query closes the overview; if this
-    // does not happen, nothing else in this file means anything.
+    // does not happen, nothing else in this file means anything. The precondition matters as
+    // much as the outcome: without asserting `opened` is true first, this test cannot tell
+    // "Escape closed it" from "it was never open" — a fixture whose init() silently skipped
+    // open() would still show `opened === false` afterwards and this canary would pass vacuously.
     function test_the_fixture_delivers_keys() {
+        compare(view.opened, true, "init() must leave the overview open")
         keyClick(Qt.Key_Escape)
         compare(view.opened, false)
     }
