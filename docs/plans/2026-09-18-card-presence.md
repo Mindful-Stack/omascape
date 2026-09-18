@@ -20,13 +20,16 @@
 
 **Test loop:** `mise run test`. Single suites:
 - Tier 1: `QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/tst_layout.qml`
-- UI: `bash tests/ui/run.sh Presence::test_name`
+- UI: `bash tests/ui/run.sh` for the whole fixture, or a **fully qualified** selector —
+  `bash tests/ui/run.sh Presence::test_the_card_keeps_a_real_margin_from_the_screen_edge`.
+  A bare `Presence` is read by qmltestrunner as a test-*function* name, matches nothing,
+  and exits non-zero without running anything.
 
 **Fixture facts you need for this plan** (all verified against `tests/ui/prepare.py`, 2026-09-18):
 - `Style.space(12)` is rewritten to the literal `12`, so **`card.pad` is exactly 12** in the UI suite. Every number below depends on that.
 - `PanelWindow` becomes a plain `Item`, and `anchors { top: true; … }` becomes `width: 1200; height: 800` (`prepare.py:70`). That is a constant binding, not a binding to anything — assigning `view.testPanel.width = 1920` overwrites it cleanly. **No change to `prepare.py` is required by this plan**, which matters: it is shared by seven suites.
 - `SoftShadow.qml` is replaced by a stub that **already declares** `target`, `radius`, `blur`, `offset` and `color` (`prepare.py:243`). Adding `blur:` and `offset:` at the card's use site therefore cannot break the fixture. The stub draws nothing, so **no offscreen test can assert anything about the shadow** — it is covered by the manual sweep in Task 4 only.
-- `root` exposes `testPanel`, `testCard`, `testFlick`, `testCanvas` aliases.
+- `root` exposes `testPanel`, `testCard`, `testFlick`, `testCanvas` and `testHintRow` aliases (`prepare.py:72-88`). There is **no** alias for `hintBox` (the Column); with `hintsExpanded` false the Column's implicitWidth is the first tier's, so `testHintRow` is the correct proxy.
 
 **Gotcha — Qt 6.4 on CI** rejects legacy reserved words as identifiers (`float`, `int`, `long`, `char`, `byte`, `double`, `boolean`, `final`, `native`). Check `gh pr checks` after every push.
 
@@ -55,8 +58,12 @@ Append to `tests/tst_layout.qml`, inside the `TestCase`:
     // a 1920-logical one (a 4K panel at 2x — the commonest laptop logical width there is).
     function test_screen_margin_is_five_percent_with_a_floor() {
         compare(Logic.screenMargin(1920), 96, "4K at 2x: the reported case")
-        compare(Logic.screenMargin(2048), 102, "2560 at 1.25x: rounds down from 102.4")
+        compare(Logic.screenMargin(2048), 102, "2560 at 1.25x: 102.4 rounds down")
         compare(Logic.screenMargin(1080), 54, "the vertical axis uses the same function")
+        // THE case that discriminates Math.round from Math.floor. Every other width above is
+        // either exact (1920 x 0.05 = 96) or rounds the same way under both (102.4, 54.0), so
+        // without this line a floor() implementation passes the whole function.
+        compare(Logic.screenMargin(1919), 96, "95.95 rounds UP; flooring would give 95")
     }
     // The floor is what keeps a genuinely narrow screen behaving as it does today rather than
     // losing its margin entirely: 5% of 200 is 10, less than the 16 the old constants used.
@@ -75,7 +82,7 @@ Append to `tests/tst_layout.qml`, inside the `TestCase`:
     }
 ```
 
-**What these distinguish:** the first fails if the fraction or the rounding is wrong (`Math.floor` instead of `Math.round` turns 102.4 into 102 *coincidentally* but 1920×0.05 = 96 exactly, so `1080 → 54` is the case that discriminates rounding). The second fails if the floor is missing or applied after rounding. The third fails if the guard is missing — and it is the one that matters most, because its failure mode is an invisible overlay that still takes keyboard focus, not a visible error.
+**What these distinguish:** the first fails if the fraction is wrong, and — only via the 1919 case — if `Math.floor` were used instead of `Math.round`. Note carefully that 1920, 2048 and 1080 all produce the *same* answer under both, so they prove nothing about rounding; 1919 → 95.95 is the only line in the group that does. The second fails if the floor is missing or applied after rounding. The third fails if the guard is missing — and it is the one that matters most, because its failure mode is an invisible overlay that still takes keyboard focus, not a visible error.
 
 - [ ] **Step 2: Run it to verify it fails**
 
@@ -152,7 +159,12 @@ Create `tests/ui/presence.qml`:
 ```qml
 import QtQuick
 import QtTest
-import "../logic.js" as Logic
+// NOT "../logic.js". prepare.py writes logic.js into the fixture root beside the copied suite
+// (prepare.py:129), so the parent directory is /tmp and the import fails with
+// `Script file:///tmp/logic.js unavailable`. The flat form is what prepare.py's own config stub
+// uses (prepare.py:203). This suite is the FIRST UI suite to import logic.js, which is why the
+// path had never been exercised.
+import "logic.js" as Logic
 
 // Offscreen UI suite for the card-presence spec (docs/specs/2026-09-18-card-presence-design.md).
 // The fixture (tests/ui/prepare.py) runs the real Overview with the compositor replaced by a
@@ -185,11 +197,12 @@ TestCase {
     // `mons` is a list of monitors; each gets `perMon` workspaces, numbered consecutively.
     // The panel is sized BEFORE open() so the first rebuild already sees the real width:
     // availCanvasW is what feeds Logic.layout's availW, and open() rebuilds once immediately.
-    function seed(mons, perMon) {
+    // panelW/panelH default to 1920x1080; the width-cap test overrides them.
+    function seed(mons, perMon, panelW, panelH) {
         view = createTemporaryObject(overview, tc)
         verify(view)
-        view.testPanel.width = 1920
-        view.testPanel.height = 1080
+        view.testPanel.width = panelW === undefined ? 1920 : panelW
+        view.testPanel.height = panelH === undefined ? 1080 : panelH
         var wss = [], id = 1
         for (var m = 0; m < mons.length; m++)
             for (var k = 0; k < perMon; k++, id++)
@@ -221,6 +234,35 @@ TestCase {
                "content " + view.testFlick.contentWidth + " must fit viewport " + view.testFlick.width)
     }
 
+    // maxCardW's ONLY coverage. The three tests above cannot reach it: canvas.implicitWidth is
+    // bounded by availCanvasW, which is itself maxCardW - 2*pad, so the width cap can never bind
+    // from grid width alone — leave maxCardW at its old `- 16` and every assertion above still
+    // passes (verified by review, 2026-09-18). The one thing that CAN push the card past the cap
+    // is the hint row, which has its own implicitWidth and is deliberately allowed to widen a
+    // narrow card so the eight key hints are not clipped.
+    //
+    // 520 is a starting point, not a measured constant: it assumes the hint row is wider than a
+    // 3-column grid at this size. The precondition below is what makes the test honest — if the
+    // hints do not actually exceed the canvas, this test proves nothing and says so, rather than
+    // passing for the wrong reason. If it trips, lower the panel width until they do.
+    function test_the_card_width_cap_binds_and_still_respects_the_margin() {
+        var panelW = 520
+        seed([makeMon("eDP-1", 0)], 5, panelW, 1080)
+        var margin = Logic.screenMargin(panelW)          // max(16, 26) = 26
+        // Fixture precondition: the cap path must genuinely be the one under test. testHintRow is
+        // the first hint tier (prepare.py:88); with hintsExpanded false the Column's implicitWidth
+        // is that row's, so it is the right proxy for what pushes card.implicitWidth.
+        verify(view.testHintRow.implicitWidth > view.testCanvas.implicitWidth,
+               "hints (" + view.testHintRow.implicitWidth + ") must exceed canvas ("
+               + view.testCanvas.implicitWidth + ") or this test exercises nothing")
+        // The margin claim…
+        verify(view.testCard.width <= panelW - 2 * margin,
+               "card is " + view.testCard.width + ", must be <= " + (panelW - 2 * margin))
+        // …and the discriminator: the card must sit EXACTLY on the cap. With maxCardW left at
+        // `panel.width - 16` the card would be 504 here, not 468.
+        compare(view.testCard.width, panelW - 2 * margin, "maxCardW must be what is binding")
+    }
+
     // The vertical margin's only coverage. maxCardH does not bind in ordinary layouts, so an
     // unwired height binding would go unnoticed until someone docked a third monitor.
     function test_a_tall_layout_respects_the_vertical_margin() {
@@ -247,9 +289,12 @@ cp "$src/tests/ui/presence.qml" "$fixture/tst_presence_ui.qml"
 - [ ] **Step 2: Run it to verify it fails**
 
 ```bash
-bash tests/ui/run.sh Presence
+bash tests/ui/run.sh Presence::test_the_card_keeps_a_real_margin_from_the_screen_edge
 ```
-Expected: `test_the_card_keeps_a_real_margin_from_the_screen_edge` FAILs with `card is 1900, must be <= 1728`. That exact number is the proof the suite is measuring the real bug — **if it reports 1200-ish, the panel resize did not take and `view.testPanel.width = 1920` needs fixing before anything else in this task means anything.** The other two tests may pass or fail; only this one is diagnostic at this step.
+(Qualified `TestCase::function`, not a bare `Presence` — that selector matches no function and
+exits non-zero without running anything, which reads exactly like a passing run that did nothing.)
+
+Expected: FAIL with `card is 1900, must be <= 1728`. That exact number is the proof the suite is measuring the real bug — **if it reports 1200-ish, the panel resize did not take and `view.testPanel.width = 1920` needs fixing before anything else in this task means anything.** The other two tests may pass or fail; only this one is diagnostic at this step.
 
 - [ ] **Step 3: Wire all three bindings**
 
@@ -269,9 +314,11 @@ and the two card caps (around lines 1463-1464):
 
 ```qml
             // Cap the card to the screen so the Flickable viewport can be smaller than the
-            // content. With availCanvasW taking the same margin, the width cap is a backstop
-            // that only binds in the degenerate narrow-screen case; the HEIGHT cap does real
-            // work whenever there are enough monitor groups to overflow.
+            // content. canvas.implicitWidth is already bounded by availCanvasW (= this minus
+            // 2*pad), so the WIDTH cap never binds on grid width — the only thing that reaches
+            // it is the hint row, which is deliberately allowed to widen a narrow card so the
+            // key hints are not clipped. The HEIGHT cap does real work whenever there are enough
+            // monitor groups to overflow.
             readonly property real maxCardW: panel.width  > 0 ? panel.width  - 2 * Logic.screenMargin(panel.width)  : 1616
             readonly property real maxCardH: panel.height > 0 ? panel.height - 2 * Logic.screenMargin(panel.height) : 900
 ```
@@ -281,7 +328,7 @@ and the two card caps (around lines 1463-1464):
 ```bash
 mise run test
 ```
-Expected: all three Presence tests PASS, and **every existing suite still passes**. Pay attention to `Drag`, `Actions` and `Monitors` — they run at the fixture's default 1200×800, where `screenMargin(1200)` = 60 rather than the old 16, so cell widths shift and any test asserting an absolute canvas or card coordinate will move with them. If one fails, it is reporting a genuine coordinate change, not a regression: re-derive its expected value rather than reverting the binding.
+Expected: all four Presence tests PASS, and **every existing suite still passes**. Pay attention to `Drag`, `Actions` and `Monitors` — they run at the fixture's default 1200×800, where `screenMargin(1200)` = 60 rather than the old 16, so cell widths shift and any test asserting an absolute canvas or card coordinate will move with them. If one fails, it is reporting a genuine coordinate change, not a regression: re-derive its expected value rather than reverting the binding.
 
 - [ ] **Step 5: Commit**
 
