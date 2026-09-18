@@ -576,6 +576,18 @@ TestCase {
         keyClick(Qt.Key_Escape)
         compare(view.testCard.hintSpace, before)
     }
+    // Distinguishes: hintSpace weighing the hint tiers by their own implicit size regardless of
+    // config.hint. An invisible item keeps its implicitHeight in QML, so a second tier left
+    // expanded from an earlier `?` (while hints were on) must not keep inflating the budget once
+    // hints are switched off — nothing on screen would explain the extra space.
+    function test_hints_off_ignores_a_leftover_expanded_hint_tier() {
+        keyClick("?")
+        wait(20)   // let hintBox's Column settle on the expanded (two-tier) size
+        view.testConfig.hint = false
+        type("s")
+        compare(view.testCard.hintSpace, view.testBar.implicitHeight + 8,
+                "budget must match the bar alone, not a hidden expanded tier")
+    }
     // Task 4 review carry-forward: applyTiles' update-branch row must never carry
     // matched/selectedMatch, or every settle tick would `set` them false-then-true again and
     // restart the fade Behaviors even though nothing about the match changed.

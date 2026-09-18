@@ -345,3 +345,66 @@ in (`WindowTile.appear`, skipped during the entrance and the open settle); a clo
 tile vanishes at once.
 Give the layer a `no_anim` rule so the compositor does not fade it a second time (README).
 Design: `docs/specs/2026-09-10-motion-design.md`.
+
+## Actions: target, cursor, close, menu (2026-09-17)
+
+A single target rule shared by every action, a Tab-driven window cursor, Ctrl+W, a right-click
+context menu on tiles/wells/badges (Close, Float/Tile, Fullscreen/Exit, Lock/Unlock, Move to
+‹monitor›, Swap with ‹monitor›, Close all windows), and a two-tier hint row toggled by `?`.
+Design: `docs/specs/2026-09-15-actions-design.md`.
+
+- **Pointer liveness lives in scene coordinates, not canvas ones.** `Logic.target(input)` prefers
+  a live pointer (the tile or well under it) over the keyboard target (a find match, else the Tab
+  cursor, else the selected workspace). Liveness itself is tracked by a `HoverHandler` on the
+  Flickable viewport recording `point.scenePosition`, because the canvas moves under a stationary
+  pointer during edge/wheel scrolling, a card resize and the entrance animation — canvas
+  coordinates would read that motion as "the user moved the mouse" and hijack the keyboard target
+  mid-scroll. Canvas coordinates are derived from the scene point only at resolve time.
+- **Which keys clear liveness is deliberately uneven.** Navigation and query keys (arrows, digits,
+  Tab/Shift+Tab, Esc, Backspace, typed text, `Ctrl+S`, `Ctrl+L`, `?`) clear it on entry — they are
+  the keyboard asking for the wheel back. Action keys (Ctrl+W, Enter) read liveness as it stands
+  and leave it alone, because an action means "do this to what I'm pointing at", not "I am on the
+  keyboard now". A lone modifier press touches neither: if `Ctrl` alone cleared liveness, hovering
+  a tile and pressing Ctrl+W could never work, because the modifier half of the chord would go
+  stale before the letter arrived.
+- **A close is a request, not a fact.** The app may prompt, delay or refuse it, and the window
+  stays in the model until Hyprland reports it gone. `pendingCloses` (address → deadline, the same
+  1.8 s shape as the drag and fullscreen pending maps) dims the tile, drops it from Tab's cycle
+  order, and turns a second Ctrl+W on it into a no-op instead of a duplicate dispatch — without
+  it, a refused close would look identical to a live window and a repeat press would just resend
+  the request.
+- **The menu lives at panel level, not inside the canvas.** The Flickable clips its contents, so a
+  canvas-level menu opened near the bottom of a scrolled workspace list would be cut off by the
+  viewport edge before it could nudge itself back on screen. Panel level sees the whole surface,
+  so it can always place itself fully inside it.
+- **Every menu item names the state it will set, never a toggle** (`float`/`tile`,
+  `lock`/`unlock`, not "toggle float"), so an item built from a snapshot can never do the opposite
+  of its own label if the state changed underneath it. That costs something: a toggle row's id is
+  exactly what changes the moment its state changes — `float` becomes `tile` as soon as the window
+  floats — and a state change is precisely what triggers the rebuild that redraws the menu. An id
+  search therefore fails on the rows that most need their highlight kept. The menu matches by id
+  first and falls back to the pre-refresh index clamped into the new list; id-matching still runs
+  first because a workspace menu's Move/Swap rows genuinely appear and disappear with the monitor
+  count, shifting every row below them.
+- **Move is offered whether or not the workspace is active on its monitor; Swap only when it is.**
+  This reads like an inconsistency until you look at what the compositor actually does:
+  `swap_monitors` exchanges whatever each monitor is *currently showing* — it has no notion of "a
+  hidden workspace", only "what's on screen right now". Offering Swap on a workspace that is not
+  active on its monitor would silently swap two workspaces other than the ones named in the menu.
+  Move has no such trap: it names the workspace being moved directly, hidden or not.
+- **A right click cancels an in-flight left-button drag, and nothing in QML can stop it.** Verified
+  against Qt 6.11.2 with a minimal probe: a `MouseArea`'s exclusive grab is unconditionally
+  cancelled the instant a second accepted button completes its own press-release cycle while the
+  first is still held, regardless of `drag.target` or which item accepts the second button. Doing
+  it properly would mean moving the tile drag off `MouseArea`/`drag.target` onto
+  `DragHandler`/`TapHandler` — a rewrite of the drag machinery, out of scope here. What the code
+  guarantees instead: the grab cancellation runs the existing `onCanceled` → `endDrag()` path, so
+  the tile returns cleanly, no drop is submitted, and no menu opens. Right-click-cancels-a-drag is
+  also a common enough convention elsewhere that this reads as a feature, not a glitch.
+
+**Unverified on this machine.** The Move/Swap compositor semantics above are read from the
+0.56.2 source (`CWorkspacePlacementController`), not observed — this machine has one monitor, and
+the live probe recorded that and skipped both cases by design rather than fabricate a result.
+Whether Hyprland's own workspace lookup accepts the `special:…` name form (which Close all on the
+scratchpad row depends on) has likewise never been probed; if it doesn't, that row closes nothing
+and reports "workspace not found" — wrong, but inert and visible, never silent or destructive.

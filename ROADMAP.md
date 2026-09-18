@@ -13,7 +13,10 @@ refresh, selection by workspace id, Lua behaviour suite in CI. Find (2026-09-11)
 fuzzy window search, see docs/specs/2026-09-11-find-design.md. Scratchpad row (2026-09-12):
 Ctrl+S shows special:scratchpad as a trailing row, see docs/specs/2026-09-12-scratchpad-design.md.
 Workspace lock (2026-09-12): Ctrl+L arms a workspace's windows black in every screen capture,
-see docs/specs/2026-09-12-lock-design.md.
+see docs/specs/2026-09-12-lock-design.md. Actions (2026-09-17): a single target rule, a
+Tab-driven window cursor, Ctrl+W, and a right-click context menu (Close, Float/Tile,
+Fullscreen/Exit, Lock/Unlock, Move/Swap monitors, Close all windows), plus a two-tier `?` hint
+row, see docs/specs/2026-09-15-actions-design.md.
 
 ## Next steps
 
@@ -67,6 +70,17 @@ Type any letter to fuzzy-filter windows by class and title; see
 `Ctrl+L` arms the selected workspace for screen sharing; see
 `docs/specs/2026-09-12-lock-design.md`.
 
+### 10. ~~Actions: target, cursor, close, menu~~ ✅ done (2026-09-17), two things unverified
+Tab cursor, Ctrl+W, right-click menu (window and workspace actions); see
+`docs/specs/2026-09-15-actions-design.md`. Left open, both requiring a check this single-monitor
+dev machine cannot do:
+- [ ] Move/Swap between monitors, on a real two-monitor rig — the code follows
+      `CWorkspacePlacementController` as read from the 0.56.2 source, but the live probe has one
+      monitor and skipped both cases by design.
+- [ ] Whether `hl.get_workspace()` accepts the `special:…` name form, which Close all on the
+      scratchpad row depends on — unprobed; if it's rejected, that row closes nothing and reports
+      "workspace not found" instead of silently doing the wrong thing.
+
 ## Maintenance gotchas (verified in-session)
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell
   rescanPlugins` reloads the registry but NOT the live QML component.
@@ -94,3 +108,14 @@ Type any letter to fuzzy-filter windows by class and title; see
 - Coalesced refresh: an event while the settle timer runs *owes* a refresh on the next tick.
   Never skip it — a request already in flight cannot contain the change the event announces
   (the nested-compositor un-fullscreen case catches this).
+- **Every new compositor chunk must raise the count guard in `tests/lua-check.sh`** (currently 23)
+  — it fails the build if fewer chunks than expected parse, which is the only thing standing
+  between a chunk that silently failed to generate and a green test run.
+- **Right-button presses must stay out of the drag release path.** `onReleased` submits a drop or
+  a click only for `Qt.LeftButton`; treating every non-middle release as a possible drop (the
+  pre-actions behaviour) would let a right release during a left drag submit a drop instead of
+  opening a menu.
+- **A mock that doesn't reproduce the side effect a chunk exists to undo can't test that chunk's
+  ordering.** The Lua mock's `window.float` was extended to actually move the active window onto
+  the floated window, because `restoreFocusLua`'s whole job is moving focus back — a mock that
+  leaves focus alone gives the ordering nothing to restore and nothing to fail on if it breaks.

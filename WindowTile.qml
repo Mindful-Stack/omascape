@@ -35,6 +35,16 @@ Item {
     property bool dimmed: false
     property color accent: "#88f"
 
+    // Tab cursor (docs/specs/2026-09-15-actions-design.md): the keyboard's window target. It
+    // reuses the find ring rather than adding a second outline — the two can never be shown at
+    // once (a query clears the cursor), so one ring always means "this is the keyboard's window".
+    property bool cursorTarget: false
+
+    // A close was requested and the compositor still reports the window: the app may be prompting
+    // about unsaved work, or may refuse. Dimmed like a non-match so the request is visible,
+    // and skipped by the Tab cycle so a repeated Ctrl+W walks forward.
+    property bool closing: false
+
     // Motion vocabulary handed down by Overview: durations (ms) and easings. Tiles never own
     // a duration of their own.
     required property QtObject motion
@@ -105,7 +115,7 @@ Item {
     transformOrigin: Item.Center
     // Hover raises a tile within its own layer only; dragging is the single global exception.
     z: dragging ? 99999 : tileLayer * 10 + (hh.hovered ? 1 : 0)
-    opacity: (dragging ? dragOpacity : (dimmed ? 0.35 : 1)) * appearOpacity
+    opacity: (dragging ? dragOpacity : ((dimmed || closing) ? 0.35 : 1)) * appearOpacity
     Behavior on scale { enabled: tile.motion.enabled && !appearAnim.running && !priming
         NumberAnimation { duration: tile.motion.fast; easing.type: tile.motion.hover } }
     Behavior on opacity { enabled: tile.motion.enabled && !appearAnim.running && !priming
@@ -209,12 +219,12 @@ Item {
         objectName: "matchOutline"
         anchors.fill: parent
         visible: opacity > 0
-        opacity: (tile.matched && !tile.dropTarget) ? 1 : 0
+        opacity: ((tile.matched || tile.cursorTarget) && !tile.dropTarget) ? 1 : 0
         Behavior on opacity { enabled: tile.motion.enabled
             NumberAnimation { duration: tile.motion.fast; easing.type: tile.motion.hover } }
         color: "transparent"
         radius: 5
-        border.width: tile.selectedMatch ? 2 : 1
+        border.width: (tile.selectedMatch || tile.cursorTarget) ? 2 : 1
         Behavior on border.width { enabled: tile.motion.enabled
             NumberAnimation { duration: tile.motion.fast; easing.type: tile.motion.hover } }
         border.color: tile.accent

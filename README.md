@@ -72,6 +72,11 @@ you, are under [Install](#install).
   placeholder in the overview) can lag a few seconds behind the end of a share: the compositor
   signals sharing per captured frame, so omascape waits out a short grace period before believing a
   share is over, rather than flickering whenever the frames pause.
+- **Actions on the spot.** Right-click a window, an empty workspace, or a workspace's number
+  badge for a menu: close, float/tile, fullscreen, lock the workspace, move or swap it to another
+  monitor, close every window on it. `Tab`/`Shift+Tab` step a keyboard cursor between windows on
+  the selected workspace so `Enter` and `Ctrl+W` can act without touching the mouse. Press `?` for
+  a second row of key hints covering all of this.
 - **Theme-aware.** Pulls the active Omarchy theme's colors and fonts, so it matches the bar
   and re-themes automatically.
 - **Zero idle cost.** The component stays loaded with the shell so open and close can animate,
@@ -195,6 +200,10 @@ Press **SUPER+A**. The overlay opens on your focused monitor.
 | **Middle-click a window**| Close that window                                         |
 | **Click an empty box**   | Jump to that workspace                                    |
 | **Click the ⛶ badge**    | Turn fullscreen off for that window (overview stays open) |
+| **Tab / Shift+Tab** (query empty) | Move a keyboard cursor to the next / previous window on the selected workspace |
+| **Ctrl+W**               | Close the targeted window (hovered, cursored, or the selected find match) |
+| **Right-click** a window, workspace, or its number badge | Open the actions menu — close, float/tile, fullscreen, lock, move/swap monitors, close all |
+| **?**                    | Show / hide a second row of key hints                      |
 | **Type a letter**        | Start a fuzzy find over window class and title             |
 | **Tab / Shift+Tab** (query active) | Cycle matches by rank                             |
 | **↑ ↓ ← →** (query active)         | Move spatially among workspaces that hold a match |
@@ -279,6 +288,9 @@ to create the runtime directory). No packages are installed and nothing is downl
   se.mindfulstack.omascape`.
 - **It opens on the wrong monitor.** Focused-monitor targeting is verified on a single
   display; multi-monitor is still being validated — see `ROADMAP.md`.
+- **Move / Swap to another monitor from the actions menu.** These call Hyprland's own
+  workspace-monitor dispatchers directly, but have only been checked against Hyprland's source,
+  not on real multi-monitor hardware yet — see `ROADMAP.md`.
 
 ---
 

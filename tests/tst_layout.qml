@@ -27,6 +27,33 @@ TestCase {
         return null
     }
 
+    // A workspace bound to no monitor ("monitor": "?" in hyprctl) makes Quickshell hand the
+    // plugin a placeholder monitor of that name with everything zeroed. Its logical size is
+    // 0x0, and 0/0 is NaN: before this was guarded, that NaN aspect flowed into the cell
+    // height, every box and group height in the layout, the canvas and finally the card, which
+    // a Rectangle paints as nothing at all — the overview mapped its surface, took focus and
+    // drew a scrim over an invisible card (found on a real desktop, 2026-09-18).
+    function phantom() {
+        return { name: "?", x: 0, y: 0, width: 0, height: 0, scale: 0, reserved: [0,0,0,0], transform: 0 }
+    }
+    function test_a_monitorless_workspace_never_yields_NaN_geometry() {
+        var r = Logic.layout({ monitors:[edp(), phantom()],
+            workspaces:[{id:1,monitorName:"eDP-1",focused:true,occupied:true},
+                        {id:2,monitorName:"eDP-1",focused:false,occupied:false},
+                        {id:6,monitorName:"?",focused:false,occupied:false}],
+            windows:[], focusedMonitorName:"eDP-1", availW:1632, params:params })
+        verify(isFinite(r.canvasSize.h), "canvas height must be finite, got " + r.canvasSize.h)
+        verify(isFinite(r.canvasSize.w), "canvas width must be finite, got " + r.canvasSize.w)
+        verify(isFinite(r.cell.h), "cell height must be finite, got " + r.cell.h)
+        for (var i = 0; i < r.boxes.length; i++) {
+            var b = r.boxes[i]
+            verify(isFinite(b.h) && b.h > 0, "box " + b.workspaceId + " height " + b.h)
+            verify(isFinite(b.y), "box " + b.workspaceId + " y " + b.y)
+        }
+        for (var g = 0; g < r.groups.length; g++)
+            verify(isFinite(r.groups[g].h), "group " + r.groups[g].monitorName + " height " + r.groups[g].h)
+    }
+
     // wide anchor: availW 1632 => cols 5, cw 320, ch 200 (eDP aspect 1.6)
     function test_cell_size_and_boxes_wide() {
         var r = Logic.layout({ monitors:[edp()],
@@ -827,6 +854,8 @@ TestCase {
         var s = boxById(r, Logic.SCRATCHPAD_ID)
         verify(s !== null, "one box for the scratchpad")
         compare(s.special, "scratchpad")
+        compare(s.synthetic, false, "the scratchpad is never a pad slot")
+        compare(s.active, false, "the scratchpad is never a monitor's activeWorkspace")
         compare(s.w, r.cell.w); compare(s.h, boxById(r, 1).h, "same monitor, same cell height")
         fuzzyCompare(s.x + s.w / 2, r.canvasSize.w / 2, 1, "centred in the row")
         compare(r.groups[1].w, r.canvasSize.w, "the row spans the canvas")
@@ -1087,5 +1116,29 @@ TestCase {
         compare(Logic.lockFrameSurfaceSize(6, 1.333333), 9, "same for a rounded 4/3")
         compare(Logic.lockFrameSurfaceSize(6, NaN), 7, "a nonsense scale degrades to thickness + 1")
         compare(Logic.lockFrameSurfaceSize(6, 0), 7, "and so does a zero scale, which would divide the world by zero")
+    }
+
+    // Distinguishes: layout() dropping the flags menuItems needs. A padded (never-created)
+    // workspace must arrive on its box as synthetic, and the monitor's active workspace as
+    // active — a fixture that builds box records by hand could never catch this.
+    function test_boxes_carry_synthetic_and_active() {
+        var mon = { name: "M", x: 0, y: 0, width: 1920, height: 1080, scale: 1, reserved: [0, 0, 0, 0] }
+        var wss = Logic.padWorkspaces(
+            [{ id: 1, monitorName: "M", focused: true, occupied: true, active: true },
+             { id: 2, monitorName: "M", focused: false, occupied: false, active: false }], 3, "M")
+        var res = Logic.layout({ monitors: [mon], workspaces: wss, windows: [],
+                                 focusedMonitorName: "M", availW: 1600,
+                                 params: { maxCols: 5, minCellW: 140, maxCellW: 380, cellInset: 3,
+                                           cellSpacing: 4, rowSpacing: 8, headerH: 22, groupInset: 6,
+                                           minTileW: 8, minTileH: 6, slotGapTolerance: 24 } })
+        function box(id) {
+            for (var i = 0; i < res.boxes.length; i++) if (res.boxes[i].workspaceId === id) return res.boxes[i]
+            fail("no box for workspace " + id)
+        }
+        compare(box(1).synthetic, false, "a real workspace is not synthetic")
+        compare(box(1).active, true, "workspace 1 is the monitor's active one")
+        compare(box(2).active, false)
+        compare(box(3).synthetic, true, "workspace 3 exists only as a pad slot")
+        compare(box(3).active, false, "a workspace Hyprland never created cannot be active")
     }
 }

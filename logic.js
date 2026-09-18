@@ -178,7 +178,8 @@ function padWorkspaces(workspaces, count, focusedMonitorName) {
     for (var id = 1; id <= count; id++) {
         if (id in monById) continue
         var host = hostFor(id); if (!host) continue
-        out.push({ id: id, monitorName: host, focused: false, occupied: false, synthetic: true })
+        out.push({ id: id, monitorName: host, focused: false, occupied: false, windowCount: 0,
+                   synthetic: true })
     }
     return out
 }
@@ -208,8 +209,16 @@ function layout(input) {
         Math.floor((availW - (cols - 1) * gap) / cols)))
     // Cell height follows each group's own monitor (see the group loop), so the picture is
     // identical whichever screen has focus; `cell.h` reports the focused monitor's for reference.
+    // A monitor whose logical size is not positive is not a screen to draw at scale: Quickshell
+    // hands the plugin a placeholder monitor (every field zeroed) for a workspace Hyprland
+    // reports on no monitor at all, and 0/0 is NaN. Falling back to the default aspect the same
+    // way a missing monitor does keeps the whole layout finite, in the spirit of availW's own
+    // guard above — a NaN here reaches every box, the canvas and the card, and a card with a NaN
+    // height paints nothing at all (found on a real desktop, 2026-09-18). The view drops those
+    // placeholders before they ever get here (Overview.buildInput); this is the floor under it.
     function cellHeightFor(mon) {
-        var aspect = mon ? _monLogical(mon).w / _monLogical(mon).h : (16 / 10)
+        var l = mon ? _monLogical(mon) : null
+        var aspect = (l && l.w > 0 && l.h > 0) ? l.w / l.h : (16 / 10)
         return Math.round(cw / aspect)
     }
     var ch = cellHeightFor(monByName[input.focusedMonitorName])
@@ -240,7 +249,14 @@ function layout(input) {
                 var box = { workspaceId: chunk[c].id, monitorName: name, monFocused: focusedGroup,
                             special: "", x: inset + c * (cw + gap), y: y, w: cw, h: gch,
                             focused: !!chunk[c].focused, occupied: !!chunk[c].occupied,
-                            armed: !!chunk[c].armed, placeholder: !!chunk[c].placeholder }
+                            // How many windows the workspace holds, not merely whether it holds
+                            // any: Close all needs more than one (see workspaceMenuRows).
+                            windowCount: chunk[c].windowCount | 0,
+                            armed: !!chunk[c].armed, placeholder: !!chunk[c].placeholder,
+                            // Menu eligibility (docs/specs/2026-09-15-actions-design.md): Move and
+                            // Swap need a workspace the compositor actually has, and Swap needs it
+                            // to be the one its monitor is showing.
+                            synthetic: !!chunk[c].synthetic, active: !!chunk[c].active }
                 boxes.push(box); boxByWs[box.workspaceId] = box
             }
             var rowW = chunk.length * cw + (chunk.length - 1) * gap
@@ -274,7 +290,11 @@ function layout(input) {
                      special: sws.special, x: inset + Math.round((rowW - 2 * inset - cw) / 2), y: y, w: cw,
                      h: cellHeightFor(monByName[sws.monitorName]),
                      focused: !!sws.focused, occupied: !!sws.occupied,
-                     armed: !!sws.armed, placeholder: !!sws.placeholder }
+                     windowCount: sws.windowCount | 0,
+                     armed: !!sws.armed, placeholder: !!sws.placeholder,
+                     // A special workspace is never a monitor's `activeWorkspace` (it is reported
+                     // separately as `specialWorkspace`), and it is never a pad slot.
+                     synthetic: false, active: false }
         boxes.push(sbox); boxByWs[sbox.workspaceId] = sbox
         y += sbox.h + inset
         sgroup.w = rowW; sgroup.h = y - sgroup.y
@@ -529,6 +549,12 @@ function fullscreenBodyLua(sel, modeExpr) {
     )
 }
 
+// Lua statements that move the cursor back to `curExpr` (an HL.Vec2 or nil). Split out of
+// restoreFocusLua because the workspace chunks restore the cursor but deliberately NOT focus.
+function restoreCursorLua(curExpr) {
+    return 'if ' + curExpr + ' then hl.dispatch(hl.dsp.cursor.move({ x = ' + curExpr + '.x, y = ' + curExpr + '.y })) end'
+}
+
 // Lua statements that re-focus the window `prevExpr` (an HL.Window or nil, read before the
 // change) when the active window is no longer it, then move the cursor back to `curExpr`
 // (an HL.Vec2 or nil). The probe (tests/integration/probe-fullscreen.sh) showed the fullscreen
@@ -543,26 +569,136 @@ function restoreFocusLua(prevExpr, curExpr) {
         '    if a:sub(1, 2) ~= "0x" then a = "0x" .. a end\n' +
         '    hl.dispatch(hl.dsp.focus({ window = "address:" .. a }))\n' +
         '  end\n' +
-        '  if ' + curExpr + ' then hl.dispatch(hl.dsp.cursor.move({ x = ' + curExpr + '.x, y = ' + curExpr + '.y })) end\n' +
+        '  ' + restoreCursorLua(curExpr) + '\n' +
         'end'
     )
 }
 
-// One atomic chunk that turns fullscreen off for `addr`. Focus is left unchanged (re-focused
-// only if the dispatcher moved it) and the cursor is restored. Used by the tile badge. The
-// toggle runs inside pcall so restoreFocusLua still runs (and
-// focus/cursor still land back where they were) even if the dispatcher throws — parity with
-// tiledInsertLua's pcall-wrapped re-tile step.
-function unfullscreenLua(addr) {
+// One atomic chunk that puts `addr` in floating state `floating` (a boolean). An explicit state,
+// never a toggle: a menu row rendered from a snapshot the compositor has since changed must be a
+// no-op, not the opposite of its label. Hyprland maps action "on"/"off" to ENABLE/DISABLE
+// (parseToggleStr) and Actions::floatWindow returns early when the state already matches, so the
+// guard here is belt and braces — but it also keeps the dispatch count assertable in tests.
+// Focus and cursor are restored: the float raises the window and relayouts its workspace, which
+// moves focus (verified in Actions::floatWindow, 0.56.2). The dispatch itself runs inside the
+// inner pcall, but restoreFocusLua is called OUTSIDE it (after `reportLua`), so focus and the
+// cursor still land back where they were even if the dispatcher throws — parity with
+// tiledInsertLua's pcall-wrapped re-tile step and the old unfullscreenLua this replaces.
+function setFloatLua(addr, floating) {
+    var want = floating ? 'true' : 'false'
+    return (
+        'function()\n' +
+        '  local sel = "address:' + addr + '"\n' +
+        '  local prevW, cur = hl.get_active_window(), hl.get_cursor_pos()\n' +
+        '  ' + dispatchGuardLua() + '\n' +
+        '  local ok, err = pcall(function()\n' +
+        '    local w = hl.get_window(sel)\n' +
+        '    if not w then error("window is gone", 0) end\n' +
+        '    if (w.floating == true) ~= ' + want + ' then\n' +
+        '      run(hl.dsp.window.float({ window = sel, action = "' + (floating ? 'on' : 'off') + '" }))\n' +
+        '    end\n' +
+        '  end)\n' +
+        '  ' + reportLua('float') + '\n' +
+        '  ' + restoreFocusLua('prevW', 'cur') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}
+
+// One atomic chunk that leaves `addr` in fullscreen mode `mode` (0 off, 1 maximized, 2 fullscreen)
+// via the idempotent fullscreenBodyLua. Focus is restored because fullscreening a window on the
+// ACTIVE workspace leaves Hyprland 0.56.2 with no active window (probe-fullscreen.sh). The toggle
+// dispatch runs inside the inner pcall, but restoreFocusLua runs OUTSIDE it, so focus and the
+// cursor still land back where they were even if the dispatcher throws — parity with
+// tiledInsertLua's pcall-wrapped re-tile step and the old unfullscreenLua this replaces.
+function setFullscreenLua(addr, mode) {
+    var m = Math.max(0, Math.min(2, mode | 0))
     return (
         'function()\n' +
         '  local prevW, cur = hl.get_active_window(), hl.get_cursor_pos()\n' +
         '  ' + dispatchGuardLua() + '\n' +
         '  local ok, err = pcall(function()\n' +
-        fullscreenBodyLua('"address:' + addr + '"', '0') + '\n' +
+        fullscreenBodyLua('"address:' + addr + '"', String(m)) + '\n' +
         '  end)\n' +
-        reportLua('un-fullscreen') + '\n' +
+        reportLua(m === 0 ? 'un-fullscreen' : 'fullscreen') + '\n' +
         restoreFocusLua('prevW', 'cur') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}
+
+// The tile badge's un-fullscreen is the mode-0 case. Kept as its own name because the badge, the
+// menu and the existing chunk test all refer to it.
+function unfullscreenLua(addr) { return setFullscreenLua(addr, 0) }
+
+// Raw Hyprland events after which the compositor may have moved keyboard focus to a WINDOW,
+// which silently takes it away from this overlay's on-demand layer surface while the picker is
+// still up. Each one is a place Hyprland calls fullWindowFocus/refocus:
+//   closewindow      — the closed window was the focused one (Window.cpp, "refocus on a new window
+//                      if needed"; it logs "ignoring a refocus" otherwise, hence the intermittency)
+//   workspacev2      — a workspace switch focuses that workspace's last window
+//                      (WorkspacePlacementController.cpp)
+//   activespecialv2  — opening a special workspace focuses a window on it
+//   focusedmonv2     — monitor focus moved, taking window focus with it
+// The overlay held focus unconditionally until it became OnDemand (so the other-monitor catcher
+// could receive presses); an exclusive layer could not lose it this way. The answer is not to go
+// back — it is to re-grab (see regrabFocusLua), which the warp does without disturbing pointer
+// routing. Deliberately NOT activewindowv2: focusing the layer can itself emit an activewindow
+// change, and regrabbing on that would chase its own tail.
+function focusStealingEvent(name) {
+    return name === "closewindow" || name === "workspacev2" ||
+           name === "activespecialv2" || name === "focusedmonv2"
+}
+
+// One atomic chunk that re-grants keyboard focus to this overlay's layer surface, by warping the
+// cursor to where it already is.
+//
+// Why this is needed at all: when a window really closes, Hyprland refocuses another one if the
+// closed window was the focused one (Window.cpp, "refocus on a new window if needed" — it logs
+// "ignoring a refocus" otherwise, which is why the symptom is intermittent). Focusing a *window*
+// takes keyboard focus away from an on-demand layer surface, which is what this overlay is, so the
+// overview silently stops receiving keys — mid-Ctrl+W, the next keystroke lands in the window
+// Hyprland just picked.
+//
+// Why a warp fixes it: mouseMoveUnified re-grants keyboard focus to the layer under the pointer
+// whenever its interactivity is not `none` (InputManager.cpp). Warping to the SAME position is
+// deliberate and sufficient — Actions::moveCursor calls warpTo(pos, true), and Hyprland's own
+// simulateMouseMovement has to offset by a pixel specifically to AVOID counting as a refocus, so an
+// unoffset warp does count. Every other action chunk already ends with a cursor restore and so
+// never lost focus; close was the only one that did not, and the only one that did.
+function regrabFocusLua() {
+    return (
+        'function()\n' +
+        '  local cur = hl.get_cursor_pos()\n' +
+        '  ' + restoreCursorLua('cur') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}
+
+// One atomic chunk that closes every window on workspace `wsId`. The list is read INSIDE the
+// compositor (HL.Workspace:get_windows() — a one-based table of HL.Window, verified in
+// LuaWorkspace.cpp and by tests/integration/actions-probe.sh), not passed in, so windows the
+// overview never laid out (a null _tileRect, or a workspace it is not showing) are closed too.
+// Each close is guarded on its own: one window refusing must not stop the rest, and the failures
+// are reported together in one notification rather than one per window.
+function closeAllLua(wsId) {
+    var ws = wsSelector(wsId)
+    return (
+        'function()\n' +
+        '  ' + dispatchGuardLua() + '\n' +
+        '  local failed = {}\n' +
+        '  local ok, err = pcall(function()\n' +
+        '    local w = hl.get_workspace("' + ws + '")\n' +
+        '    if not w or not w.get_windows then error("workspace ' + ws + ' not found", 0) end\n' +
+        '    for _, win in ipairs(w:get_windows() or {}) do\n' +
+        '      local a = tostring(win and win.address or "")\n' +
+        '      if a ~= "" then\n' +
+        '        if a:sub(1, 2) ~= "0x" then a = "0x" .. a end\n' +
+        '        local s, e = pcall(function() run(hl.dsp.window.close({ window = "address:" .. a })) end)\n' +
+        '        if not s then failed[#failed + 1] = a .. ": " .. tostring(e) end\n' +
+        '      end\n' +
+        '    end\n' +
+        '  end)\n' +
+        '  if ok and #failed > 0 then ok, err = false, table.concat(failed, "; ") end\n' +
+        '  ' + reportLua('close all') + '\n' +
         'end'
     ).replace(/\n\s*/g, ' ')
 }
@@ -594,6 +730,54 @@ function floatingMoveLua(addr, targetWs, pos) {
         '  end)\n' +
         '  ' + reportLua('floating move') + '\n' +
         '  ' + restoreFocusLua('prevW', 'cur') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}
+
+// One atomic chunk that moves workspace `wsId` to monitor `monitorName`. What the compositor then
+// does depends on where the workspace was (CWorkspacePlacementController::moveWorkspaceToMonitor,
+// 0.56.2): a hidden workspace arrives hidden and nothing on either screen changes; one that was
+// active on a non-focused monitor also arrives hidden, its old monitor switching to another of its
+// workspaces; one that was active on the FOCUSED monitor becomes the destination's active
+// workspace, takes monitor focus with it and WARPS THE CURSOR to the destination's centre (the Lua
+// dispatcher exposes no noWarpCursor). The chunk warps the cursor back so the pointer never leaves
+// the overview's screen. Focus is deliberately not restored — the compositor's outcome stands.
+function workspaceMoveLua(wsId, monitorName) {
+    var ws = wsSelector(wsId)
+    return (
+        'function()\n' +
+        '  local cur = hl.get_cursor_pos()\n' +
+        '  ' + dispatchGuardLua() + '\n' +
+        '  local ok, err = pcall(function()\n' +
+        '    run(hl.dsp.workspace.move({ monitor = "' + monitorName + '", workspace = "' + ws + '" }))\n' +
+        '  end)\n' +
+        '  ' + reportLua('move workspace') + '\n' +
+        '  ' + restoreCursorLua('cur') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
+}
+
+// One atomic chunk that swaps monitor `monitorA`'s active workspace with monitor `monitorB`'s.
+// `wsId` is the workspace the menu row was drawn for: hl.dsp.workspace.swap_monitors acts on
+// whatever is ACTIVE on monitorA at dispatch time (swapActiveWorkspaces, 0.56.2), and that monitor
+// may have switched workspaces since the last rebuild — so the chunk verifies the identity first
+// and refuses rather than swapping a workspace the user never chose. One dispatcher, so the swap
+// itself can never half-apply.
+function workspaceSwapLua(wsId, monitorA, monitorB) {
+    var ws = wsSelector(wsId)
+    return (
+        'function()\n' +
+        '  local cur = hl.get_cursor_pos()\n' +
+        '  ' + dispatchGuardLua() + '\n' +
+        '  local ok, err = pcall(function()\n' +
+        '    local a = hl.get_active_workspace("' + monitorA + '")\n' +
+        '    if not a or tostring(a.id) ~= "' + ws + '" then\n' +
+        '      error("workspace ' + ws + ' is no longer active on ' + monitorA + '", 0)\n' +
+        '    end\n' +
+        '    run(hl.dsp.workspace.swap_monitors({ monitor1 = "' + monitorA + '", monitor2 = "' + monitorB + '" }))\n' +
+        '  end)\n' +
+        '  ' + reportLua('swap workspaces') + '\n' +
+        '  ' + restoreCursorLua('cur') + '\n' +
         'end'
     ).replace(/\n\s*/g, ' ')
 }
@@ -801,6 +985,199 @@ function navigateMatches(boxes, matchWs, current, dir) {
     var ws = cand[ni].workspaceId
     for (var m = 0; m < matchWs.length; m++) if (matchWs[m] === ws) return m
     return current
+}
+
+// ---- Actions (docs/specs/2026-09-15-actions-design.md) -----------------------------------
+// The subject of an action. Pure: the view resolves the pointer to a tile/well and hands the
+// result in, so this file never touches a delegate or a coordinate system.
+
+// Address of the drawn tile under (px, py), or "". `candidates` are the DISPLAYED rects
+// ({ address, x, y, w, h, z }) the view collects from the delegates — scale already folded in,
+// so a hovered tile hit-tests at the size it is painted. Highest `z` wins; a tie goes to the
+// later candidate, which is the one the Repeater paints on top. The hit test is inclusive on
+// all four edges, so a pointer exactly on the shared border of two abutting tiles counts as
+// inside both and the z-tie rule picks the later one. Unlike `hitWorkspace`/`tiledDropPlan`
+// there is no nearest-rect fallback: an action must never reach a tile the pointer is not
+// actually over.
+function tileAt(candidates, px, py) {
+    var best = null
+    for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i]
+        if (px < c.x || px > c.x + c.w || py < c.y || py > c.y + c.h) continue
+        if (!best || c.z >= best.z) best = c
+    }
+    return best ? best.address : ""
+}
+
+// "Most recent input device wins." A live pointer (see Overview.pointerLive) names what it is
+// over and nothing else — over empty canvas an action has NO target, deliberately: silently
+// falling back to the keyboard would make Ctrl+W close a window the user is not looking at.
+// Otherwise the keyboard: while a query is active the target is the find match and nothing
+// else — a query with no match is a TERMINAL "no target", not a fall-through to the cursor or
+// the selected workspace. Without that, a mistyped search plus Enter would jump to whatever
+// workspace happens to be selected: worse than inert. (Query and cursor cannot both be active
+// in the running overview — setQuery() clears the cursor — so this branch never actually needs
+// to choose between them; it is written terminal anyway so a future refactor cannot reopen the
+// fall-through by "simplifying" it back in.) With no query, the Tab cursor, then the selected
+// workspace.
+function target(input) {
+    if (input.pointerLive) {
+        if (input.pointerTileAddress) return { kind: "window", address: input.pointerTileAddress }
+        if (hasWs(input.pointerWorkspaceId)) return { kind: "workspace", id: input.pointerWorkspaceId }
+        return null
+    }
+    if (input.query && input.query.length)
+        return input.matchAddress ? { kind: "window", address: input.matchAddress } : null
+    if (input.cursorAddress) return { kind: "window", address: input.cursorAddress }
+    if (hasWs(input.selectedId)) return { kind: "workspace", id: input.selectedId }
+    return null
+}
+
+// Next/previous window of workspace `wsId` in reading order (y, then x, then address so the
+// order can never depend on model insertion). `tiles` must be pre-mapped into the shape
+// { address, wsid, x, y } (from raw model rows with wx/wy) so a row cannot collide with a
+// QML delegate's own x/y. `skip` is an address→true map of windows with an outstanding close
+// request — they are not cycle stops, which is what stops a repeated Ctrl+W from landing back on
+// a window it already asked to close. Returns "" when the workspace has no eligible window.
+function cycleWindows(tiles, wsId, current, step, skip) {
+    var list = []
+    for (var i = 0; i < tiles.length; i++) {
+        var t = tiles[i]
+        if (t.wsid !== wsId) continue
+        if (skip && skip[t.address]) continue
+        list.push(t)
+    }
+    if (!list.length) return ""
+    list.sort(function (a, b) {
+        return (a.y - b.y) || (a.x - b.x) || (a.address < b.address ? -1 : a.address > b.address ? 1 : 0)
+    })
+    var idx = -1
+    for (var j = 0; j < list.length; j++) if (list[j].address === current) { idx = j; break }
+    if (idx < 0) return (step > 0 ? list[0] : list[list.length - 1]).address
+    return list[((idx + step) % list.length + list.length) % list.length].address
+}
+
+// Menu highlight movement: wrapping, and from "none" onto the first (down) or last (up) row.
+// Takes the ITEM LIST, not a count, so it can step past a separator (`{ separator: true }`, no
+// id, not hoverable or activatable): the highlight must never land on one, whether arrived at by
+// stepping or by wrapping off either end. `index < 0` ("none") is treated as sitting just before
+// index 0 (stepping down) or just after the last index (stepping up), so the same wrap-and-skip
+// loop below handles every case uniformly.
+function menuNavigate(items, index, step) {
+    var count = items.length
+    if (!(count > 0)) return -1
+    var i = index < 0 ? (step > 0 ? 0 : count - 1)
+                       : ((index + step) % count + count) % count
+    for (var n = 0; n < count; n++) {
+        if (!items[i].separator) return i
+        i = ((i + step) % count + count) % count
+    }
+    return -1   // degenerate: every item is a separator
+}
+
+// Monitor names are interpolated into quoted Lua strings inside the move/swap chunks. Anything
+// outside this alphabet is refused here, in JavaScript, before it can reach a chunk at all —
+// the same defence `validLockSelector` gives the lock chunks.
+var MONITOR_NAME_RE = /^[A-Za-z0-9._-]+$/
+function validMonitorName(name) { return typeof name === "string" && MONITOR_NAME_RE.test(name) }
+
+// Nerd Font glyphs (nf-md-laptop / nf-md-monitor). Internal panels are eDP/LVDS/DSI connectors,
+// everything else is an external screen. Lives here rather than in Overview so `menuItems` can
+// stay pure and the monitor chips and the menu can never disagree about which glyph a monitor gets.
+function monitorGlyph(name) { return /^(eDP|LVDS|DSI)/i.test(name) ? "\u{F0322}" : "\u{F0379}" }
+
+// Lock/Unlock, Move to <monitor>, Swap with <monitor>, Close all windows — the rows that act on
+// a workspace as a CONTAINER. Shared by the workspace-target menu (below) and the window-target
+// menu's group below the separator (docs/specs/2026-09-15-actions-design.md, "The menu",
+// addenda 2026-09-17 and 2026-09-18), so the two can never disagree about what a workspace
+// offers or in what order.
+function workspaceMenuRows(b, monitors) {
+    var out = []
+    out.push(b.armed ? { id: "unlock", label: "Unlock" } : { id: "lock", label: "Lock" })
+    // Monitor operations need a workspace the compositor actually has, on a machine with
+    // somewhere to send it. The scratchpad has no monitor of its own to move between.
+    var others = []
+    if (!b.special && !b.synthetic) {
+        var mons = monitors || []
+        for (var i = 0; i < mons.length; i++) {
+            var n = mons[i] ? mons[i].name : null
+            if (!validMonitorName(n) || n === b.monitorName) continue
+            others.push(n)
+        }
+    }
+    for (var m = 0; m < others.length; m++)
+        out.push({ id: "move:" + others[m], label: "Move to " + others[m], glyph: monitorGlyph(others[m]) })
+    // Swap exchanges the two monitors' ACTIVE workspaces (swapActiveWorkspaces, 0.56.2), so it is
+    // only offered for a workspace its monitor is actually showing.
+    if (b.active)
+        for (var s = 0; s < others.length; s++)
+            out.push({ id: "swap:" + others[s], label: "Swap with " + others[s], glyph: monitorGlyph(others[s]) })
+    // ✎ Close all needs MORE THAN ONE window (2026-09-18), not merely an occupied workspace:
+    // above a single window it is Close wearing a longer label and a confirmation dialog, and
+    // offering both invites picking the heavier one by accident. Last in the group, the furthest
+    // row from the window menu's own Close.
+    if (b.windowCount > 1) out.push({ id: "closeAll", label: "Close all windows" })
+    return out
+}
+
+// The rows a context menu shows for `tgt`. Pure: `ctx` carries the window record
+// (`_windowByAddress`), the box record (`layout()`'s own output — the WINDOW's own workspace
+// box for a window target, ✎ 2026-09-17, not necessarily the selected one) and the monitor
+// list, all re-read on every rebuild, so an open menu follows the compositor rather than a
+// snapshot. Anything that does not apply is HIDDEN, never greyed, and every id names the state
+// it will set — never a toggle, so a stale activation is at worst a no-op inside the compositor.
+function menuItems(tgt, ctx) {
+    if (!tgt || !ctx) return []
+    var out = []
+    if (tgt.kind === "window") {
+        var w = ctx.win
+        if (!w) return []                               // gone: the caller dismisses on an empty list
+        out.push({ id: "close", label: "Close" })
+        out.push(w.floating ? { id: "tile", label: "Tile" } : { id: "float", label: "Float" })
+        out.push(fullscreenMode(w) > 0 ? { id: "unfullscreen", label: "Exit fullscreen" }
+                                       : { id: "fullscreen", label: "Fullscreen" })
+        // ✎ A window's menu also carries its workspace's actions, below a separator — Close all
+        // among them (2026-09-18, reversing the 2026-09-17 addendum that put it beside Close):
+        // grouped by SCOPE, so nothing acting on every window sits among the rows acting on this
+        // one. Needs the window's OWN workspace box, which may be null (the workspace vanished a
+        // settle tick before this refresh) — then there is simply no group. Lock/Unlock is
+        // unconditional (see workspaceMenuRows), so whenever `wb` exists the group is non-empty
+        // and the separator never has nothing under it.
+        var wb = ctx.box
+        if (wb) {
+            var wsRows = workspaceMenuRows(wb, ctx.monitors)
+            if (wsRows.length) {
+                out.push({ id: "separator", separator: true })
+                out = out.concat(wsRows)
+            }
+        }
+        return out
+    }
+    var b = ctx.box
+    if (!b) return []
+    return workspaceMenuRows(b, ctx.monitors)
+}
+
+// A press of a modifier key ALONE. It belongs to no class: it must not drive the menu (Ctrl then
+// W would otherwise dismiss and then close a window) and must not clear pointer liveness (hover +
+// Ctrl+W could never work, because the Ctrl press would go stale before the W arrived).
+function isModifierKey(key) {
+    return key === 0x01000020 ||   // Qt.Key_Shift
+           key === 0x01000021 ||   // Qt.Key_Control
+           key === 0x01000023 ||   // Qt.Key_Alt
+           key === 0x01000022 ||   // Qt.Key_Meta
+           key === 0x01000024 ||   // Qt.Key_CapsLock
+           key === 0x01001103      // Qt.Key_AltGr
+}
+
+// An ACTION key reads pointer liveness and leaves it unchanged — "do this to what I am pointing
+// at", not "I am on the keyboard now" — so a second Ctrl+W cannot silently switch from the
+// hovered window to the Tab cursor. Everything else is navigation or query intent and clears
+// liveness on entry. `chord` is the event's Ctrl/Alt/Meta mask.
+function isActionKey(key, chord, ctrlMask) {
+    if (chord === ctrlMask && key === 0x57) return true            // Ctrl+W (Qt.Key_W)
+    if (chord) return false
+    return key === 0x01000004 || key === 0x01000005                // Return, Enter
 }
 
 // ---- Scratchpad (docs/specs/2026-09-12-scratchpad-design.md) ---------------------------

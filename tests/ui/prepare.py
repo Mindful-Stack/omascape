@@ -86,6 +86,9 @@ qml = qml.replace('id: root', '''id: root
     // id breaks every UI suite at once with "Invalid alias reference", not just Scratchpad's.
     property alias testHintModel: hintKeys.model
     property alias testHintRow: hint
+    // Compile-time dependency on the `hintKeys2` id in Overview.qml: renaming or removing that
+    // id breaks every UI suite at once with "Invalid alias reference", not just Lock's.
+    property alias testHintModel2: hintKeys2.model
     property var testScreens: []
     property QtObject compositor: QtObject {
         property var monitors: ({values: []})
@@ -172,6 +175,8 @@ for edge in ('left', 'right'):
 ''' + fill_v(edge), 'LockFrame %s strip anchors + surface + paint' % edge)
 (dest / 'LockFrame.qml').write_text(frame)
 (dest / 'FindBar.qml').write_text((source / 'FindBar.qml').read_text())   # no shell imports: verbatim
+(dest / 'HintCap.qml').write_text((source / 'HintCap.qml').read_text())   # no shell imports: verbatim
+(dest / 'ContextMenu.qml').write_text((source / 'ContextMenu.qml').read_text())  # no shell imports: verbatim
 # Shell-only helpers: the config loader needs Quickshell.Io, the shadow a GPU shader.
 # `motionEffective` is writable here so tests can flip the policy without a compositor.
 # `workspaces` defaults to 0 (no padding) so the fixture shows exactly the compositor's
@@ -238,3 +243,52 @@ keep_loaded = json.loads((source / 'manifest.json').read_text()).get('keepLoaded
 (dest / 'SoftShadow.qml').write_text(
     'import QtQuick\nItem { property Item target: parent; property real radius: 0; property real blur: 0\n'
     '       property var offset: null; property color color: "black" }\n')
+# Ui/ConfirmDialog stub: the real component (/usr/share/omarchy/shell/Ui/ConfirmDialog.qml) imports
+# qs.Commons for its theme (Color/Style/Util), which the offscreen fixture has none of, so it needs
+# the same "keep the behaviour, drop the shell wiring" treatment as OmascapeConfig/OmascapeLocks
+# above. Reproduced FAITHFULLY: `opened`/`message`/`confirmText`/`cancelText`/`selectedIndex`, the
+# `canceled()`/`confirmed()` signals, and `handleKey(event)` with the exact same key set and the
+# same return value (true only when it actually consumed the key) — this plugin drives the dialog
+# entirely through handleKey from its one key catcher, so a stub whose key handling diverges would
+# let a UI test pass against behaviour the real dialog does not have. Also reproduced: the outer
+# scrim's "click anywhere cancels" MouseArea, since it needs no theme and this plugin's own
+# "press outside dismisses" convention (the context menu's catcher) makes the same shape worth
+# covering here too. NOT reproduced: the real component's card layout (BorderSurface/SoftShadow),
+# qs.Commons theme colours, or the two Cancel/Confirm buttons' own hover-to-select-index and
+# click-to-confirm/cancel hit areas — nothing here needs to click a specific button by position,
+# only handleKey and the scrim. The theme properties (background/foreground/etc.) are kept as
+# inert properties only so a binding to them from Overview.qml does not fail to resolve.
+(dest / 'ConfirmDialog.qml').write_text(
+    'import QtQuick\n'
+    'Item {\n'
+    '    id: root\n'
+    '    property bool opened: false\n'
+    '    property string message: ""\n'
+    '    property string cancelText: "Cancel"\n'
+    '    property string confirmText: "Confirm"\n'
+    '    property int selectedIndex: 1\n'
+    '    property color background: "#222"\n'
+    '    property color foreground: "#ddd"\n'
+    '    property color scrim: "#000"\n'
+    '    property color selectedBackground: "#444"\n'
+    '    property color selectedText: "#fff"\n'
+    '    property string fontFamily: ""\n'
+    '    property int cornerRadius: 8\n'
+    '    signal canceled()\n'
+    '    signal confirmed()\n'
+    '    function handleKey(event) {\n'
+    '        if (!root.opened) return false\n'
+    '        if (event.key === Qt.Key_Escape) { root.canceled(); return true }\n'
+    '        else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right ||\n'
+    '                 event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {\n'
+    '            root.selectedIndex = root.selectedIndex === 0 ? 1 : 0\n'
+    '            return true\n'
+    '        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {\n'
+    '            if (root.selectedIndex === 0) root.canceled(); else root.confirmed()\n'
+    '            return true\n'
+    '        }\n'
+    '        return false\n'
+    '    }\n'
+    '    visible: opened\n'
+    '    MouseArea { anchors.fill: parent; enabled: root.opened; onClicked: root.canceled() }\n'
+    '}\n')

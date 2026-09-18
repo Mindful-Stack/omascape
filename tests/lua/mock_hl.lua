@@ -51,6 +51,13 @@ function M.new(opts)
   hl.__cursor = { x = 5, y = 6 }
   hl.__active_special = opts.active_special or nil          -- { name = "special:…" } or nil
   function hl.get_active_special_workspace() return hl.__active_special end
+  hl.__active_by_monitor = opts.active_by_monitor or {}
+  -- hl.get_active_workspace(monitorSelector) — with no selector it answers the focused monitor's,
+  -- which is what the existing callers use.
+  function hl.get_active_workspace(mon)
+    if mon == nil then return hl.__active_workspace end
+    return hl.__active_by_monitor[mon]
+  end
 
   local function byAddress(sel)
     local a = sel:match("^address:(.+)$")
@@ -59,7 +66,6 @@ function M.new(opts)
   function hl.get_window(sel) return byAddress(sel) end
   function hl.get_active_window() return hl.__active_window end
   function hl.get_cursor_pos() return { x = hl.__cursor.x, y = hl.__cursor.y } end
-  function hl.get_active_workspace() return hl.__active_workspace end
   function hl.get_workspace(id)
     return hl.__workspaces[tostring(id)] or { fullscreen_window = nil, fullscreen_mode = 0 }
   end
@@ -77,6 +83,13 @@ function M.new(opts)
 
   -- Rules: named handles with enable state, so tests can assert "one handle per selector".
   hl.__window_rules, hl.__layer_rules, hl.__subs = {}, {}, {}
+  -- Addresses closed via window.close, in order (Task 12 asserts "closed every window the
+  -- workspace listed" — meaningful only because the dispatcher below actually drops them).
+  hl.__closed = {}
+  -- Every workspace.move/swap_monitors dispatch, in order. Ownership only: which workspace each
+  -- monitor then SHOWS is the compositor's business (moveWorkspaceToMonitor, 0.56.2) and is
+  -- asserted on the nested rig, not here.
+  hl.__moved, hl.__swapped = {}, {}
   -- `__set_calls` counts every set_enabled CALL on this rule, including one that throws: the
   -- observer's grace timer (below) is only worth anything if the flapping edges produce no calls
   -- at all, so "how many times was the compositor asked to toggle this rule" is the property the
@@ -179,8 +192,10 @@ function M.new(opts)
     focus = d("focus"),
     cursor = { move = d("cursor.move") },
     window = { float = d("window.float"), move = d("window.move"), fullscreen = d("window.fullscreen"),
+               close = d("window.close"),
                bring_to_top = d("window.bring_to_top"), alter_zorder = d("window.alter_zorder") },
-    workspace = { toggle_special = d("workspace.toggle_special") },
+    workspace = { toggle_special = d("workspace.toggle_special"), move = d("workspace.move"),
+                  swap_monitors = d("workspace.swap_monitors") },
   }
   function hl.dispatch(desc)
     hl.__log[#hl.__log + 1] = desc
@@ -193,7 +208,22 @@ function M.new(opts)
     if desc.name == "focus" then
       hl.__active_window = w or hl.__active_window
     elseif desc.name == "window.float" and w then
-      w.floating = not w.floating
+      -- Absolute, not a toggle: Hyprland's parseToggleStr maps "on"/"off" to ENABLE/DISABLE and
+      -- Actions::floatWindow returns early when the state already matches (probed live, see
+      -- tests/integration/actions-probe.sh). Modelled here so a chunk that skips a redundant
+      -- dispatch and one that sends it are distinguishable.
+      if a.action == "on" then w.floating = true
+      elseif a.action == "off" then w.floating = false
+      else w.floating = not w.floating end
+      -- The float raises the window and relayouts its workspace, which moves focus onto it. This
+      -- is what gives restoreFocusLua something to restore; without it the "focus restored"
+      -- assertions below would pass against a chunk that never restored anything.
+      hl.__active_window = w
+    elseif desc.name == "window.close" and w then
+      -- A real close removes the window; "closed every window the workspace listed" is the
+      -- property Task 12 asserts, and it is only meaningful if the mock actually drops them.
+      hl.__windows[w.address] = nil
+      hl.__closed[#hl.__closed + 1] = w.address
     elseif desc.name == "window.move" and w then
       if a.workspace then
         local n = tonumber(a.workspace)
@@ -216,6 +246,22 @@ function M.new(opts)
       local name = "special:" .. tostring(desc.args)
       if hl.__active_special and hl.__active_special.name == name then hl.__active_special = nil
       else hl.__active_special = { name = name } end
+    elseif desc.name == "workspace.move" then
+      -- Ownership only: which workspace each monitor then SHOWS is the compositor's business
+      -- (moveWorkspaceToMonitor, 0.56.2) and is asserted on the nested rig, not here.
+      hl.__moved[#hl.__moved + 1] = { workspace = a.workspace, monitor = a.monitor }
+      -- Stand-in for the real compositor's cursor warp to the destination monitor's centre
+      -- (moveWorkspaceToMonitor, 0.56.2 — no noWarpCursor from Lua): a fixed, clearly-not-the-
+      -- fixture's-starting-position value, so a chunk that captures the cursor position AFTER
+      -- this dispatch (instead of before) restores the warped value instead of undoing it, and
+      -- the "cursor restored" assertion can actually tell the two orderings apart.
+      hl.__cursor = { x = 9999, y = 9999 }
+    elseif desc.name == "workspace.swap_monitors" then
+      hl.__swapped[#hl.__swapped + 1] = { monitor1 = a.monitor1, monitor2 = a.monitor2 }
+      -- Same reasoning as workspace.move above (swapActiveWorkspaces also warps the cursor to
+      -- the now-active workspace, 0.56.2): warp here too, so a chunk that captures the cursor
+      -- AFTER dispatching instead of before restores the warp instead of undoing it.
+      hl.__cursor = { x = 9999, y = 9999 }
     end
     return { ok = true, pass_event = false }
   end
