@@ -302,7 +302,14 @@ Spec: `docs/specs/2026-09-10-window-states-design.md`; plan: `docs/plans/2026-09
   window and cursor position first and restores them at the end via `Logic.restoreFocusLua`, which
   re-focuses only if the active window changed and always warps the cursor back; that
   dispatcher-can-drop-focus behaviour is what the probe script
-  (`tests/integration/probe-fullscreen.sh`) established. Separately, `dwindle:preserve_split`
+  (`tests/integration/probe-fullscreen.sh`) established. It never re-focuses a window the chunk
+  has **moved**, though (found on the nested rig, 2026-09-18): focus carries the workspace —
+  `hl.dsp.focus` on a window that now lives elsewhere switches the compositor to it, the only step
+  of a tiled insert that moves the active workspace — so dragging the *focused* window onto a
+  workspace nothing is showing used to take the whole desktop with it, defeating `follow = false`.
+  The capture (`Logic.captureFocusLua`) therefore records the workspace id that window was on, and
+  a window that has since left it is not chased: the compositor has already handed focus to
+  another window on the workspace the user is still looking at. Separately, `dwindle:preserve_split`
   defaults to `false`, under which dwindle re-derives a container's split axis from its aspect
   ratio on every recalculation — a fullscreen enter/exit is one — so a re-tile next to another
   window that is later un-fullscreened (or a re-tile of a fullscreen window) can come back split

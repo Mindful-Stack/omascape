@@ -207,6 +207,16 @@ function M.new(opts)
     local w = a.window and byAddress(a.window) or nil
     if desc.name == "focus" then
       hl.__active_window = w or hl.__active_window
+      -- Focus CARRIES THE WORKSPACE: focusing a window that lives on another workspace switches
+      -- the compositor to it (probed live on 0.56.2 against the nested rig, step by step through
+      -- a tiled insert — it is the only step of that chunk that moves the active workspace).
+      -- Modelled here because a chunk that restores focus to a window it has just moved away
+      -- takes the user with it, and a mock whose active workspace never moves cannot show that.
+      if w and w.workspace then hl.__active_workspace = w.workspace end
+      if a.workspace then
+        local n = tonumber(a.workspace)
+        hl.__active_workspace = n and { id = n } or { id = -99, name = a.workspace }
+      end
     elseif desc.name == "window.float" and w then
       -- Absolute, not a toggle: Hyprland's parseToggleStr maps "on"/"off" to ENABLE/DISABLE and
       -- Actions::floatWindow returns early when the state already matches (probed live, see
@@ -217,8 +227,14 @@ function M.new(opts)
       else w.floating = not w.floating end
       -- The float raises the window and relayouts its workspace, which moves focus onto it. This
       -- is what gives restoreFocusLua something to restore; without it the "focus restored"
-      -- assertions below would pass against a chunk that never restored anything.
-      hl.__active_window = w
+      -- assertions below would pass against a chunk that never restored anything. Only while the
+      -- window is on the ACTIVE workspace, though: floating or un-floating one on a workspace
+      -- nothing is showing leaves focus (and the active workspace) alone — probed live on
+      -- 0.56.2, and it is what makes a tiled insert onto a hidden workspace end with focus
+      -- somewhere other than the window that moved.
+      if w.workspace == nil or hl.__active_workspace == nil or w.workspace.id == hl.__active_workspace.id then
+        hl.__active_window = w
+      end
     elseif desc.name == "window.close" and w then
       -- A real close removes the window; "closed every window the workspace listed" is the
       -- property Task 12 asserts, and it is only meaningful if the mock actually drops them.
@@ -227,7 +243,20 @@ function M.new(opts)
     elseif desc.name == "window.move" and w then
       if a.workspace then
         local n = tonumber(a.workspace)
+        local from = w.workspace
         w.workspace = n and { id = n } or { id = -99, name = a.workspace }
+        -- `follow = false` leaves the user where they are, and the compositor hands focus to
+        -- another window on the workspace the moved one just left — nil when there is none
+        -- (probed live on 0.56.2). Without this the moved window stays "active" in the mock and
+        -- every focus-restore assertion is answered by a guard that never fires.
+        if a.follow == false and hl.__active_window == w then
+          hl.__active_window = nil
+          for _, other in pairs(hl.__windows) do
+            if other ~= w and other.workspace and from and other.workspace.id == from.id then
+              hl.__active_window = other; break
+            end
+          end
+        end
       end
       if a.x and a.y then w.at = { x = tonumber(a.x), y = tonumber(a.y) } end
     elseif desc.name == "window.fullscreen" and w then

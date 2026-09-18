@@ -562,7 +562,13 @@ TestCase {
         verify(lastFs > lastFloat, "fullscreen re-applied after the un-float")
         verify(lua.indexOf('same and w.fullscreen or 0') >= 0, "own mode only kept for a same-workspace re-tile")
         verify(lua.lastIndexOf('smart_split = smart') > lastFs, "config restored after everything")
-        verify(lua.indexOf('local prevW = hl.get_active_window()') >= 0, "focus recorded up front")
+        verify(lua.indexOf('local prevW, cur = hl.get_active_window(), hl.get_cursor_pos()') >= 0,
+               "focus and cursor recorded up front")
+        // The workspace that window was on is part of the capture: the restore refuses to chase a
+        // window the chunk has moved, because focusing one that lives elsewhere switches the user
+        // to it (see captureFocusLua / restoreFocusLua; behaviour pinned in tests/lua).
+        verify(lua.indexOf('local prevWs = prevW and prevW.workspace and prevW.workspace.id or nil') >= 0,
+               "the workspace it was on is recorded too")
         verify(lua.lastIndexOf('hl.dsp.focus(') > lua.lastIndexOf('smart_split = smart'), "focus restored (if moved) at the very end")
         verify(lua.lastIndexOf('cursor.move(') > lua.lastIndexOf('hl.dsp.focus('), "cursor restored after the re-focus")
         verify(lua.indexOf('fa:sub(1, 2) ~= "0x"') >= 0, "workspace fullscreen address normalised like restoreFocusLua")

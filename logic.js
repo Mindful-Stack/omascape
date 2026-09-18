@@ -466,8 +466,7 @@ function tiledInsertLua(addr, targetWs, placement) {
         '  local w = hl.get_window(sel)\n' +
         '  if not w or w.floating then return end\n' +
         '  local anchorSel = ' + anchorSel + '\n' +
-        '  local prevW = hl.get_active_window()\n' +
-        '  local cur = hl.get_cursor_pos()\n' +
+        '  ' + captureFocusLua() + '\n' +
         '  ' + dispatchGuardLua() + '\n' +
         '  local same = w.workspace ~= nil and w.workspace.id == ' + ws + '\n' +
         '  local layout = hl.get_config("general.layout")\n' +
@@ -476,7 +475,7 @@ function tiledInsertLua(addr, targetWs, placement) {
         '      if not same then run(hl.dsp.window.move({ workspace = "' + ws + '", follow = false, window = sel })) end\n' +
         '    end)\n' +
         '    ' + reportLua('tiled insert') + '\n' +
-        '    ' + restoreFocusLua('prevW', 'cur') + '\n' +
+        '    ' + restoreFocusLua('prevW', 'prevWs', 'cur') + '\n' +
         '    return\n' +
         '  end\n' +
         '  local smart = hl.get_config("dwindle.smart_split")\n' +
@@ -524,7 +523,7 @@ function tiledInsertLua(addr, targetWs, placement) {
         '  step(function() if ownMode ~= 0 then ' + fullscreenBodyLua('sel', 'ownMode') + ' end end)\n' +
         '  hl.config({ dwindle = { smart_split = smart, use_active_for_splits = useActive } })\n' +
         '  ' + reportLua('tiled insert') + '\n' +
-        '  ' + restoreFocusLua('prevW', 'cur') + '\n' +
+        '  ' + restoreFocusLua('prevW', 'prevWs', 'cur') + '\n' +
         'end'
     ).replace(/\n\s*/g, ' ')
 }
@@ -555,19 +554,43 @@ function restoreCursorLua(curExpr) {
     return 'if ' + curExpr + ' then hl.dispatch(hl.dsp.cursor.move({ x = ' + curExpr + '.x, y = ' + curExpr + '.y })) end'
 }
 
+// The state restoreFocusLua needs, read BEFORE the chunk changes anything: the active window,
+// the id of the workspace it was on (a number, copied out of the snapshot — never the table,
+// which is no use once the window has moved), and the cursor. One helper so every chunk captures
+// the same three things in the same order.
+// Returns newline-separated statements; the outermost chunk builder must flatten to one line.
+function captureFocusLua() {
+    return (
+        'local prevW, cur = hl.get_active_window(), hl.get_cursor_pos()\n' +
+        'local prevWs = prevW and prevW.workspace and prevW.workspace.id or nil'
+    )
+}
+
 // Lua statements that re-focus the window `prevExpr` (an HL.Window or nil, read before the
 // change) when the active window is no longer it, then move the cursor back to `curExpr`
 // (an HL.Vec2 or nil). The probe (tests/integration/probe-fullscreen.sh) showed the fullscreen
 // dispatcher can drop focus to nil, and focusing warps the cursor, so every chunk that touches
 // fullscreen ends with this. Addresses from Lua may lack the 0x prefix hyprctl uses.
+//
+// ✎ Never a window this chunk has MOVED (found on the nested rig, 2026-09-18). Focusing carries
+// the workspace: `hl.dsp.focus` on a window that now lives elsewhere switches the compositor to
+// that workspace — probed step by step through a tiled insert, it is the only step of the chunk
+// that moves it. So dragging the focused window onto a workspace nothing is showing restored
+// focus to it and took the whole desktop along, the one thing `follow = false` promises not to
+// do. `prevWsExpr` is the workspace id that window was on when the chunk started (captureFocusLua):
+// unchanged, focus is restored as before; changed, there is nothing to restore — the compositor
+// already handed focus to another window on the workspace the user is still looking at.
 // Returns newline-separated statements; the outermost chunk builder must flatten to one line.
-function restoreFocusLua(prevExpr, curExpr) {
+function restoreFocusLua(prevExpr, prevWsExpr, curExpr) {
     return (
         'do local nowW = hl.get_active_window()\n' +
         '  if ' + prevExpr + ' and (not nowW or nowW.address ~= ' + prevExpr + '.address) then\n' +
         '    local a = tostring(' + prevExpr + '.address)\n' +
         '    if a:sub(1, 2) ~= "0x" then a = "0x" .. a end\n' +
-        '    hl.dispatch(hl.dsp.focus({ window = "address:" .. a }))\n' +
+        '    local pw = hl.get_window("address:" .. a)\n' +
+        '    local stayed = pw ~= nil and (' + prevWsExpr + ' == nil or\n' +
+        '      (pw.workspace ~= nil and pw.workspace.id == ' + prevWsExpr + '))\n' +
+        '    if stayed then hl.dispatch(hl.dsp.focus({ window = "address:" .. a })) end\n' +
         '  end\n' +
         '  ' + restoreCursorLua(curExpr) + '\n' +
         'end'
@@ -589,7 +612,7 @@ function setFloatLua(addr, floating) {
     return (
         'function()\n' +
         '  local sel = "address:' + addr + '"\n' +
-        '  local prevW, cur = hl.get_active_window(), hl.get_cursor_pos()\n' +
+        '  ' + captureFocusLua() + '\n' +
         '  ' + dispatchGuardLua() + '\n' +
         '  local ok, err = pcall(function()\n' +
         '    local w = hl.get_window(sel)\n' +
@@ -599,7 +622,7 @@ function setFloatLua(addr, floating) {
         '    end\n' +
         '  end)\n' +
         '  ' + reportLua('float') + '\n' +
-        '  ' + restoreFocusLua('prevW', 'cur') + '\n' +
+        '  ' + restoreFocusLua('prevW', 'prevWs', 'cur') + '\n' +
         'end'
     ).replace(/\n\s*/g, ' ')
 }
@@ -614,13 +637,13 @@ function setFullscreenLua(addr, mode) {
     var m = Math.max(0, Math.min(2, mode | 0))
     return (
         'function()\n' +
-        '  local prevW, cur = hl.get_active_window(), hl.get_cursor_pos()\n' +
+        '  ' + captureFocusLua() + '\n' +
         '  ' + dispatchGuardLua() + '\n' +
         '  local ok, err = pcall(function()\n' +
         fullscreenBodyLua('"address:' + addr + '"', String(m)) + '\n' +
         '  end)\n' +
         reportLua(m === 0 ? 'un-fullscreen' : 'fullscreen') + '\n' +
-        restoreFocusLua('prevW', 'cur') + '\n' +
+        restoreFocusLua('prevW', 'prevWs', 'cur') + '\n' +
         'end'
     ).replace(/\n\s*/g, ' ')
 }
@@ -721,7 +744,7 @@ function floatingMoveLua(addr, targetWs, pos) {
         '  local sel = "address:' + addr + '"\n' +
         '  local w = hl.get_window(sel)\n' +
         '  if not w or not w.floating then return end\n' +
-        '  local prevW, cur = hl.get_active_window(), hl.get_cursor_pos()\n' +
+        '  ' + captureFocusLua() + '\n' +
         '  ' + dispatchGuardLua() + '\n' +
         '  local same = ' + same + '\n' +
         '  local ok, err = pcall(function()\n' +
@@ -729,7 +752,7 @@ function floatingMoveLua(addr, targetWs, pos) {
         '    run(hl.dsp.window.move({ x = "' + x + '", y = "' + y + '", window = sel }))\n' +
         '  end)\n' +
         '  ' + reportLua('floating move') + '\n' +
-        '  ' + restoreFocusLua('prevW', 'cur') + '\n' +
+        '  ' + restoreFocusLua('prevW', 'prevWs', 'cur') + '\n' +
         'end'
     ).replace(/\n\s*/g, ' ')
 }
