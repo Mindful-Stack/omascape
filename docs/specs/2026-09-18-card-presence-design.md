@@ -152,12 +152,16 @@ readonly property color badgeColor: Qt.rgba(cardColor.r, cardColor.g, cardColor.
 **Tier 1 (`logic.js`, pure, CI):**
 - `screenMargin(1920)` = 96, `screenMargin(2048)` = 102, `screenMargin(0)` = 16,
   `screenMargin(NaN)` = 16, `screenMargin(200)` = 16 (the floor binds).
-- The regression that names the bug: for a 1920 panel, `layout()` yields `cols` 5 and a canvas
-  no wider than `1920 − 2 × pad − 2 × screenMargin(1920)`. Asserted as an inequality *against
-  `screenMargin` itself*, not against the literal 337, so changing 5% to 4% does not require
-  rewriting the test — only the table above.
 - `layout()` is unchanged for the `availW`-missing path — the existing safe-default assertions
   must still pass untouched.
+
+✎ *(corrected while planning, 2026-09-18.)* An earlier draft of this section also called for a
+pure `layout()` test asserting that a 1920 panel leaves room at the edges. **That test is
+circular and must not be written:** `layout()` receives `availW` as an *input* and has no way to
+know whether its caller subtracted a margin, so such a test only re-asserts the number the test
+itself passed in. It would pass identically against the unfixed code. Tier 1 covers
+`screenMargin` alone; every claim about the margin actually reaching the card belongs to the UI
+suite below.
 
 **UI suite (`tests/ui/presence.qml`, the real `Overview` against the stubbed compositor).** ✎
 *(added after review 2026-09-18.)* The pure test above **cannot catch this bug**, which is the
