@@ -2030,6 +2030,28 @@ Item {
                 fontFamily: root.fontFamily; fontSize: root.captionSize
             }
         }
+
+        // The peek (docs/specs/2026-09-18-peek-design.md, "The peek layer"): a sibling of `card`,
+        // stacked above it, needing no z-order arbitration against the menu or the confirmation
+        // dialog in either direction — `Keys.onPressed` returns early for both before the `Space`
+        // branch, and both call the peek's own force-clear on open, so the two are never on
+        // screen together. Display only: every property below is a plain binding on root state,
+        // not a value copied at press time. `shown`/`peekTarget` are hard-coded here because
+        // `peeking` does not exist yet — Task 7 adds the hold state and rebinds both lines.
+        PeekLayer {
+            id: peekLayer
+            shown: false                 // Task 7 binds this to root.peeking
+            peekTarget: null             // Task 7 binds this to root.resolveTarget()
+            windowByAddress: root._windowByAddress
+            handleByAddress: root.handleByAddress
+            params: root.params
+            background: root.background; foreground: root.foreground
+            hairline: root.hairline; scrim: root.scrim
+            cardRadius: root.cardRadius
+            fontFamily: root.fontFamily; captionSize: root.captionSize
+            darkTheme: root.darkTheme
+            motion: root.motion
+        }
         // Swallows any press that is not on the menu itself. Panel-sized and above the card, so a
         // press on the scrim cannot both dismiss the menu and close the overview — one press, one
         // effect. A press on ANOTHER monitor still closes the overview (its own catcher), which is
