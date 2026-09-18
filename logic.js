@@ -242,16 +242,23 @@ function _placeWindows(wins, mon, box, P) {
 // monitor; the box is the peek rect at the origin, so the returned rows are box-local and the
 // view positions them by parenting alone.
 function peekTiles(wins, mon, boxW, boxH, P) {
-    if (!wins || !wins.length || !mon) return []
+    // `!wins` guards an unbound QML property, which arrives as `undefined` and would throw on
+    // `.length` inside _placeWindows. An empty (but defined) array is not guarded here — it is
+    // legal input, and _placeWindows already returns [] for it on its own; short-circuiting it
+    // here too would mask any non-array handed in by a QML wiring bug as a silently blank
+    // mini-map instead of an error.
+    if (!wins || !mon) return []
     return _placeWindows(wins, mon, { x: 0, y: 0, w: boxW, h: boxH }, P)
 }
 
 // Fit `srcW x srcH` inside `boxW x boxH` preserving aspect — never stretch, never upscale past
 // the box (spec: "60% is a box, not a stretch"). A degenerate source (the monitorless "?"
 // placeholder reports 0x0) yields 0x0 rather than NaN, which a Rectangle paints as nothing at
-// all instead of collapsing the layer's whole geometry.
+// all instead of collapsing the layer's whole geometry. The box itself gets the same guard: a
+// NaN box (seen from a binding that has not settled yet) must not leak into `w`/`h` either.
 function peekFit(srcW, srcH, boxW, boxH) {
     if (!(srcW > 0) || !(srcH > 0)) return { w: 0, h: 0 }
+    if (!(boxW > 0) || !(boxH > 0)) return { w: 0, h: 0 }
     var k = Math.min(boxW / srcW, boxH / srcH)
     return { w: srcW * k, h: srcH * k }
 }

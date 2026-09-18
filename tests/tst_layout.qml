@@ -1179,8 +1179,6 @@ TestCase {
     }
 
     // ---- peek (docs/specs/2026-09-18-peek-design.md) ------------------------------------
-    // The peek's own box: a 60% rect at origin, the shape peekTiles is called with.
-    function peekBox(w, h) { return { x: 0, y: 0, w: w, h: h } }
 
     // Distinguishes: a peekTiles that calls _tileRect directly instead of the shared placement,
     // which is exactly the defect the spec's "Workspace target" section forbids. The fullscreen
@@ -1205,15 +1203,20 @@ TestCase {
 
     // Distinguishes: a peek that re-derives geometry instead of sharing the grid's. This
     // compares peekTiles against `layout`'s OWN output for the same workspace — the grid cell at
-    // one size, the peek box at another — which is what the spec asks for and what the previous
-    // draft of this test did not do (it compared two peek sizes to each other, and would have
-    // passed on a peek that was self-consistently wrong).
+    // one size, the peek box at another — which is what the spec asks for. The fixed-px
+    // `cellInset` changes the INNER box's aspect by a different amount at each scale (6px is
+    // 1.6% of a 380px-wide grid cell and 0.5% of a 1200px peek box), so the grid cell and the
+    // peek box are not similarly constrained even though they share a monitor — a small residual
+    // drift between them is expected, and that is exactly why the comparison below is normalised
+    // against each box's own INNER rect (box minus 2*cellInset) rather than its outer one.
     function test_peekTiles_geometry_matches_the_grid() {
         var mon = edp()
+        // Asymmetric split (70/30, not 50/50): a symmetric fixture makes the width-ratio check
+        // below compare 1.0 against 1.0 no matter what breaks, so nothing could ever move it.
         var wins = [
-            { address: "0xA", workspaceId: 1, ax: 0, ay: 26, sw: 1024, sh: 1254,
+            { address: "0xA", workspaceId: 1, ax: 0, ay: 26, sw: 1434, sh: 1254,
               floating: false, fullscreen: 0, cls: "a", title: "a" },
-            { address: "0xB", workspaceId: 1, ax: 1024, ay: 26, sw: 1024, sh: 1254,
+            { address: "0xB", workspaceId: 1, ax: 1434, ay: 26, sw: 614, sh: 1254,
               floating: false, fullscreen: 0, cls: "b", title: "b" }
         ]
         var r = Logic.layout({ monitors: [mon],
@@ -1221,28 +1224,41 @@ TestCase {
             windows: wins, focusedMonitorName: "eDP-1", availW: 1632, params: params })
         var b = boxById(r, 1)
         verify(b !== null, "the grid must have a box for workspace 1")
-        // The peek box's aspect matches the cell's (both follow the monitor), so the arrangement
-        // is comparable; 1200x750 is 1.6, as is 2048x1280.
         var pk = Logic.peekTiles(wins, mon, 1200, 750, params)
         compare(pk.length, 2)
         function gridRow(a) {
             for (var i = 0; i < r.tiles.length; i++) if (r.tiles[i].address === a) return r.tiles[i]
             fail("no grid row for " + a); return null
         }
+        var ci = params.cellInset
         for (var i = 0; i < pk.length; i++) {
             var g = gridRow(pk[i].address)
-            // Each tile's centre as a FRACTION of its own box — scale-invariant, so this compares
-            // the arrangement and not the pixels. The 3% tolerance is for `cellInset`, a fixed
-            // px value that is therefore NOT scale-invariant: 6px is 1.6% of a 380px cell and
-            // 0.5% of the 1200px peek box.
-            var gf = (g.x - b.x + g.w / 2) / b.w, pf = (pk[i].x + pk[i].w / 2) / 1200
-            verify(Math.abs(gf - pf) < 0.03,
-                   pk[i].address + " centre drifted from the grid: " + gf + " vs " + pf)
-            // And the ratio BETWEEN the two tiles' widths, which carries no inset at all and so
-            // needs no tolerance beyond rounding.
-            verify(Math.abs((pk[0].w / pk[1].w) - (gridRow(pk[0].address).w / gridRow(pk[1].address).w)) < 0.05,
-                   "tile width ratio must hold across sizes")
+            // Each tile's centre as a fraction of its box's INNER rect — scale-invariant, so
+            // this compares the arrangement and not raw pixels, and isolates the residual
+            // cellInset drift described above instead of the (larger, and here irrelevant)
+            // difference between a box's outer and inner aspect. Both axes matter: `reserved`
+            // ([0,26,0,0], eDP-1 above) is purely vertical, so a peek that ignores it drifts on y
+            // while leaving x untouched, and a fraction-of-x-only comparison is blind to it by
+            // construction.
+            //
+            // Measured on this fixture: correct code drifts ~7.8e-4 on x and 0.00000 on y. A
+            // peek that ignores `reserved` drifts 0.0061 on x and 0.0102 on y; one that drops
+            // `cellInset` drifts 0.0101 on x; one with no letterbox centring drifts 0.0072 on y.
+            // 0.002 on x and 0.005 on y both clear correct code with margin and catch all three.
+            var gfX = (g.x - b.x - ci + g.w / 2) / (b.w - 2 * ci)
+            var gfY = (g.y - b.y - ci + g.h / 2) / (b.h - 2 * ci)
+            var pfX = (pk[i].x - ci + pk[i].w / 2) / (1200 - 2 * ci)
+            var pfY = (pk[i].y - ci + pk[i].h / 2) / (750 - 2 * ci)
+            verify(Math.abs(gfX - pfX) < 0.002,
+                   pk[i].address + " x centre drifted from the grid: " + gfX + " vs " + pfX)
+            verify(Math.abs(gfY - pfY) < 0.005,
+                   pk[i].address + " y centre drifted from the grid: " + gfY + " vs " + pfY)
         }
+        // The ratio BETWEEN the two tiles' widths, which carries no inset at all and so needs no
+        // tolerance beyond rounding. Hoisted out of the loop above: it does not depend on `i`, and
+        // inside the loop it silently repeated the same comparison twice.
+        verify(Math.abs((pk[0].w / pk[1].w) - (gridRow(pk[0].address).w / gridRow(pk[1].address).w)) < 0.05,
+               "tile width ratio must hold across sizes")
     }
 
     // Distinguishes: an empty workspace returning null/undefined instead of an empty array, which
