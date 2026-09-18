@@ -2036,10 +2036,14 @@ Item {
         // dialog in either direction — `Keys.onPressed` returns early for both before the `Space`
         // branch, and both call the peek's own force-clear on open, so the two are never on
         // screen together. Display only: every property below is a plain binding on root state,
-        // not a value copied at press time. `shown`/`peekTarget` are hard-coded here because
-        // `peeking` does not exist yet — Task 7 adds the hold state and rebinds both lines.
+        // not a value copied at press time. `shown` and `peekTarget` are hard-coded here because
+        // `peeking` does not exist yet — Task 7 adds the hold state, rebinds those two, and wires
+        // `monForTarget`, `workspaceWindows` and `armed` (none of which exist on `root` yet
+        // either, so they are left at PeekLayer's own defaults for now). PeekLayer anchors
+        // nothing itself, so this call site owns its sizing.
         PeekLayer {
             id: peekLayer
+            anchors.fill: parent
             shown: false                 // Task 7 binds this to root.peeking
             peekTarget: null             // Task 7 binds this to root.resolveTarget()
             windowByAddress: root._windowByAddress
@@ -2047,6 +2051,10 @@ Item {
             params: root.params
             background: root.background; foreground: root.foreground
             hairline: root.hairline; scrim: root.scrim
+            // config.scrim (root state, not target-dependent) is wired now, unlike the
+            // target-resolution properties above: a user who has turned the card's own scrim off
+            // must not get one reintroduced just by holding Space.
+            scrimVisible: config.scrim
             cardRadius: root.cardRadius
             fontFamily: root.fontFamily; captionSize: root.captionSize
             darkTheme: root.darkTheme

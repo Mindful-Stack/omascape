@@ -146,8 +146,10 @@ k        = Math.min(peekBoxW / aspectW, peekBoxH / aspectH)     // fit, never st
 ```
 
 Backdrop: the existing `root.scrim`, at a step above the card's own, so the grid reads as
-"behind" rather than as competing content. The peek carries the same `cardRadius` and the card's
-`SoftShadow` treatment so it reads as the same material as the picker.
+"behind" rather than as competing content, and following `config.scrim` the same way the card's
+own scrim does — off means no backdrop, but the frame keeps its opaque background and shadow. The
+peek carries the same `cardRadius` and the card's `SoftShadow` treatment so it reads as the same
+material as the picker.
 
 **Window target.** One `ScreencopyView` on `handleByAddress[addr]`, the same path `WindowTile.qml`
 uses, with the existing icon fallback for windows that have no toplevel handle. The ROADMAP's

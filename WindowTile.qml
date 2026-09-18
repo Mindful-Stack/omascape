@@ -71,6 +71,13 @@ Item {
     // (Overview.tileCandidates), back to bare model geometry.
     property int iconMax: 40
     property bool decorated: true
+    // Same opt-in as iconMax/decorated, for the same reason: the grid's r5 (box radius 8 minus
+    // the cell inset 3, concentric with the well) is wrong at peek size, where the frame around
+    // this tile carries the card's own cardRadius (~20). Left at the grid default everywhere
+    // except the window peek, which passes cardRadius so its capture's corners — and the
+    // hairline right at its edge — read as the SAME shape the frame and its SoftShadow are
+    // drawn at, instead of a smaller rectangle poking past the shadow at all four corners.
+    property int cornerRadius: 5
 
     // Drag ghost: while in transit the tile shrinks around the grabbed point (so that point stays
     // under the pointer and the ghost never hides the drop highlight) and turns translucent.
@@ -156,7 +163,7 @@ Item {
     ClippingRectangle {
         anchors.fill: parent
         color: tile.bg
-        radius: 5   // box radius (8) minus the cell inset (3): concentric with the well
+        radius: tile.cornerRadius   // grid default: box radius (8) minus the cell inset (3), concentric with the well
         // no outline at rest beyond a faint hairline (adjacent previews with zero Hyprland
         // gaps would otherwise merge); the accent border marks the tiled-insert anchor
         border.width: tile.dropTarget ? 2 : 1

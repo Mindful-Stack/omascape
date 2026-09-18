@@ -1,15 +1,16 @@
 import QtQuick
-import Quickshell
-import Quickshell.Wayland
-import Quickshell.Widgets
 import "logic.js" as Logic
 
 // The peek layer (docs/specs/2026-09-18-peek-design.md). Display only: it renders whatever
 // target it is handed and owns no state of its own — no key handling, no target resolution, no
 // snapshot. `shown` going false tears the captures down, which is the whole teardown story.
+// No Quickshell import here: everything that touches a wl toplevel or a layer-shell surface is
+// WindowTile's business, not this component's — it only arranges WindowTile instances and reads
+// plain QML/JS values handed down as properties. `anchors.fill: parent` is deliberately NOT set
+// here (unlike most root Items in this repo); the one caller (Overview.qml) owns that sizing so
+// this component stays usable at whatever size a future caller gives it.
 Item {
     id: peek
-    anchors.fill: parent
     visible: shown
 
     property bool shown: false
@@ -19,11 +20,22 @@ Item {
     property var handleByAddress: ({})
     property var monForTarget: null          // the target's monitor row
     property var workspaceWindows: []        // the target workspace's windows, when kind is workspace
+    // The target workspace is under a no_screen_share rule (lockSyncLua, logic.js). The compositor
+    // denies capture either way, so there is no leak without this — but the grid's own delegate
+    // gates capMode on the same condition (Overview.qml, boxArmed) rather than firing one denied
+    // screencopy request per window every time the pointer holds over an armed workspace.
+    property bool armed: false
     property var params: ({})
     property color background: "#1a1a1a"
     property color foreground: "#dddddd"
     property color hairline: "#888888"
     property color scrim: "#000000"
+    // Whether the backdrop draws at all — follows config.scrim (Overview.qml's own scrimRect is
+    // `visible: config.scrim`), plumbed in as a plain property rather than read from `config`
+    // directly so this component stays display-only and takes everything as input. The frame
+    // keeps its opaque background and SoftShadow either way, so the peek still reads as elevated
+    // with the backdrop off.
+    property bool scrimVisible: true
     property real cardRadius: 12
     property string fontFamily: ""
     property int captionSize: 10
@@ -49,8 +61,9 @@ Item {
     // A step above the card's own scrim, so the grid reads as "behind" rather than as competing
     // content. Not a MouseArea: the peek is bound to the held key alone and swallows no click —
     // which is also why a right-click during a hold reaches the tile underneath (spec: the modal
-    // opens and the peek yields).
-    Rectangle { anchors.fill: parent; color: peek.scrim; opacity: 0.35 }
+    // opens and the peek yields). `visible: peek.scrimVisible` so a user who has turned the card's
+    // own scrim off does not get one reintroduced just by holding Space.
+    Rectangle { anchors.fill: parent; color: peek.scrim; opacity: 0.35; visible: peek.scrimVisible }
 
     // The card's own shadow treatment, so the peek reads as the same material as the picker
     // (spec: "The peek layer"). Same component and the same luminance-following alpha the card
@@ -81,6 +94,10 @@ Item {
             motion: peek.motion
             iconMax: 96
             decorated: false
+            // Fills `frame`, so its own corners must be drawn at the frame's radius — the grid's
+            // r5 default reads as a smaller, squarer rectangle sitting inside the r20 frame, with
+            // a hairline the card never shows, and pokes past the SoftShadow at all four corners.
+            cornerRadius: peek.cardRadius
         }
 
         // Workspace target: the grid's own placement at peek size, one capture per window.
@@ -100,10 +117,20 @@ Item {
                 floating: modelData.layer === 2
                 tileLayer: modelData.layer
                 fullscreen: modelData.fullscreen
-                capMode: peek.shown ? "live" : "icon"
+                // Mirrors the grid's own gate (Overview.qml, boxArmed): an armed workspace's
+                // windows are under a no_screen_share rule and the compositor denies the capture
+                // either way, but the grid never fires the request in the first place.
+                capMode: peek.shown && !peek.armed ? "live" : "icon"
                 bg: peek.background; fg: peek.foreground; borderColor: peek.hairline
                 fontFamily: peek.fontFamily; titleSize: peek.captionSize
                 motion: peek.motion
+                // Larger than the grid's 40px default: a mini-map tile gets a whole workspace's
+                // share of the peek box (up to 60% of the screen) rather than a fraction of the
+                // canvas split across every workspace, so its tiles run several times a grid
+                // cell's area even on a busy workspace. Smaller than the window peek's 96 — which
+                // fills nearly the whole frame by itself — since a mini-map tile is still one of
+                // several. 64 reads clearly on a several-window workspace without dominating it.
+                iconMax: 64
                 decorated: false
             }
         }
