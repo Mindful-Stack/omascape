@@ -184,6 +184,47 @@ function padWorkspaces(workspaces, count, focusedMonitorName) {
     return out
 }
 
+// The grid's per-window placement for ONE workspace, factored out of `layout` so the peek's
+// mini-map (peekTiles) runs the identical code at a different box size. `wins` are that
+// workspace's windows, `mon` its monitor, `box` the rect to place them in — a grid cell for the
+// grid, a peek-sized rect for the peek. Returns the tile rows, `null` results dropped.
+//
+// Slot recovery is deliberately box-INDEPENDENT: it measures in usable-rect-local coordinates off
+// the real monitor, never off `box`, so the same slot is recovered at cell size and at peek size
+// and only the final _tileRect mapping differs. That is what makes peek/grid parity a property of
+// the code rather than of a test.
+function _placeWindows(wins, mon, box, P) {
+    // Tiled windows that are not fullscreen or maximized, in usable-rect-local coords: what a
+    // fullscreen window's slot is recovered from (see recoverSlot).
+    var R = _usableRect(mon), others = []
+    for (var pi = 0; pi < wins.length; pi++) {
+        var pw = wins[pi]
+        if (pw.floating || fullscreenMode(pw)) continue
+        others.push({ x: (pw.ax - mon.x) - R.x, y: (pw.ay - mon.y) - R.y, w: pw.sw, h: pw.sh })
+    }
+    var out = []
+    for (var wi = 0; wi < wins.length; wi++) {
+        var win = wins[wi]
+        var mode = fullscreenMode(win), layer = win.floating ? 2 : 1, slot = null
+        if (mode) {
+            var whole = { x: 0, y: 0, w: R.w, h: R.h }
+            if (win.floating) {
+                slot = { x: R.w * 0.2, y: R.h * 0.2, w: R.w * 0.6, h: R.h * 0.6 }   // no slot exists
+            } else {
+                slot = others.length ? recoverSlot(whole, others, P) : whole
+                if (!slot) { slot = whole; layer = 0 }                              // ambiguous → backdrop
+            }
+        }
+        var t = _tileRect(win, mon, box, P, slot)
+        if (t) {
+            t.address = win.address; t.workspaceId = win.workspaceId
+            t.layer = layer; t.fullscreen = mode
+            out.push(t)
+        }
+    }
+    return out
+}
+
 function layout(input) {
     var P = input.params
     var monByName = _index(input.monitors, "name")
@@ -302,40 +343,19 @@ function layout(input) {
         break
     }
 
-    // Tiled windows that are not fullscreen or maximized, per workspace, in usable-rect-local
-    // coords: what a fullscreen window's slot is recovered from (see recoverSlot).
-    var tiledByWs = {}
-    for (var pi = 0; pi < input.windows.length; pi++) {
-        var pw = input.windows[pi]
-        if (pw.floating || fullscreenMode(pw)) continue
-        var pbox = boxByWs[pw.workspaceId], pmon = pbox ? monByName[pbox.monitorName] : null
-        if (!pmon) continue
-        var pR = _usableRect(pmon)
-        ;(tiledByWs[pw.workspaceId] = tiledByWs[pw.workspaceId] || []).push(
-            { x: (pw.ax - pmon.x) - pR.x, y: (pw.ay - pmon.y) - pR.y, w: pw.sw, h: pw.sh })
+    // Windows grouped by workspace, skipping any whose box is missing or a lock placeholder
+    // (a placeholder shows no tile and takes no capture — spec: Rendering).
+    var winsByWs = {}
+    for (var gi = 0; gi < input.windows.length; gi++) {
+        var gw = input.windows[gi], gbox = boxByWs[gw.workspaceId]
+        if (!gbox || gbox.placeholder) continue
+        if (!monByName[gbox.monitorName]) continue
+        ;(winsByWs[gw.workspaceId] = winsByWs[gw.workspaceId] || []).push(gw)
     }
     var tiles = []
-    for (var wi = 0; wi < input.windows.length; wi++) {
-        var win = input.windows[wi], wbox = boxByWs[win.workspaceId]; if (!wbox) continue
-        if (wbox.placeholder) continue     // lock placeholder: no tile, no capture (spec: Rendering)
-        var wmon = monByName[wbox.monitorName]; if (!wmon) continue
-        var mode = fullscreenMode(win), layer = win.floating ? 2 : 1, slot = null
-        if (mode) {
-            var UR = _usableRect(wmon), whole = { x: 0, y: 0, w: UR.w, h: UR.h }
-            if (win.floating) {
-                slot = { x: UR.w * 0.2, y: UR.h * 0.2, w: UR.w * 0.6, h: UR.h * 0.6 }   // no slot exists
-            } else {
-                var others = tiledByWs[win.workspaceId] || []
-                slot = others.length ? recoverSlot(whole, others, P) : whole
-                if (!slot) { slot = whole; layer = 0 }                              // ambiguous → backdrop
-            }
-        }
-        var t = _tileRect(win, wmon, wbox, P, slot)
-        if (t) {
-            t.address = win.address; t.workspaceId = win.workspaceId
-            t.layer = layer; t.fullscreen = mode
-            tiles.push(t)
-        }
+    for (var wsk in winsByWs) {
+        var kbox = boxByWs[winsByWs[wsk][0].workspaceId]
+        tiles = tiles.concat(_placeWindows(winsByWs[wsk], monByName[kbox.monitorName], kbox, P))
     }
     return { canvasSize: { w: canvasW, h: y }, boxes: boxes, tiles: tiles,
              groups: groups, cell: { w: cw, h: ch, cols: cols } }

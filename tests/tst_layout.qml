@@ -397,6 +397,36 @@ TestCase {
         verify(t.w > 100)
     }
 
+    // Distinguishes: a placement that conflates `layer` with `fullscreen`, or that loses one of
+    // the three fullscreen slot branches. One workspace, three windows: a tiled fullscreen one
+    // whose slot is recoverable from its neighbour, that neighbour, and a floating window. Every
+    // row must keep its own pair of values — no fixture before this one had all three at once.
+    function test_placement_keeps_layer_and_fullscreen_independent() {
+        var r = Logic.layout({ monitors: [edp()],
+            workspaces: [{ id: 1, monitorName: "eDP-1", focused: true, occupied: true }],
+            windows: [
+                // fullscreen, tiled: recoverSlot must find the left half from the right-half neighbour
+                { address: "0xF", workspaceId: 1, ax: 0, ay: 26, sw: 2048, sh: 1254,
+                  floating: false, fullscreen: 2, cls: "full", title: "full" },
+                { address: "0xR", workspaceId: 1, ax: 1024, ay: 26, sw: 1024, sh: 1254,
+                  floating: false, fullscreen: 0, cls: "right", title: "right" },
+                { address: "0xL", workspaceId: 1, ax: 400, ay: 300, sw: 300, sh: 200,
+                  floating: true, fullscreen: 0, cls: "floaty", title: "floaty" }
+            ],
+            focusedMonitorName: "eDP-1", availW: 1632, params: params })
+        function row(a) {
+            for (var i = 0; i < r.tiles.length; i++) if (r.tiles[i].address === a) return r.tiles[i]
+            fail("no tile row for " + a); return null
+        }
+        var f = row("0xF"), rt = row("0xR"), fl = row("0xL")
+        compare(f.fullscreen, 2, "fullscreen mode survives")
+        compare(f.layer, 1, "a RECOVERABLE fullscreen window stays on the tiled layer, not the backdrop")
+        compare(rt.fullscreen, 0); compare(rt.layer, 1)
+        compare(fl.fullscreen, 0); compare(fl.layer, 2, "floating stays layer 2")
+        // The recovered slot is the LEFT half: the fullscreen tile must not cover its neighbour.
+        verify(f.x + f.w <= rt.x + 1, "recovered slot must not overlap the neighbour it was recovered from")
+    }
+
     // Pins the min-size clamp's position clamp: a hairline window near the far edge of the
     // usable area, once widened to minTileW, must not spill past the cell's mini-map inset.
     function test_min_clamp_stays_within_minimap_at_edge() {
