@@ -237,6 +237,25 @@ function _placeWindows(wins, mon, box, P) {
     return out
 }
 
+// The peek's workspace mini-map (docs/specs/2026-09-18-peek-design.md, "Workspace target"): the
+// SAME placement the grid runs, at peek size. `wins` are one workspace's windows and `mon` its
+// monitor; the box is the peek rect at the origin, so the returned rows are box-local and the
+// view positions them by parenting alone.
+function peekTiles(wins, mon, boxW, boxH, P) {
+    if (!wins || !wins.length || !mon) return []
+    return _placeWindows(wins, mon, { x: 0, y: 0, w: boxW, h: boxH }, P)
+}
+
+// Fit `srcW x srcH` inside `boxW x boxH` preserving aspect — never stretch, never upscale past
+// the box (spec: "60% is a box, not a stretch"). A degenerate source (the monitorless "?"
+// placeholder reports 0x0) yields 0x0 rather than NaN, which a Rectangle paints as nothing at
+// all instead of collapsing the layer's whole geometry.
+function peekFit(srcW, srcH, boxW, boxH) {
+    if (!(srcW > 0) || !(srcH > 0)) return { w: 0, h: 0 }
+    var k = Math.min(boxW / srcW, boxH / srcH)
+    return { w: srcW * k, h: srcH * k }
+}
+
 function layout(input) {
     var P = input.params
     var monByName = _index(input.monitors, "name")

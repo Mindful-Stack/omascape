@@ -1177,4 +1177,123 @@ TestCase {
         compare(box(3).synthetic, true, "workspace 3 exists only as a pad slot")
         compare(box(3).active, false, "a workspace Hyprland never created cannot be active")
     }
+
+    // ---- peek (docs/specs/2026-09-18-peek-design.md) ------------------------------------
+    // The peek's own box: a 60% rect at origin, the shape peekTiles is called with.
+    function peekBox(w, h) { return { x: 0, y: 0, w: w, h: h } }
+
+    // Distinguishes: a peekTiles that calls _tileRect directly instead of the shared placement,
+    // which is exactly the defect the spec's "Workspace target" section forbids. The fullscreen
+    // window must land in its recovered slot (the left half) and leave its neighbour visible; a
+    // bare _tileRect call places it across the whole box and swallows 0xR.
+    function test_peekTiles_recovers_a_fullscreen_slot_like_the_grid() {
+        var mon = edp()
+        var wins = [
+            { address: "0xF", workspaceId: 1, ax: 0, ay: 26, sw: 2048, sh: 1254,
+              floating: false, fullscreen: 2, cls: "full", title: "full" },
+            { address: "0xR", workspaceId: 1, ax: 1024, ay: 26, sw: 1024, sh: 1254,
+              floating: false, fullscreen: 0, cls: "right", title: "right" }
+        ]
+        var rows = Logic.peekTiles(wins, mon, 1200, 750, params)
+        compare(rows.length, 2)
+        var f = rows[0].address === "0xF" ? rows[0] : rows[1]
+        var rt = rows[0].address === "0xF" ? rows[1] : rows[0]
+        compare(f.fullscreen, 2); compare(f.layer, 1)
+        verify(f.x + f.w <= rt.x + 1, "the fullscreen peek tile must not cover its neighbour")
+        verify(rt.w > 0 && rt.h > 0, "the neighbour must still be drawn")
+    }
+
+    // Distinguishes: a peek that re-derives geometry instead of sharing the grid's. This
+    // compares peekTiles against `layout`'s OWN output for the same workspace — the grid cell at
+    // one size, the peek box at another — which is what the spec asks for and what the previous
+    // draft of this test did not do (it compared two peek sizes to each other, and would have
+    // passed on a peek that was self-consistently wrong).
+    function test_peekTiles_geometry_matches_the_grid() {
+        var mon = edp()
+        var wins = [
+            { address: "0xA", workspaceId: 1, ax: 0, ay: 26, sw: 1024, sh: 1254,
+              floating: false, fullscreen: 0, cls: "a", title: "a" },
+            { address: "0xB", workspaceId: 1, ax: 1024, ay: 26, sw: 1024, sh: 1254,
+              floating: false, fullscreen: 0, cls: "b", title: "b" }
+        ]
+        var r = Logic.layout({ monitors: [mon],
+            workspaces: [{ id: 1, monitorName: "eDP-1", focused: true, occupied: true }],
+            windows: wins, focusedMonitorName: "eDP-1", availW: 1632, params: params })
+        var b = boxById(r, 1)
+        verify(b !== null, "the grid must have a box for workspace 1")
+        // The peek box's aspect matches the cell's (both follow the monitor), so the arrangement
+        // is comparable; 1200x750 is 1.6, as is 2048x1280.
+        var pk = Logic.peekTiles(wins, mon, 1200, 750, params)
+        compare(pk.length, 2)
+        function gridRow(a) {
+            for (var i = 0; i < r.tiles.length; i++) if (r.tiles[i].address === a) return r.tiles[i]
+            fail("no grid row for " + a); return null
+        }
+        for (var i = 0; i < pk.length; i++) {
+            var g = gridRow(pk[i].address)
+            // Each tile's centre as a FRACTION of its own box — scale-invariant, so this compares
+            // the arrangement and not the pixels. The 3% tolerance is for `cellInset`, a fixed
+            // px value that is therefore NOT scale-invariant: 6px is 1.6% of a 380px cell and
+            // 0.5% of the 1200px peek box.
+            var gf = (g.x - b.x + g.w / 2) / b.w, pf = (pk[i].x + pk[i].w / 2) / 1200
+            verify(Math.abs(gf - pf) < 0.03,
+                   pk[i].address + " centre drifted from the grid: " + gf + " vs " + pf)
+            // And the ratio BETWEEN the two tiles' widths, which carries no inset at all and so
+            // needs no tolerance beyond rounding.
+            verify(Math.abs((pk[0].w / pk[1].w) - (gridRow(pk[0].address).w / gridRow(pk[1].address).w)) < 0.05,
+                   "tile width ratio must hold across sizes")
+        }
+    }
+
+    // Distinguishes: an empty workspace returning null/undefined instead of an empty array, which
+    // a Repeater turns into a binding error rather than an empty mini-map. The spec makes an
+    // empty workspace a legal peek target, so this is a real state, not a defensive check.
+    function test_peekTiles_on_an_empty_workspace_returns_an_empty_array() {
+        var rows = Logic.peekTiles([], edp(), 1200, 750, params)
+        verify(Array.isArray(rows), "must be an array, got " + typeof rows)
+        compare(rows.length, 0)
+    }
+
+    // Distinguishes: min-clamping dropped at peek scale. A sliver window is widened to minTileW
+    // in the grid; at peek size the same clamp must still apply, and the clamped tile must stay
+    // inside the box's inset rather than spilling past its right edge.
+    function test_peekTiles_clamps_slivers_to_the_minimum_tile_size() {
+        var mon = edp()
+        var wins = [{ address: "0xS", workspaceId: 1, ax: 2040, ay: 26, sw: 8, sh: 1254,
+                      floating: false, fullscreen: 0, cls: "sliver", title: "s" }]
+        var rows = Logic.peekTiles(wins, mon, 1200, 750, params)
+        compare(rows.length, 1)
+        verify(rows[0].w >= params.minTileW, "sliver widened to minTileW")
+        verify(rows[0].x + rows[0].w <= 1200 - params.cellInset + 0.01,
+               "the widened tile must stay inside the box inset")
+    }
+
+    // Distinguishes: a fit that stretches. A 16:9 source in a 16:10 box must letterbox
+    // vertically — full width, short of full height — never fill both.
+    function test_peekFit_letterboxes_instead_of_stretching() {
+        var f = Logic.peekFit(1920, 1080, 1600, 1000)     // 16:9 into 16:10
+        compare(Math.round(f.w), 1600, "the constraining axis is filled")
+        verify(f.h < 1000, "the other axis is short: " + f.h)
+        // The load-bearing assertion: the OUTPUT aspect equals the INPUT aspect. Comparing
+        // against the box would pass for a stretch.
+        verify(Math.abs((f.w / f.h) - (1920 / 1080)) < 0.001, "aspect preserved, got " + (f.w / f.h))
+    }
+
+    // Distinguishes: a fit that upscales past the box on the other axis. Portrait into landscape
+    // is the mirror case, and an implementation using max() instead of min() passes the previous
+    // test and fails this one.
+    function test_peekFit_fits_a_portrait_source_inside_a_landscape_box() {
+        var f = Logic.peekFit(1080, 1920, 1600, 1000)
+        verify(f.w <= 1600 + 0.001 && f.h <= 1000 + 0.001, "never exceeds the box")
+        compare(Math.round(f.h), 1000, "height is the constraining axis")
+        verify(Math.abs((f.w / f.h) - (1080 / 1920)) < 0.001, "aspect preserved")
+    }
+
+    // Distinguishes: a degenerate monitor (the "?" phantom, scale 0) producing NaN in the peek,
+    // the same class of bug that once blanked the whole card (see the phantom test above).
+    function test_peekFit_never_yields_NaN() {
+        var f = Logic.peekFit(0, 0, 1600, 1000)
+        verify(isFinite(f.w) && isFinite(f.h), "got " + f.w + "x" + f.h)
+        verify(f.w >= 0 && f.h >= 0)
+    }
 }
