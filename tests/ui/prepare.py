@@ -89,6 +89,9 @@ qml = qml.replace('id: root', '''id: root
     // Compile-time dependency on the `hintKeys2` id in Overview.qml: renaming or removing that
     // id breaks every UI suite at once with "Invalid alias reference", not just Lock's.
     property alias testHintModel2: hintKeys2.model
+    // Compile-time dependency on the `peekLayer` id in Overview.qml: renaming or removing that
+    // instance breaks every UI suite at once with "Invalid alias reference", not just Peek's.
+    property alias testPeek: peekLayer
     property var testScreens: []
     property QtObject compositor: QtObject {
         property var monitors: ({values: []})
@@ -177,6 +180,7 @@ for edge in ('left', 'right'):
 (dest / 'FindBar.qml').write_text((source / 'FindBar.qml').read_text())   # no shell imports: verbatim
 (dest / 'HintCap.qml').write_text((source / 'HintCap.qml').read_text())   # no shell imports: verbatim
 (dest / 'ContextMenu.qml').write_text((source / 'ContextMenu.qml').read_text())  # no shell imports: verbatim
+(dest / 'PeekLayer.qml').write_text((source / 'PeekLayer.qml').read_text())      # no shell imports: verbatim
 # Shell-only helpers: the config loader needs Quickshell.Io, the shadow a GPU shader.
 # `motionEffective` is writable here so tests can flip the policy without a compositor.
 # `workspaces` defaults to 0 (no padding) so the fixture shows exactly the compositor's
