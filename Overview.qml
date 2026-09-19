@@ -244,6 +244,28 @@ Item {
         maxCols: 5, minCellW: 140, maxCellW: 380, cellInset: 3, cellSpacing: 4,
         rowSpacing: 8, headerH: 22, groupInset: 6, minTileW: 8, minTileH: 6, slotGapTolerance: 24
     })
+    // ---- Bar attachment ------------------------------------------------------------------
+    // The reserved TOP strip of the screen the picker is ON. The overlay is an Overlay-layer
+    // surface with exclusionMode Ignore, so panel.height is the WHOLE screen and the bar sits
+    // underneath it; `reserved` is the only thing that says where the bar ends.
+    //
+    // Resolved through targetScreen, NOT through Hyprland.focusedMonitor. open() captures
+    // targetScreen once, but focus keeps moving: focus landing on a monitor that reserves a
+    // different amount — or nothing — would otherwise re-anchor the card, resize its height cap
+    // and flip bar mode off underneath an open picker.
+    //
+    // monitorEpoch is the dependency, exactly as the reminder frame's binding uses it:
+    // monitorFor() is a one-shot C++ invokable and nothing notifies QML when Hyprland REPLACES
+    // the monitor object for a screen, so without it this keeps a stale or null pointer.
+    readonly property int reservedTop: {
+        var m = (root.monitorEpoch,
+                 root.targetScreen ? Hyprland.monitorFor(root.targetScreen) : null)
+        var r = m && m.lastIpcObject ? m.lastIpcObject.reserved : null
+        return (r && r.length > 1 && isFinite(r[1]) && r[1] > 0) ? Math.round(r[1]) : 0
+    }
+    // No top bar to hang from (a side, bottom or hidden bar) means no attachment: the picker
+    // keeps the centred card rather than squaring itself against nothing.
+    readonly property bool barMode: config.anchor === "bar" && reservedTop > 0
     // Backdrop behind the focused monitor's group: a whisper of accent, so which screen is
     // live reads peripherally without touching the three well shades.
     readonly property color groupBackdropColor: Qt.rgba(accent.r, accent.g, accent.b, 0.08)
