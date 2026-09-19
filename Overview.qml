@@ -1824,7 +1824,7 @@ Item {
                             // NO `|| 0` on the lookup. Rank 0 is a legitimate value (every
                             // layout has a top row), so `|| 0` would turn a MISS into a silent
                             // "first row". A miss cannot happen -- every box gets a rank, and
-                            // logic.js:360 skips any window whose workspace has no box, so no
+                            // logic.js:397 skips any window whose workspace has no box, so no
                             // tile can reference a rankless workspace -- and if that invariant
                             // ever breaks it must be visible, not smoothed over. rowPhase's own
                             // non-finite guard is the single fail-safe.

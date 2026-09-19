@@ -201,7 +201,7 @@ function padWorkspaces(workspaces, count, focusedMonitorName) {
 // turn a miss into a silent "animate as the top row", hiding a broken invariant. The single
 // fail-safe for a non-finite rank lives in rowPhase, not at each call site. Every tile's
 // workspace id is in ranks by construction: layout() paths at 301/339 produce boxes, and
-// tiles are born only from boxes (line 360: `if (!wbox) continue`).
+// tiles are born only from boxes (line 397: `if (!wbox) continue`).
 function rowRanks(boxes) {
     if (!boxes || !boxes.length) return { ranks: {}, rowCount: 0 }
     var ys = [], i, v

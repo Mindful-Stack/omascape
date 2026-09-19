@@ -55,7 +55,7 @@ and ring the display.
 
 - **Full width, with the bottom cap kept.** `maxCardH` still subtracts one `screenMargin`, so an
   overflowing layout stops short of the screen edge instead of running into it. This is invisible
-  in ordinary use: `Overview.qml:1526` sizes the card to its content and the cap only bites on
+  in ordinary use: `Overview.qml:1637` sizes the card to its content and the cap only bites on
   overflow. At 1080 with a 26px bar the cap sits at 1000 while a single-monitor ten-workspace card
   measures roughly 550–600.
 
@@ -89,17 +89,17 @@ and ring the display.
   user's own combination of settings and is left alone.
 
 - **The bar is resolved from `targetScreen`, not from live focus.** ✎ *(added after review.)*
-  `open()` captures `root.targetScreen` once (`Overview.qml:1449` binds the surface to it), but
+  `open()` captures `root.targetScreen` once (`Overview.qml:1520` binds the surface to it), but
   `Hyprland.focusedMonitor` is live. Focus can move to another monitor while the picker is open,
   and the two monitors may reserve different amounts — different bar scales, or no top bar at all.
   Reading live focus would then re-anchor the card, resize `maxCardH`, or flip `barMode` off
   underneath an open picker. `reservedTop` must resolve through `Hyprland.monitorFor(targetScreen)`,
-  using the established `monitorEpoch` comma-dependency (`Overview.qml:108`, `:1407`) because
+  using the established `monitorEpoch` comma-dependency (`Overview.qml:122`, `:1407`) because
   `monitorFor` is a one-shot C++ invokable that nothing re-notifies when Hyprland replaces the
   monitor object for a screen.
 
 - **No card scale in bar mode.** ✎ *(added after review.)* `enterAnim` scales the card 0.96 → 1
-  and `exitAnim` to 0.98 (`Overview.qml:1310`, `:1320`). `transformOrigin: Item.Top` moves the
+  and `exitAnim` to 0.98 (`Overview.qml:1381`, `:1391`). `transformOrigin: Item.Top` moves the
   pivot to the top *centre* — it does not stop horizontal scaling. On a 1920 panel the card's
   sides would travel **38.4 px inward during the entrance and 19.2 px during the exit**, which is
   precisely the failure the first draft's off-screen border depended on not happening. Squaring the
@@ -150,9 +150,9 @@ screen and never animates. `flick.width` needs no correction, since the card no 
 ## The staged entrance
 
 **The canvas has no rows.** `canvas` is an `Item` holding absolutely-positioned Repeaters over flat
-models; boxes carry `bx/by/bw/bh` (`Overview.qml:1676`) and tiles `wx/wy` (`:1765`). There is no
+models; boxes carry `bx/by/bw/bh` (`Overview.qml:1799`) and tiles `wx/wy` (`:1906`). There is no
 row object to hang a delay on. `tilesModel` is also reconciled **in place** (`set`, not reassign —
-`:478`), so delegates persist across rebuilds and a per-delegate `Component.onCompleted` timer
+`:529`), so delegates persist across rebuilds and a per-delegate `Component.onCompleted` timer
 would fire once at startup and never again.
 
 So the entrance is **one root-level progress property with N bindings**, not N timers:
@@ -162,7 +162,7 @@ So the entrance is **one root-level progress property with N bindings**, not N t
   following the motion policy and the suites' `motion.scale` hook for free.
 - `Logic.rowRanks(boxes)` → `{ ranks: { workspaceId: k }, rowCount: n }`, ranking distinct box `y`
   values ascending, globally across monitor groups so the stagger sweeps the whole card. It reads
-  `layout()`'s own `box.y`, upstream of the `by` role mapping at `:1106`.
+  `layout()`'s own `box.y`, upstream of the `by` role mapping at `:1163`.
 - `Logic.rowPhase(progress, rank, rowCount)` → 0..1 for that row. Each row's ramp occupies a fixed
   `span` ≈ 0.6 of the timeline and the starts are spread across the remainder —
   `stride = (1 − span) / (rowCount − 1)`, with a single row being simply `progress`. So **more rows
@@ -172,7 +172,7 @@ So the entrance is **one root-level progress property with N bindings**, not N t
   so the entrance never fights the existing `Behavior on y` layout motion. Tiles look up their rank
   by `workspaceId`, so a tile can never stagger out of step with the box it sits in.
 
-Exact float equality is safe: `logic.js:263` assigns `y: y` from one shared accumulator, so every
+Exact float equality is safe: `logic.js:328` assigns `y: y` from one shared accumulator, so every
 box in a sub-row carries the identical value by construction, not by coincidence.
 
 Three properties this must hold:
@@ -225,8 +225,10 @@ fades in at full size while the rows drop into it. `card.scale` stays 1, so `Sof
   per-monitor ranking.
 - `rowPhase`: `0` at `progress` 0 and `1` at 1 for every rank; **row 1 strictly lags row 0 at a
   mid-timeline progress** (the discriminator — wire the rank wrong, or drop the stride, and these
-  collapse to equal); the last row has not yet reached 1 just before the end; a non-finite input
-  returns 1.
+  collapse to equal); the last row has not yet reached 1 just before the end; and a non-finite
+  input never returns **0** — non-finite `progress` gives 1, a non-finite `rank` degrades to rank
+  0, a non-finite `rowCount` to no stagger. ✎ *(an earlier draft said "returns 1" here too; that
+  is true only of `progress` — see the corrected statement above.)*
 
 **UI — new `tests/ui/dropdown.qml`**, registered by hand in `tests/ui/run.sh` (the UI suites are
 not auto-discovered):
@@ -244,7 +246,7 @@ not auto-discovered):
   `card.x` and `card.width` mid-animation — not only at rest — and assert the card still spans
   the panel. This is the assertion the first draft needed and did not have: at rest, a scaled and
   an unscaled card are identical, so an end-state-only check passes against the very bug it is
-  supposed to catch. Drive it through the existing `motion.scale` test hook (`Overview.qml:215`)
+  supposed to catch. Drive it through the existing `motion.scale` test hook (`Overview.qml:229`)
   rather than by waiting on wall-clock.
 - **Focus moving to a monitor with a different top reservation does not move the card.** Open on
   a monitor reserving 26, then point `Hyprland.focusedMonitor` at one reserving 52, and assert
