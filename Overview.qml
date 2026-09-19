@@ -467,7 +467,8 @@ Item {
     }
     // The "select" policy's digit latch: the key code of the digit press that made the current
     // selection, or 0. A press of the SAME key completes the gesture. Cleared by every other key
-    // and by every click — but NOT by pointer movement, which changes nothing in select mode.
+    // that reaches the handler — but NOT by pointer movement, which changes nothing in select
+    // mode. Click-to-select clears it too, once that exists.
     property int digitLatch: 0
     // ---- Actions: the arrow-key window cursor ----------------------------------------------
     // The keyboard's window target inside the selected workspace. "" = none. Mirrored into the
@@ -1531,6 +1532,19 @@ Item {
                     e.accepted = true
                     // Lone modifiers belong to no class (see Logic.isModifierKey).
                     if (Logic.isModifierKey(e.key)) return
+                    // Take the latch: EVERY key that gets this far clears it, and only the digit
+                    // branch below re-arms — from `latch`, the value as it was on entry. Pointer
+                    // movement never reaches this handler, which is exactly why a mouse move
+                    // cannot break a pending repeat.
+                    //
+                    // Placement is the rule. ABOVE the dialog, menu and dismiss-key branches,
+                    // because each of those returns early: a key swallowed by a menu would
+                    // otherwise leave the latch armed, and a menu action can close or move a
+                    // window first — so `2`, a menu, `2` would enter a workspace after two
+                    // presses that never showed a selection. BELOW the modifier guard, because a
+                    // lone Shift or Ctrl changes nothing on screen and must not break a repeat.
+                    var latch = root.digitLatch
+                    root.digitLatch = 0
                     // The confirmation dialog owns every key while it is open, ahead of the menu
                     // branch: this plugin has exactly one focus item, so everything is routed
                     // through here. `handleKey`'s own return is not consulted — while the dialog
@@ -1544,12 +1558,6 @@ Item {
 
                     var chord = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
                     var finding = root.query.length > 0
-                    // Take the latch: EVERY key clears it, and only the digit branch below
-                    // re-arms — from `latch`, the value as it was on entry. Pointer movement
-                    // never reaches here, which is exactly why a mouse move cannot break a
-                    // pending repeat.
-                    var latch = root.digitLatch
-                    root.digitLatch = 0
                     // Action keys read pointer liveness; everything else is keyboard intent and
                     // clears it BEFORE any resolve below can see it.
                     if (!Logic.isActionKey(e.key, chord, Qt.ControlModifier)) root.pointerLive = false

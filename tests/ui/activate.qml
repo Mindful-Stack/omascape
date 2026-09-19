@@ -181,6 +181,7 @@ TestCase {
     function test_c_a_mouse_move_does_not_clear_the_latch() {
         keyClick(Qt.Key_2)
         hoverTile("0xA")
+        compare(view.pointerLive, true, "the hover must be a REAL move, or this proves nothing")
         keyClick(Qt.Key_2)
         compare(view.opened, false, "the repeat must still complete after a mouse move")
     }
@@ -206,11 +207,38 @@ TestCase {
     // failure modes. Holding a digit is a live-check item, not an offscreen one.
 
     // Distinguishes: a latch that outlives the summon it was armed in, which would make the
-    // first digit press of the NEXT open enter instead of select.
+    // first digit press of the NEXT open enter instead of select. Asserted BEHAVIOURALLY, by
+    // reopening and pressing the same digit: `digitActivate` already returns latch 0 on enter,
+    // so a state-only check would stay green even with open()'s reset deleted.
     function test_c_entering_leaves_no_latch_behind() {
         keyClick(Qt.Key_2); keyClick(Qt.Key_2)
         compare(view.opened, false)
-        compare(view.digitLatch, 0, "the latch must not survive the close")
+
+        view.open()
+        wait(400)
+        view.compositor.commands = []    // after the open: it dispatches lock chunks of its own
+        keyClick(Qt.Key_2)
+        compare(view.opened, true, "the first digit of a new summon selects; it never completes")
+        compare(view.compositor.commands.length, 0, "and dispatches nothing")
+    }
+    // Distinguishes: a latch taken AFTER the dialog/menu/dismiss-key branches, each of which
+    // returns early. A key swallowed by the menu would then leave the latch armed — and a menu
+    // action can close or move a window first — so `2`, a menu-swallowed key, `2` would enter a
+    // workspace after two presses that never showed a selection between them.
+    function test_c_a_key_swallowed_by_the_menu_still_clears_the_latch() {
+        keyClick(Qt.Key_2)
+        compare(view.digitLatch, Qt.Key_2, "armed")
+
+        var p = tileCentre("0xA")
+        mousePress(view, p.x, p.y, Qt.RightButton)
+        mouseRelease(view, p.x, p.y, Qt.RightButton)
+        wait(30)
+        compare(view.menuOpen, true, "the menu must really be open, or this proves nothing")
+
+        keyClick(Qt.Key_Escape)                  // dismisses the menu; never reaches the branches
+        wait(30)
+        compare(view.menuOpen, false)
+        compare(view.digitLatch, 0, "a swallowed key must still have cleared the latch")
     }
     // Distinguishes: a policy flip that leaves a stale latch, so the first digit after switching
     // back completes a gesture begun under the old policy.
