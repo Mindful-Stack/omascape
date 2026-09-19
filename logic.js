@@ -1001,6 +1001,7 @@ function parseConfig(raw) {
         workspaces: (typeof o.workspaces === "number" && isFinite(o.workspaces))
             ? Math.max(0, Math.floor(o.workspaces)) : 10,
         motion: (o.motion === "full" || o.motion === "off") ? o.motion : "auto",
+        activate: (o.activate === "select") ? "select" : "enter",
         lockBorder: (typeof o.lockBorder === "string" && LOCK_BORDER_RE.test(o.lockBorder))
             ? o.lockBorder : "rgb(ff4444)",
         lockBorderSize: (typeof o.lockBorderSize === "number" && isFinite(o.lockBorderSize))
