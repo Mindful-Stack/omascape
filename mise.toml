@@ -5,3 +5,11 @@ run = "bash tests/run.sh"
 [tasks.test-integration]
 description = "Tier 2: nested-Hyprland integration (local; needs Hyprland + Quickshell + foot + jq)"
 run = "bash tests/integration/move.sh"
+
+[tasks.link]
+description = "Point the live Omarchy plugin dir at this worktree and restart the shell"
+run = "bash scripts/dev-link.sh"
+
+[tasks.unlink]
+description = "Restore the ordinary clone install and restart the shell"
+run = "bash scripts/dev-link.sh --unlink"
