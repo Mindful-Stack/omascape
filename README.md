@@ -423,8 +423,7 @@ APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inli
    ```
 
    `mise run dev:unlink` puts the clone back. Running it from the installed clone itself is fine:
-   it is already the live checkout, so only the restart happens. (`link` and `unlink` work as
-   short aliases for both.)
+   it is already the live checkout, so only the restart happens.
 
    The names mirror Omarchy's own `omarchy dev link` / `dev unlink` / `dev status`, which do the
    same three things for Omarchy itself.
@@ -451,7 +450,7 @@ APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inli
 
    > ⚠️ **Editing QML requires a full shell restart, not just a rescan.**
    > `omarchy-shell shell rescanPlugins` reloads the manifest/registry but **not** the live
-   > QML component, so your code change won't show until the shell restarts. `mise run link`
+   > QML component, so your code change won't show until the shell restarts. `mise run dev:link`
    > does that for you — and it restarts only the compositor your session identifies, rather
    > than whichever one happens to answer.
 

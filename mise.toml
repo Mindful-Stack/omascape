@@ -7,15 +7,13 @@ description = "Tier 2: nested-Hyprland integration (local; needs Hyprland + Quic
 run = "bash tests/integration/move.sh"
 
 # Named after Omarchy's own `omarchy dev link` / `dev unlink` / `dev status`, which
-# do the same three things one level up. The short spellings stay as aliases.
+# do the same three things one level up.
 [tasks."dev:link"]
-description = "Point the live Omarchy plugin dir at this worktree and restart the shell (alias: link)"
-alias = "link"
+description = "Point the live Omarchy plugin dir at this worktree and restart the shell"
 run = "bash scripts/dev-link.sh"
 
 [tasks."dev:unlink"]
-description = "Restore the ordinary clone install and restart the shell (alias: unlink)"
-alias = "unlink"
+description = "Restore the ordinary clone install and restart the shell"
 run = "bash scripts/dev-link.sh --unlink"
 
 [tasks."dev:status"]
