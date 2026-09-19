@@ -42,6 +42,11 @@ case "${1:-}" in
 *) fail "unknown argument: $1" ;;
 esac
 
+# Refuse a broken manifest before anything is touched; the shell silently ignores
+# a plugin whose manifest does not validate.
+"$OMARCHY" plugin validate "$REPO" >/dev/null ||
+  fail "omarchy plugin validate failed for $REPO; nothing was changed"
+
 # --- identify the desktop session, before touching anything -----------------
 # UWSM finalizes the session's HYPRLAND_INSTANCE_SIGNATURE into the systemd user
 # environment; omarchy-restart-shell already reads OMARCHY_PATH from there. The
@@ -129,6 +134,28 @@ if [[ $MODE == link ]]; then
   fi
   # The already-live branch printed its own line above.
   [[ -n $install_real && $install_real == "$REPO" ]] || echo "linked   $PLUGIN_ID -> $REPO"
+  [[ -z $previous ]] || echo "was      $previous"
+
+  # Any uncommitted change counts, untracked files included: the shell loads the
+  # working tree exactly as it is on disk.
+  branch=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
+  sha=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "?")
+  dirty=""
+  [[ -z $(git -C "$REPO" status --porcelain 2>/dev/null) ]] || dirty=" (dirty)"
+  echo "branch   $branch @ $sha$dirty"
+else
+  if [[ -L $INSTALL ]]; then
+    previous=$(readlink -- "$INSTALL")
+    rm -- "$INSTALL"
+  elif [[ -e $INSTALL ]]; then
+    fail "$INSTALL is not a symlink; refusing to move a real install"
+  fi
+  if [[ -d $STASH ]]; then
+    mv -- "$STASH" "$INSTALL"
+    echo "restored $PLUGIN_ID <- ${STASH##*/}"
+  else
+    echo "unlinked $PLUGIN_ID (no stashed install to restore)"
+  fi
   [[ -z $previous ]] || echo "was      $previous"
 fi
 

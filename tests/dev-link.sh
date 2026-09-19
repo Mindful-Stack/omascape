@@ -358,5 +358,51 @@ same  "dead: exits 1" "$status" "1"
 has   "dead: gives the journal hint" "$out" "journalctl --user -t omarchy-shell -n 60"
 lacks "dead: does not claim success" "$out" "restart  ok"
 
+# --- --unlink removes the link and restores the stash ---------------------
+box=$(setup unlink-restores)
+mkdir -p "$(stash_path "$box")"
+echo marker > "$(stash_path "$box")/CLONE_MARKER"
+ln -s "$src" "$(install_path "$box")"
+run "$box" --unlink
+same   "unlink: exits 0" "$status" "0"
+is_dir "unlink: the clone is back as a real directory" "$(install_path "$box")"
+same   "unlink: its contents survived" "$(cat "$(install_path "$box")/CLONE_MARKER")" "marker"
+absent "unlink: the stash is gone" "$(stash_path "$box")"
+has    "unlink: restarted too" "$out" "restart  ok"
+
+# --- --unlink with nothing stashed just removes the link -----------------
+box=$(setup unlink-bare)
+ln -s "$src" "$(install_path "$box")"
+run "$box" --unlink
+same   "unlink-bare: exits 0" "$status" "0"
+absent "unlink-bare: the link is gone" "$(install_path "$box")"
+has    "unlink-bare: says there was nothing to restore" "$out" "no stashed install"
+
+# --- a manifest that fails validation refuses, touching nothing ----------
+box=$(setup invalid-manifest)
+printf 'fail\n' > "$box/state/validate"
+run "$box"
+same   "invalid: exits 1" "$status" "1"
+absent "invalid: no symlink was created" "$(install_path "$box")"
+absent "invalid: no restart was attempted" "$box/state/restart-signature"
+
+# --- XDG_CONFIG_HOME is ignored, because Omarchy hardcodes the path ------
+box=$(setup ignores-xdg)
+extra_env=(XDG_CONFIG_HOME="$box/xdg")
+run "$box"
+extra_env=()
+same    "xdg: exits 0" "$status" "0"
+is_link "xdg: linked under \$HOME/.config, not \$XDG_CONFIG_HOME" "$(install_path "$box")"
+absent  "xdg: nothing was created under XDG_CONFIG_HOME" "$box/xdg"
+
+# --- the receipt names the branch and its state --------------------------
+box=$(setup receipt-branch)
+run "$box"
+if [[ $out =~ branch[[:space:]]+[^[:space:]]+[[:space:]]@[[:space:]][0-9a-f]{7} ]]; then
+  ok "receipt: names the branch and short sha"
+else
+  bad "receipt: names the branch and short sha" "no branch line in: $out"
+fi
+
 printf '\n  %d passed, %d failed\n' "$passed" "$failed"
 (( failed == 0 )) || exit 1
