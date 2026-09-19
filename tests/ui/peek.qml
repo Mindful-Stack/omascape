@@ -322,6 +322,43 @@ TestCase {
         keyRelease(Qt.Key_Space)
     }
 
+    // ---- icon-flash grace period (WindowTile.qml's iconGraceMs) ---------------------------
+
+    // Distinguishes: iconGraceMs wired to the peek's window tile but not actually gating the
+    // icon fallback, or not wired at all. Offscreen there is no compositor, so ScreencopyView
+    // never gets content and `cap.hasContent` stays false forever (see this file's own header
+    // comment) — which is exactly the state the grace exists to handle, and prepare.py's
+    // ScreencopyView stub reproduces it faithfully (hasContent pinned false, every other binding
+    // real production code — see prepare.py's own comment on that stub). `wantCapture` also
+    // needs `handle !== null`, and offscreen there is no ToplevelManager either, so
+    // `handleByAddress` is always {} on its own (buildHandles() has nothing to build from) — a
+    // bare placeholder object poked in directly stands in for a real HyprlandToplevel just as
+    // well here, since nothing downstream ever dereferences it (the stub above never reads
+    // `captureSource`). With that handle present and the peek's own `capMode: "live"`,
+    // `wantCapture` is genuinely true, so the grace clock genuinely starts: this checks both of
+    // its edges against the actual peeked WindowTile instance, not a fixture stand-in — hidden
+    // immediately after the press (the race this bug report is about), then shown once the
+    // grace has actually elapsed with still no content (the denied-capture case the grace must
+    // not hide forever). iconUrl is always "" offscreen (Quickshell.iconPath is stubbed to ""
+    // too), so the Image itself never shows either way — testLetterVisible is the one of the
+    // pair that can actually move in this tier, and per the report's own decision on
+    // WindowTile.qml:193, it is gated identically to the icon.
+    function test_the_peeked_window_holds_its_icon_off_until_the_grace_elapses() {
+        hoverTile("0xB")
+        view.handleByAddress = Object.assign({}, view.handleByAddress, { "0xB": {} })
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        var t = view.testPeek.testWindowTile
+        verify(t !== null && t !== undefined, "the fixture must expose the peeked WindowTile")
+        compare(t.wantCapture, true, "precondition: a handle is present and capMode is live")
+        compare(t.testLetterVisible, false,
+                "the fallback must not flash in before the grace elapses")
+        wait(t.iconGraceMs + 60)
+        compare(t.testLetterVisible, true,
+                "and must appear once the grace has genuinely elapsed with no content")
+        keyRelease(Qt.Key_Space)
+    }
+
     // ---- the mini-map's window-list cache (Task 7 review, item 1) --------------------------
 
     // Distinguishes: `peekWorkspaceWindowsFor()`'s cache losing identity stability on a change

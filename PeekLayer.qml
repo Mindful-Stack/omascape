@@ -98,6 +98,17 @@ Item {
             // r5 default reads as a smaller, squarer rectangle sitting inside the r20 frame, with
             // a hairline the card never shows, and pokes past the SoftShadow at all four corners.
             cornerRadius: peek.cardRadius
+            // A fresh capture is created on every hold (see iconGraceMs's own comment in
+            // WindowTile.qml), so unlike a grid tile this one races the icon against the first
+            // frame every single time — the bug docs/specs/2026-09-18-peek-design.md's own
+            // "honest rendering of no pixels" line does not cover, because a frame IS on the way.
+            // 150ms: a wlroots screencopy round trip is normally one or two compositor frames
+            // (~16-33ms at 60Hz), so this is roughly 5-10x that budget — enough headroom for a
+            // slow first frame (a busy compositor, a cold GPU pipeline) to still land inside the
+            // window and never show an icon at all, while staying well under "a few hundred ms"
+            // for the genuine-denial case (a `no_screen_share` rule outside the armed-workspace
+            // path), where the icon is now merely late by this much rather than flashing first.
+            iconGraceMs: 150
         }
 
         // Workspace target: the grid's own placement at peek size, one capture per window.
@@ -139,6 +150,10 @@ Item {
                 // on a crowded workspace, so there is no overflow risk at that end either.
                 iconMax: 96
                 decorated: false
+                // Same reasoning and number as the window peek's own iconGraceMs above: each
+                // mini-map tile is a fresh per-window capture on every hold too, so it races the
+                // icon against its first frame exactly the same way.
+                iconGraceMs: 150
             }
         }
     }

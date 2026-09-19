@@ -125,9 +125,47 @@ qml = qml.replace('id: root', '''id: root
 tile = (source / 'WindowTile.qml').read_text()
 tile = re.sub(r'^import Quickshell.*\n', '', tile, flags=re.M)
 tile = re.sub(r'Quickshell.iconPath\(.*\)', '""', tile)
-start = tile.index('    ClippingRectangle {')
-end = tile.index('    // title label', start)
-tile = tile[:start] + '    Rectangle { anchors.fill: parent; color: tile.bg }\n\n' + tile[end:]
+# ClippingRectangle (Quickshell.Widgets) has no offscreen equivalent; a plain Rectangle keeps
+# every property used here (radius, border.*) valid. Losing the actual child-clipping is fine —
+# nothing this tier asserts on depends on it.
+tile = replaced(tile, '    ClippingRectangle {', '    Rectangle {', 'ClippingRectangle wrapper')
+# ScreencopyView (Quickshell.Wayland) can't run offscreen either, but unlike the wrapper above its
+# own state is exactly what the icon-fallback and grace-period bindings that follow (the Image and
+# Text below it, and iconGraceMs/graceActive up in the property block) react to — so it is stubbed,
+# not deleted, and the stub's `hasContent` is pinned to false: precisely what the real type would
+# report offscreen anyway (no compositor, no captured frame, ever arrives). Every binding that
+# reads `cap.hasContent` or `cap.visible` then runs as genuine production code, which is what
+# makes the icon-vs-capture race in tests/ui/peek.qml a real test rather than a fixture fiction —
+# see that file's own header comment on what this tier can and cannot show.
+tile = replaced(tile, '''        ScreencopyView {
+            id: cap
+            anchors.fill: parent
+            visible: tile.wantCapture && cap.hasContent
+            captureSource: tile.wantCapture ? tile.handle : null
+            live: tile.capMode === "live"
+        }''', '''        Item {
+            id: cap
+            anchors.fill: parent
+            property bool hasContent: false
+            visible: tile.wantCapture && cap.hasContent
+        }''', 'ScreencopyView capture stub')
+# The icon-fallback Image and letter-fallback Text carry no id in production (nothing there needs
+# one) — the peek icon-flash suite (tests/ui/peek.qml) needs one to read `visible` back, so this
+# gives each an id and re-exposes it as a plain alias on `tile`, the same test-only-plumbing
+# pattern the Overview.qml block above uses for its own testX aliases. Only iconUrl.length === 0
+# is reachable offscreen (Quickshell.iconPath is stubbed to "" above, so the Image itself never
+# shows), which is exactly why this file's own grace-period test reads testLetterVisible.
+tile = replaced(tile, '        Image {\n            anchors.centerIn: parent',
+                       '        Image {\n            id: iconImg\n            anchors.centerIn: parent',
+                 'icon Image id')
+tile = replaced(tile, '        Text {\n            anchors.centerIn: parent',
+                       '        Text {\n            id: letterFallback\n            anchors.centerIn: parent',
+                 'letter-fallback Text id')
+tile = replaced(tile, '    id: tile\n',
+                       '''    id: tile
+    property alias testIconVisible: iconImg.visible
+    property alias testLetterVisible: letterFallback.visible
+''', 'tile id (test alias anchor)')
 (dest / 'WindowTile.qml').write_text(tile)
 (dest / 'logic.js').write_text((source / 'logic.js').read_text())
 # Share-time reminder frame: the same treatment as Overview.qml's own PanelWindow — layer-shell
@@ -180,7 +218,21 @@ for edge in ('left', 'right'):
 (dest / 'FindBar.qml').write_text((source / 'FindBar.qml').read_text())   # no shell imports: verbatim
 (dest / 'HintCap.qml').write_text((source / 'HintCap.qml').read_text())   # no shell imports: verbatim
 (dest / 'ContextMenu.qml').write_text((source / 'ContextMenu.qml').read_text())  # no shell imports: verbatim
-(dest / 'PeekLayer.qml').write_text((source / 'PeekLayer.qml').read_text())      # no shell imports: verbatim
+# No shell imports, so almost verbatim — except the window-peek's own WindowTile carries no id in
+# production (nothing there needs one either), and the icon-flash grace suite (tests/ui/peek.qml)
+# needs a way to reach it. Same test-only-plumbing pattern as the WindowTile.qml block above: give
+# it an id and re-expose it as a plain alias on `peek`.
+peeklayer = (source / 'PeekLayer.qml').read_text()
+peeklayer = replaced(peeklayer, '''        WindowTile {
+            anchors.fill: parent
+            visible: peek.isWindow''', '''        WindowTile {
+            id: peekWindowTile
+            anchors.fill: parent
+            visible: peek.isWindow''', 'window-peek WindowTile id')
+peeklayer = replaced(peeklayer, '    id: peek\n',
+                                  '    id: peek\n    property alias testWindowTile: peekWindowTile\n',
+                      'peek id (test alias anchor)')
+(dest / 'PeekLayer.qml').write_text(peeklayer)
 # Shell-only helpers: the config loader needs Quickshell.Io, the shadow a GPU shader.
 # `motionEffective` is writable here so tests can flip the policy without a compositor.
 # `workspaces` defaults to 0 (no padding) so the fixture shows exactly the compositor's

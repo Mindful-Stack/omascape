@@ -79,6 +79,39 @@ Item {
     // drawn at, instead of a smaller rectangle poking past the shadow at all four corners.
     property int cornerRadius: 5
 
+    // Peek's own opt-in, for a different reason than the three above: the grid's ScreencopyView
+    // is created once per summon and its first frame typically lands during appear()'s fade-in,
+    // so the icon-then-capture race there is over before a user's eye gets to the tile. The peek
+    // instead creates a FRESH capture on every hold, at ~3x the grid's size, so that race runs on
+    // every single Space press — the icon wins for a frame or two, then gets yanked out from
+    // under a box covering 60% of the screen. Zero (the grid default) reproduces today's
+    // behaviour exactly: the icon is the honest "no pixels to show" render, and appears the
+    // instant there is nothing to show. Above zero, the icon is held off for this many ms while a
+    // capture is genuinely in flight (`wantCapture` true, `cap.hasContent` still false) rather
+    // than flashing in ahead of frame 0. If the grace elapses with still nothing — a capture the
+    // compositor denies outright, e.g. the user's own `no_screen_share` window rule outside the
+    // armed-workspace path this file already gates on via `capMode: "icon"` — the icon appears
+    // exactly as it does today, just late by this much, rather than leaving a blank frame
+    // forever. `wantCapture` being false (no handle, or a tile explicitly parked in icon mode) is
+    // never gated: nothing is expected there, so the icon still shows immediately, with no delay.
+    property int iconGraceMs: 0
+    readonly property bool graceActive: iconGraceMs > 0 && wantCapture && !cap.hasContent
+    property bool graceElapsed: false
+    Timer {
+        id: graceTimer
+        interval: tile.iconGraceMs
+        // Bound to the real Timer.running property rather than driven off an onGraceActiveChanged
+        // handler on our own QML-declared property: a tile can be BORN already needing the grace
+        // (capture requested from its very first paint, e.g. the peek's fresh-per-hold capture),
+        // and a plain on*Changed handler on a QML property only fires on a later change — not on
+        // the value the property is born with. Timer.running is a real C++-backed property, so
+        // assigning it true for the first time still runs through its setter and starts the
+        // clock, regardless of whether this is the tile's first binding evaluation or its tenth.
+        running: tile.graceActive
+        onRunningChanged: if (running) tile.graceElapsed = false
+        onTriggered: tile.graceElapsed = true
+    }
+
     // Drag ghost: while in transit the tile shrinks around the grabbed point (so that point stays
     // under the pointer and the ghost never hides the drop highlight) and turns translucent.
     // The pointer, not the ghost, decides where a tiled window lands.
@@ -177,10 +210,14 @@ Item {
             live: tile.capMode === "live"
         }
 
-        // icon fallback: shown when not capturing, or until the first frame arrives
+        // icon fallback: shown when not capturing at all (no handle, or capMode "icon" — nothing
+        // is expected, so no delay applies), or once iconGraceMs above has elapsed with still no
+        // content. While a capture IS expected and its grace hasn't elapsed yet, this stays
+        // hidden rather than flashing in ahead of the first frame — see iconGraceMs's own comment
+        // for the full story and why the grid leaves it at zero (immediate, as before).
         Image {
             anchors.centerIn: parent
-            visible: !cap.visible && tile.iconUrl.length > 0
+            visible: !cap.visible && tile.iconUrl.length > 0 && (!tile.graceActive || tile.graceElapsed)
             source: tile.iconUrl
             width: Math.min(tile.iconMax, parent.width * 0.5)
             height: width
@@ -188,9 +225,13 @@ Item {
             sourceSize.width: width * Screen.devicePixelRatio
             sourceSize.height: height * Screen.devicePixelRatio
         }
+        // Same grace as the icon above, for the same reason: an app with no icon at all falls
+        // back to this letter instead, and it races the first frame exactly the same way — an
+        // unknown app is not a reason to skip the grace, so this is gated identically rather than
+        // gated on nothing.
         Text {
             anchors.centerIn: parent
-            visible: !cap.visible && tile.iconUrl.length === 0
+            visible: !cap.visible && tile.iconUrl.length === 0 && (!tile.graceActive || tile.graceElapsed)
             text: String(tile.cls).substring(0, 1).toUpperCase()
             color: tile.fg
             font.pixelSize: Math.min(20, parent.height * 0.5)
