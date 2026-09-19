@@ -516,7 +516,7 @@ Item {
     }
     // The workspace a tile is currently DRAWN in. Not the same as `_windowByAddress[addr]
     // .workspaceId` for the ~1.8 s of an optimistic drop: the row carries the target while the
-    // compositor still reports the source (submitDrop says so at :966). A click must act on the
+    // compositor still reports the source (submitDrop, :982, notes it). A click must act on the
     // box the user actually clicked into, so every selection path reads the row, not the report
     // — which is also why this reads the model rather than taking the id from a caller.
     function displayedWorkspaceOf(addr) {
@@ -525,7 +525,7 @@ Item {
         return -1
     }
     // Click-to-select under the "select" policy. Sets BOTH the window cursor and the box
-    // selection: applyTiles clears a cursor that is not on selectedId (see :1180), so a click
+    // selection: rebuild() drops a cursor that is not on selectedId (:1252), so a click
     // that set only the cursor would lose its ring at the next rebuild.
     function selectTile(addr) {
         digitLatch = 0
@@ -1451,14 +1451,11 @@ Item {
     // The watched config file changing the padded workspace count while open: the compositor
     // data is not stale, so a plain rebuild re-lays the wells at once. `lockBorder`/
     // `lockBorderSize` need no handler at all now — the frame binds to them directly.
+    // `activate`: a mid-session policy flip must not leave a stale latch behind, or the first
+    // digit after switching back to "select" would complete a gesture begun under the old policy.
     Connections {
         target: config
         function onWorkspacesChanged() { if (root.opened) root.rebuild() }
-    }
-    // A mid-session policy flip must not leave a stale latch behind: the first digit after
-    // switching back to "select" would otherwise complete a gesture begun under the old policy.
-    Connections {
-        target: config
         function onActivateChanged() { root.digitLatch = 0 }
     }
 

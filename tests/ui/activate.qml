@@ -40,6 +40,15 @@ TestCase {
             wsRow(3, [])
         ] }
     }
+    // The compositor acknowledging a drop of 0xA onto workspace 3: the stub records dispatches
+    // but never moves anything itself, so a test that needs the move to land must say so.
+    function v3(v) {
+        v.compositor.workspaces = { values: [
+            wsRow(1, [client("0xB", "bravo", 900)]),
+            wsRow(2, [client("0xC", "charlie", 100)]),
+            wsRow(3, [client("0xA", "alpha", 100)])
+        ] }
+    }
     function init() {
         // QtQuickTest runs these alphabetically and the window is shared, so the synthetic cursor
         // arrives wherever the previous test left it. Parking it off every tile makes each test's
@@ -349,6 +358,16 @@ TestCase {
         wait(30)
         compare(view.cursorAddress, "0xA")
         compare(view.selectedId, 3, "the box the tile is drawn in, not the one it came from")
+
+        // …and it must still be there once the compositor catches up, which is what makes
+        // selecting the target box right rather than merely optimistic. The click's own press
+        // drops the pending move (Overview.qml:1959, "a second grab supersedes"), so from here
+        // the only thing holding the tile on workspace 3 is the compositor's own report — which
+        // in a real session is exactly what the drop's dispatch produces.
+        v3(view)                                  // Hyprland acknowledges: 0xA now lives on ws 3
+        view.rebuild()
+        compare(view.selectedId, 3)
+        compare(view.cursorAddress, "0xA", "the ring survives the compositor catching up")
     }
     // A drag needs TWO moves, as tests/ui/drag.qml:57 does it: a short one to cross Qt's
     // startDragDistance and arm `drag.active`, then the real one. A single jump leaves `moved`
@@ -359,7 +378,9 @@ TestCase {
         mousePress(view, from.x, from.y, Qt.LeftButton)
         mouseMove(view, from.x + 12, from.y + 2, 20)
         mouseMove(view, to.x, to.y, 20)
-        verify(view.draggingAddress === "0xA", "the drag must really have started")
+        // draggingAddress is set in onPressed, before any movement, so it proves nothing about
+        // the drag having started. The drop target only resolves once the pointer is over box 3.
+        compare(view.dropTargetWs, 3, "the drag must really have reached workspace 3")
         mouseRelease(view, to.x, to.y, Qt.LeftButton)
         wait(30)
         compare(view.cursorAddress, "", "a moved drag is not a click")

@@ -226,18 +226,30 @@ malformed config never changes behaviour.
   new `selectTile(addr)` instead of `focusWindow(addr)`. `onDoubleClicked` calls
   `focusWindow(addr)`.
 - **`selectTile(addr)`** — new, and the one place the find split lives, so neither mouse area has
-  to know about it:
+  to know about it. (The query branch was factored into its own `selectMatchOrClearQuery(addr)`
+  during the build; the rule is unchanged.)
 
       if a query is live and `addr` is in `matches`:
           matchIndex = its index; applyMatchRoles(); followMatch()
       else:
           if a query is live: setQuery("")      // runs restorePreQuerySelection()
-          selectedIndex = Logic.indexOfWorkspace(boxes, window's workspaceId)
+          selectedIndex = Logic.indexOfWorkspace(boxes, displayedWorkspaceOf(addr))
           setCursor(addr)                       // after setQuery, never before
+          ensureSelectedVisible()
 
   `setCursor` is deliberately not called on the match branch: `setQuery` holds the invariant that
   find and the cursor are never both live (`Overview.qml:732`), and the match branch keeps the
   query.
+
+  **`displayedWorkspaceOf(addr)`, not the window's reported `workspaceId`** — added in review.
+  For the ~1.8 s of an optimistic drop the tile's row carries the *target* workspace while the
+  compositor still reports the *source*, and a click has to act on the box the user clicked into.
+  Reading the row inside the selection path, rather than taking an id from each caller, is what
+  stops a future call site getting it wrong. One consequence is accepted and documented in the
+  code: the **match** branch reaches its box through find's own `followMatch()`, which resolves
+  from the compositor's report, so clicking a *matching* tile mid-drop selects the source box.
+  Making `followMatch` drop-aware would change find everywhere — Tab and the arrows included —
+  for a corner this feature did not introduce.
 - **`selectWorkspaceBox(id)`** — new, for wells: clears a live query first, then sets
   `selectedIndex` from `indexOfWorkspace` and `setCursor("")`.
 - The well `MouseArea` (`Overview.qml:1693`): left click calls `selectWorkspaceBox` under
