@@ -2131,8 +2131,14 @@ Item {
                     spacing: Math.round(Style.space(12))
                     Repeater {
                         id: hintKeys
-                        model: [ { k: "1–0", l: "jump" }, { k: "tab", l: "workspace" }, { k: "↑ ↓ ← →", l: "window" },
-                                 { k: "↵", l: "select" },
+                        // Every cap names what its key actually does, so the two keys whose job
+                        // the activate policy changes have to follow it
+                        // (docs/specs/2026-09-18-activate-select-design.md). Under "enter" a
+                        // digit jumps straight out and ↵ goes to whatever is highlighted; under
+                        // "select" a digit only moves the ring and ↵ is what commits.
+                        model: [ { k: "1–0", l: config.activate === "select" ? "select" : "jump" },
+                                 { k: "tab", l: "workspace" }, { k: "↑ ↓ ← →", l: "window" },
+                                 { k: "↵", l: config.activate === "select" ? "enter" : "select" },
                                  { k: "drag", l: "move window" }, { k: "type", l: "find" },
                                  { k: "esc", l: "close" },
                                  { k: "?", l: root.hintsExpanded ? "less" : "more" } ]

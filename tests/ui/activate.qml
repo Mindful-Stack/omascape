@@ -473,4 +473,20 @@ TestCase {
         compare(view.compositor.commands.length, 1)
         verify(view.compositor.commands[0].indexOf("address:0xC") >= 0)
     }
+    // Distinguishes: a hint row hard-coded to the enter-policy wording, which would tell a
+    // select-mode user that a digit jumps. Reads the live model, so it also catches a row that
+    // changed shape.
+    function test_f_the_hint_row_follows_the_policy() {
+        function labelFor(key) {
+            var m = view.testHintModel
+            for (var i = 0; i < m.length; i++) if (m[i].k === key) return m[i].l
+            fail("no hint cap for " + key)
+        }
+        compare(labelFor("1–0"), "select")
+        compare(labelFor("↵"), "enter")
+
+        view.testConfig.activate = "enter"
+        compare(labelFor("1–0"), "jump", "the default policy's wording")
+        compare(labelFor("↵"), "select")
+    }
 }
