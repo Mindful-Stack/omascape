@@ -11,6 +11,10 @@ QtObject {
     property bool hint: true         // key hints under the workspace grid
     property int workspaces: 10      // always show ids 1..N, even ones Hyprland has not created; 0 = off
     property string motion: "auto"   // "auto" follows Hyprland animations:enabled; "full" | "off"
+    // "center" (default) keeps the centred card; "bar" hangs the picker off the top bar,
+    // full-width. Bar mode needs an actual top bar to hang from — a side, bottom or hidden bar
+    // reserves nothing at the top and falls back to centred on its own (Overview.qml barMode).
+    property string anchor: "center"
     // Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum): the local-only
     // frame omascape draws around a monitor that is SHOWING an armed workspace while a share is
     // running (LockFrame.qml — four layer-shell strips, blanked in every capture). `lockBorder`
@@ -37,6 +41,7 @@ QtObject {
         cfg.hint = o.hint
         cfg.workspaces = o.workspaces
         cfg.motion = o.motion
+        cfg.anchor = o.anchor
         cfg.lockBorder = o.lockBorder
         cfg.lockBorderSize = o.lockBorderSize
     }
