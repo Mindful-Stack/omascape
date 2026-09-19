@@ -7,8 +7,9 @@ Status: **approved design, pre-implementation.** Branch `peek`.
 ## Goal
 
 Hold `Space` to blow the current target up to 60% of the screen — a Quick Look for the overview.
-Release to dismiss. Navigation keeps working underneath while it is held, so `Space`+`Tab` is a
-big flip-through: hold, Tab to the right window, release, Enter.
+Release to dismiss. Navigation keeps working underneath while it is held, so `Space`+arrows is a
+big flip-through: hold, arrow to the right window, release, Enter. (`Space`+`Tab` is the same
+gesture one level up: `Tab` steps whole workspaces, so the peek flips between mini-maps.)
 
 ## Scope
 
@@ -26,7 +27,7 @@ resolved target; zoom/pan inside the peek; a peek for the monitor-group header.
 ## Decisions (brainstorm 2026-09-18)
 
 - **The peek shows whatever `Logic.target` resolves, and nothing else.** A window target (hover,
-  Tab cursor, or find match) peeks that window; a workspace target (hover over empty canvas, or
+  arrow cursor, or find match) peeks that window; a workspace target (hover over empty canvas, or
   the selected workspace with no cursor) peeks that whole workspace; **no target peeks nothing**.
   This is not a new targeting rule — it is the existing one (`logic.js:1046`), which already
   treats "no target" as terminal rather than falling back. The peek therefore cannot show
@@ -61,7 +62,7 @@ resolved target; zoom/pan inside the peek; a peek for the monitor-group header.
 - **`Space` is an action key, so it peeks what the pointer is over.** Peek acts on the target
   exactly as `Enter` and `Ctrl+W` do, and the key handler clears `pointerLive` for every key that
   is *not* an action key, before any resolve can see it (`Overview.qml:1518`). Without this,
-  hovering one window and pressing `Space` would preview the Tab cursor instead. `Qt.Key_Space`
+  hovering one window and pressing `Space` would preview the keyboard's cursor instead. `Qt.Key_Space`
   therefore joins `Logic.isActionKey` (`logic.js:1200`) rather than being special-cased in QML:
   the rule stays in the pure layer, where the Tier 1 suite asserts it alongside `Enter` and
   `Ctrl+W`. Only bare `Space` qualifies — a chorded `Space` falls through to the chord branch,
@@ -100,6 +101,14 @@ resolved target; zoom/pan inside the peek; a peek for the monitor-group header.
   A window peek uses the window's own `sw`/`sh`; a workspace peek uses `_monLogical(mon).w/h` —
   the same aspect `cellHeightFor` uses for grid cells, so the peek and the cell can never disagree
   about a monitor's shape.
+
+> **Navigation keys, as of `main`'s `ec6083b` ("Tab steps workspaces, arrows step windows").**
+> `Tab`/`Shift+Tab` step **workspaces** (clearing the window cursor as they go) and the **arrows**
+> move the **window cursor** — the inverse of what this design was first written against. The peek
+> itself is indifferent: it re-targets on whatever navigation does, because it is a binding on
+> `resolveTarget()` and not a key handler. Only the key *names* in this document changed; every
+> behavioural claim is unchanged. With a query active the older mapping still holds — `Tab` cycles
+> matches, arrows navigate between them.
 
 ## Behaviour
 
@@ -266,7 +275,7 @@ and cannot press a key):
 - `Space` with an active query does not change the query.
 - `Space` with `menuOpen` or `confirmOpen` reaches neither the peek nor the query.
 - An auto-repeat `Space` press is a no-op when already peeking, **and** when the hold is cancelled.
-- `Space` does not clear `pointerLive`: with the pointer over one tile and the Tab cursor on
+- `Space` does not clear `pointerLive`: with the pointer over one tile and the window cursor on
   another, `Space` peeks the hovered one. Repeated for a pointer over empty canvas inside a
   workspace box (peeks that workspace, not the cursor's window), and asserted again after an
   auto-repeat so a repeat cannot quietly flip the resolution to the keyboard.
@@ -292,8 +301,9 @@ and cannot press a key):
 
 **Tier 2 (nested Hyprland):**
 - Hold `Space` over a hovered tile, confirm one large capture appears and the grid is still live.
-- Hold `Space`, press `Tab` twice, confirm the peek shows the third window without releasing.
-- Release and confirm the cursor sits where `Tab` left it and no compositor state changed.
+- Hold `Space`, press an arrow twice, confirm the peek shows the third window without releasing.
+- Release and confirm the cursor sits where the arrows left it and no compositor state changed.
+- Hold `Space`, press `Tab`, confirm the peek flips to the next workspace's mini-map.
 - Hold `Space` on a workspace holding a fullscreen window plus tiled ones, and confirm the peek
   mini-map matches the grid cell's arrangement — the fullscreen window in its slot, neighbours
   visible — rather than covering the workspace.
