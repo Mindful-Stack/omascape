@@ -40,6 +40,15 @@ ship (or be dropped) on their own.
   tap is a right click on the touchpad. **Middle-click still closes** and is now listed in the
   hints.
 - **Keyboard: Ctrl+W closes the target, no keyboard-opened menu.** Ctrl+L keeps locking.
+  ✎ 2026-09-18: with one carve-out — a workspace target that names **exactly one** window
+  closes that window. A workspace is still not a closable thing; the point is that a
+  single-window workspace leaves no ambiguity to protect the user from, which is the same
+  reading that already hides the menu's Close all below two windows ("above a single window
+  it is Close wearing a longer label"). Above one window Ctrl+W still does nothing — it is
+  deliberately *not* escalated to Close all, because the magnitude of a keystroke must not
+  depend on a count the user may have misread, and a mis-aimed press would then cost a
+  workspace rather than a window. A keyboard path to Close all, if one is ever wanted, gets
+  its own chord rather than overloading this one.
 - **A Tab-driven window cursor**, because without one the keyboard can only name a window through
   find. "What happens if the workspace has several windows?" — Tab picks one.
 - **Most recent input device wins.** A pointer parked over a tile must not hijack keyboard actions,
@@ -124,7 +133,7 @@ non-empty query clears the cursor, and Tab with a query cycles matches as today.
 | ← → ↑ ↓, digits    | as today, and clear the cursor                                                           |
 | Enter              | ✎ resolves the target: a live pointer over a tile focuses that window, over a well jumps to it; otherwise the keyboard target — with a cursor, focus that window (the tile-click path, scratchpad raise included) and close; without, jump to the selected workspace |
 | Esc                | clear the cursor if set; else (as today) clear the query if set; else close              |
-| Ctrl+W             | close the target if it is a window (below); workspace target → nothing; ignored while a drag is in flight and on key auto-repeat |
+| Ctrl+W             | close the target if it is a window (below); ✎ workspace target → its only window if it has exactly one, else nothing; ignored while a drag is in flight and on key auto-repeat |
 | Ctrl+L             | unchanged (locks the *selected workspace*, not the target — a cursor never changes what Ctrl+L does) |
 
 Reading order is `Logic.cycleWindows(tiles, wsId, current, step, skip)`: the workspace's tiles
@@ -148,6 +157,28 @@ dims the tile like a non-match, and:
   (refused: the tile un-dims and is cyclable again). Ctrl+W on a pending window is a no-op until
   then.
 - Ctrl+W with a query active closes the selected match the same way.
+
+✎ **The lone-window carve-out** (2026-09-18). `Logic.loneWindow(tiles, wsId, skip)` returns the one
+address a workspace names, or `""` when it names none or several, and `closeTarget()` consults it
+when the resolved target is a workspace. Three things follow from where it lives:
+
+- **In `closeTarget()`, not in `Logic.target`.** The target rule is shared by every action, so
+  widening it would also change Enter on a one-window workspace from "jump to the workspace" to
+  "focus that window", and would move what the peek shows. Only close reads a workspace as its
+  lone window.
+- **`skip` is the same `pendingCloses` set `cycleWindows` takes**, so a window already asked to
+  close does not count towards the one. Its tile is drawn dimmed, so "exactly one window here I
+  have not already closed" is what the screen shows. A workspace whose only remaining window has
+  an outstanding close therefore names nothing, and a repeated Ctrl+W on it is inert.
+- **Counted from the tiles, not from `windowCount`.** `windowCount` is counted deliberately behind
+  a lock placeholder (the placeholder hides the windows from find and drag, not from the
+  compositor); driving the carve-out off it would let Ctrl+W close a window that is, at that
+  moment, invisible by design. Counting rows in the tiles model makes an armed workspace inert
+  while it is a placeholder, for free.
+
+Because the target rule is shared, this also means hovering the **empty background** of a
+one-window workspace and pressing Ctrl+W closes that window — a consequence, accepted knowingly
+and pinned by a test rather than left to be discovered.
 
 ## The menu
 
@@ -517,7 +548,8 @@ window onto the floated window**, so "restores focus" has something to restore.
   stale pointer falls through to match, cursor, workspace, in that order, `null` when nothing is
   selected; `cycleWindows` — reading order (y then x), wrap both ways, none → first/last, empty
   workspace → `""`, current not on the workspace → first, skipped addresses never returned, all
-  skipped → `""`; `menuItems` — each row of the table above (window floating/tiled/fullscreen/
+  skipped → `""`; ✎ `loneWindow` — one window answers it, several or none answer `""`, an absent
+  workspace answers `""`, and a skipped address does not count towards the one; `menuItems` — each row of the table above (window floating/tiled/fullscreen/
   maximized; workspace armed/unarmed, occupied/empty, active/hidden, scratchpad, synthetic, one vs
   two vs three monitors, monitor glyph by connector name), ids carry states not toggles;
   monitor-name validation refuses anything outside `[A-Za-z0-9._-]`. `tst_layout.qml`: boxes carry

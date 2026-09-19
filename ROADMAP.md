@@ -16,7 +16,9 @@ Workspace lock (2026-09-12): Ctrl+L arms a workspace's windows black in every sc
 see docs/specs/2026-09-12-lock-design.md. Actions (2026-09-17): a single target rule, a
 Tab-driven window cursor, Ctrl+W, and a right-click context menu (Close, Float/Tile,
 Fullscreen/Exit, Lock/Unlock, Move/Swap monitors, Close all windows), plus a two-tier `?` hint
-row, see docs/specs/2026-09-15-actions-design.md.
+row, see docs/specs/2026-09-15-actions-design.md. Ctrl+W on a workspace holding exactly one
+window closes it without stepping into the tile first (2026-09-18); above one window it stays
+inert rather than escalating to Close all.
 
 ## Next steps
 

@@ -92,6 +92,19 @@ TestCase {
         fail("no tile row for " + addr)
     }
     function hoverTile(addr) { var p = tileCentre(addr); mouseMove(view, p.x, p.y); wait(30) }
+    // A point inside a workspace box but clear of every tile in it: the well. Bottom-right
+    // corner, inset past the box border — the fixture's windows all sit in the upper-left of
+    // their monitor, so nothing is drawn there.
+    function hoverWell(wsId) {
+        for (var i = 0; i < view.boxes.length; i++) {
+            var b = view.boxes[i]
+            if (b.workspaceId !== wsId) continue
+            var p = view.testCanvas.mapToItem(view, b.x + b.w - 6, b.y + b.h - 6)
+            mouseMove(view, p.x, p.y); wait(30)
+            return
+        }
+        fail("no box for workspace " + wsId)
+    }
 
     // ---- fixture health ------------------------------------------------------------------
     // Distinguishes: a fixture where keyClick never reaches keyCatcher. Escape on an empty query
@@ -421,12 +434,60 @@ TestCase {
         ctrlW()
         compare(view.compositor.commands.length, n, "a third press has no target")
     }
-    // Distinguishes: a workspace target silently closing something. Ctrl+W with no window target
-    // must dispatch nothing at all.
-    function test_ctrl_w_on_a_workspace_target_does_nothing() {
+    // Distinguishes: a workspace target closing something it cannot name. Workspace 1 holds two
+    // windows, so Ctrl+W with no cursor and no hover must dispatch nothing at all — the guard the
+    // one-window rule below is carved out of.
+    function test_ctrl_w_on_a_multi_window_workspace_does_nothing() {
         compare(view.cursorAddress, "")
+        compare(view.selectedId, 1, "two windows: 0xA and 0xB")
         ctrlW()
         compare(view.compositor.commands.length, 0)
+    }
+    // ✎ 2026-09-18: a workspace naming exactly ONE window is that window, for Ctrl+W alone.
+    // Distinguishes: the carve-out not firing — on a single-window workspace, close and close-all
+    // are the same act, so there is no ambiguity left for the workspace guard to protect.
+    function test_ctrl_w_on_a_one_window_workspace_closes_its_only_window() {
+        keyClick(Qt.Key_Tab)                    // ws 2 holds 0xC alone; Tab also clears the cursor
+        compare(view.selectedId, 2)
+        compare(view.cursorAddress, "", "the target is the workspace, not a window")
+        ctrlW()
+        verify(closed("0xC"))
+    }
+    // Distinguishes: the carve-out re-firing on a workspace it has already emptied. 0xC's close is
+    // outstanding, not confirmed — it is still in the model and still drawn, dimmed — so the
+    // workspace now names NO closable window and a second press must dispatch nothing.
+    function test_a_second_ctrl_w_on_an_emptied_workspace_dispatches_nothing() {
+        keyClick(Qt.Key_Tab)
+        ctrlW()
+        verify(closed("0xC"))
+        var n = view.compositor.commands.length
+        ctrlW()
+        compare(view.compositor.commands.length, n, "0xC's close is already outstanding")
+    }
+    // Distinguishes: the rule living in Logic.target() instead of closeTarget(). Widening the
+    // SHARED target rule would make Enter on this workspace focus 0xC rather than jump to ws 2 —
+    // only close may read a workspace as its lone window.
+    function test_enter_on_a_one_window_workspace_still_jumps_to_the_workspace() {
+        keyClick(Qt.Key_Tab)
+        compare(view.selectedId, 2)
+        var t = view.resolveTarget()
+        compare(t.kind, "workspace", "the target rule itself is unchanged")
+        keyClick(Qt.Key_Return)
+        verify(!closed("0xC"), "Enter never closes")
+        var cmd = view.compositor.commands.join(" | ")
+        verify(cmd.indexOf("workspace") >= 0, "expected a workspace jump, got: " + cmd)
+    }
+    // Distinguishes: the carve-out reaching the keyboard but not the pointer. The target rule is
+    // shared, so hovering the EMPTY BACKGROUND of a one-window workspace resolves to that
+    // workspace and closes its window too — a deliberate consequence, pinned here so it cannot
+    // change silently.
+    function test_ctrl_w_over_a_one_window_workspaces_well_closes_its_window() {
+        hoverWell(2)
+        var t = view.resolveTarget()
+        compare(t.kind, "workspace", "the point must be inside the box but off every tile")
+        compare(t.id, 2)
+        ctrlW()
+        verify(closed("0xC"))
     }
     // The `!e.isAutoRepeat` guard (auto-repeat closing a whole workspace from one held chord) has
     // no offscreen test here: QtTest's QML key-event API has no way to set isAutoRepeat, and a

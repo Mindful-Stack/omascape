@@ -374,6 +374,18 @@ Design: `docs/specs/2026-09-15-actions-design.md`.
   keyboard now". A lone modifier press touches neither: if `Ctrl` alone cleared liveness, hovering
   a tile and pressing Ctrl+W could never work, because the modifier half of the chord would go
   stale before the letter arrived.
+- **A workspace target closes nothing — unless it names exactly one window** (2026-09-18). On a
+  single-window workspace, close and close-all are the same act, which is why the menu already
+  hides Close all below two windows; so `Ctrl+W` there closes that window rather than asking the
+  user to arrow into the tile first. It stops at one: above one window the key stays inert instead
+  of escalating to Close all, because a keystroke whose magnitude depends on a count the user may
+  have misread costs a workspace when it is wrong, not a window. The carve-out lives in
+  `closeTarget()`, never in `Logic.target` — widening the shared rule would also turn `Enter` on
+  such a workspace from a jump into a focus, and would change what the peek shows. It counts tile
+  rows minus `pendingCloses`, not `windowCount`: the skipped set is what the dimmed tiles already
+  show, and `windowCount` deliberately counts behind a lock placeholder, where the windows are
+  invisible by design. Because the target rule is shared, hovering a one-window workspace's empty
+  background and pressing `Ctrl+W` closes its window too.
 - **A close is a request, not a fact.** The app may prompt, delay or refuse it, and the window
   stays in the model until Hyprland reports it gone. `pendingCloses` (address → deadline, the same
   1.8 s shape as the drag and fullscreen pending maps) dims the tile, drops it from the cursor's
