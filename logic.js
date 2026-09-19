@@ -194,6 +194,14 @@ function padWorkspaces(workspaces, count, focusedMonitorName) {
 // Exact float equality is safe here and is not an accident to be defended with a tolerance:
 // layout() assigns `y: y` from one running accumulator, so every box in a sub-row carries the
 // identical value by construction. A tolerance would only hide it if that ever stopped being true.
+//
+// Contract: Every box in the input gets an entry, so ranks[id] returning undefined means the
+// caller passed a workspace id that was not in the input layout. Rank 0 is a legitimate value
+// (every layout has a top row), so consumers must NOT write `ranks[id] || 0` — that idiom would
+// turn a miss into a silent "animate as the top row", hiding a broken invariant. The single
+// fail-safe for a non-finite rank lives in rowPhase, not at each call site. Every tile's
+// workspace id is in ranks by construction: layout() paths at 301/339 produce boxes, and
+// tiles are born only from boxes (line 360: `if (!wbox) continue`).
 function rowRanks(boxes) {
     if (!boxes || !boxes.length) return { ranks: {}, rowCount: 0 }
     var ys = [], i, v
