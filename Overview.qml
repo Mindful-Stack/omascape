@@ -11,6 +11,15 @@ Item {
     id: root
     property bool opened: false
     property var targetScreen: null
+    // The entrance/exit animations drive THIS, not card.scale directly, so that card.scale can
+    // carry a live binding (barMode ? 1 : entranceScale) instead. A running animation's
+    // interpolation is fixed at start and only re-reads from/to on its next loop -- so animating
+    // card.scale directly left a flip INTO bar mode mid-entrance still riding out the stale
+    // 0.96->1 trajectory while width/anchors (ordinary live bindings) snapped to bar geometry
+    // instantly, detaching the card from the screen edges for the rest of that run. Gating
+    // through a live binding on card.scale itself removes that window: the binding re-reads on
+    // every dependency change, not just on the animation's next loop.
+    property real entranceScale: 1
 
     property var boxes: []
     property var handleByAddress: ({})
@@ -1326,7 +1335,11 @@ Item {
             return
         }
         enterAnim.stop(); exitAnim.stop()
-        card.scale = 1
+        root.entranceScale = 1                     // NEVER card.scale = 1 here: card.scale now
+                                                     // carries a live binding, and an imperative
+                                                     // assignment to a bound property destroys
+                                                     // the binding permanently (same failure
+                                                     // shape as the ternary-anchor bug).
         card.opacity = on ? 1 : 0
         scrimRect.opacity = on ? 1 : 0
     }
@@ -1336,11 +1349,11 @@ Item {
                           duration: root.motion.normal; easing.type: root.motion.move }
         NumberAnimation { target: card; property: "opacity"; to: 1
                           duration: root.motion.enter; easing.type: root.motion.move }
-        // Bar mode does not scale. transformOrigin would move the pivot but not stop horizontal
-        // scaling, and a full-width card that shrinks away from both screen edges contradicts
-        // the one thing the attachment is for. The row stagger carries the motion instead.
-        NumberAnimation { target: card; property: "scale"
-                          from: root.barMode ? 1 : 0.96; to: 1
+        // Animates entranceScale, not card.scale: card.scale is a live binding
+        // (barMode ? 1 : entranceScale) so a mid-flight mode flip is picked up instantly instead
+        // of waiting for this animation's stale trajectory to finish (see entranceScale's
+        // comment). Values are unconditional again -- the mode-awareness moved to the binding.
+        NumberAnimation { target: root; property: "entranceScale"; from: 0.96; to: 1
                           duration: root.motion.enter; easing.type: root.motion.entrance
                           easing.overshoot: root.motion.overshoot }
     }
@@ -1350,7 +1363,7 @@ Item {
                           duration: root.motion.exit; easing.type: root.motion.move }
         NumberAnimation { target: card; property: "opacity"; to: 0
                           duration: root.motion.exit; easing.type: root.motion.move }
-        NumberAnimation { target: card; property: "scale"; to: root.barMode ? 1 : 0.98
+        NumberAnimation { target: root; property: "entranceScale"; to: 0.98
                           duration: root.motion.exit; easing.type: root.motion.move }
     }
     // Ask Hyprland for fresh client data, then rebuild every 60ms until five quiet ticks have
@@ -1558,6 +1571,10 @@ Item {
             // px is two device px at 2x — crisp at exactly the scale that reported the problem.
             border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
             opacity: 0        // the entrance brings it in; panel.visible follows this
+            // A live binding, not the animation target itself: pins to 1 the instant barMode
+            // goes true even mid-animation, rather than riding out entranceScale's in-flight
+            // trajectory. See entranceScale's declaration for why that distinction matters.
+            scale: root.barMode ? 1 : root.entranceScale
             readonly property int pad: Math.round(Style.space(12))
             // Space under the grid for the key hints or, while a query is active, the find
             // bar. Reserves the larger of the two whenever either could show, so swapping one

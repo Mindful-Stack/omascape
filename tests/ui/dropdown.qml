@@ -238,4 +238,40 @@ TestCase {
         verify(view.testCard.scale < 1,
                "the centred entrance still scales, got " + view.testCard.scale)
     }
+
+    // The direction that stayed buggy under the mode-dependent-animation-values fix: flipping
+    // INTO bar mode while the entrance is still running. A running animation's interpolation is
+    // fixed at start and only re-reads its from/to on its next loop, so animating card.scale
+    // directly kept riding the stale 0.96->1 trajectory after the flip, while width and the
+    // anchors -- ordinary live bindings, ungated by the animation -- snapped to bar geometry
+    // instantly: the exact edge-detachment this task exists to prevent, for the rest of that run.
+    function test_the_card_stays_pinned_after_a_mid_entrance_flip_into_bar_mode() {
+        view = createTemporaryObject(overview, tc)
+        verify(view)
+        screenA = createTemporaryObject(screenStub, tc, { name: "A" })
+        // Stretched so the flip below lands reliably inside the entrance, not by luck.
+        view.motion.scale = 10
+        view.testConfig.anchor = "center"
+        view.testPanel.width = 1920
+        view.testPanel.height = 1080
+        var monA = monitor("A", 0, 26)
+        var wss = []
+        for (var k = 1; k <= 10; k++) wss.push({ id: k, monitor: monA, toplevels: { values: [] } })
+        view.compositor.monitors = { values: [monA] }
+        view.compositor.focusedMonitor = monA
+        view.compositor.focusedWorkspace = { id: 1 }
+        view.compositor.workspaces = { values: wss }
+        view.testScreens = [screenA]
+
+        view.open()
+        wait(60)                             // partway through the stretched centred entrance
+        view.testConfig.anchor = "bar"        // flip mid-flight: the direction under test
+        for (var i = 0; i < 4; i++) {
+            wait(120)
+            var l = view.testCard.mapToItem(view.testPanel, 0, 0).x
+            var r = view.testCard.mapToItem(view.testPanel, view.testCard.width, 0).x
+            fuzzyCompare(l, 0, 0.5, "left edge after mid-entrance flip, sample " + i)
+            fuzzyCompare(r, 1920, 0.5, "right edge after mid-entrance flip, sample " + i)
+        }
+    }
 }
