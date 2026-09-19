@@ -211,10 +211,11 @@ TestCase {
         compare(Logic.parseConfig('').workspaces, 10)
         compare(Logic.parseConfig('{"workspaces": 4}').motion, "auto")   // other keys keep defaults
     }
+    // Activation policy (docs/specs/2026-09-18-activate-select-design.md).
     // Distinguishes: a key that is read raw (any string becoming the policy) or not read at all
     // (always "enter"). The unknown-string and wrong-type cases are the ones that matter: a
     // malformed config must fall back, never change behaviour.
-    function test_parseConfig_activate() {
+    function test_parse_config_activate() {
         compare(Logic.parseConfig('').activate, "enter", "absent = today's behaviour")
         compare(Logic.parseConfig('{"activate": "enter"}').activate, "enter")
         compare(Logic.parseConfig('{"activate": "select"}').activate, "select")
