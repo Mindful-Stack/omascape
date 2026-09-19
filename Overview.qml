@@ -544,8 +544,16 @@ Item {
     function closeTarget() {
         if (dragTile !== null) return          // a drag owns the pointer; actions wait
         var t = resolveTarget()
-        if (!t || t.kind !== "window") return
-        closeWindow(t.address, t.address === cursorAddress)
+        if (!t) return
+        // ✎ 2026-09-18 A workspace is not a closable thing — EXCEPT when it names exactly one
+        // window, which close and close-all would treat identically anyway (Logic.loneWindow, and
+        // the `windowCount > 1` gate the menu's Close all already carries). Resolved here rather
+        // than in Logic.target so the carve-out belongs to close alone: widening the shared target
+        // rule would also turn Enter on such a workspace from a jump into a focus.
+        var addr = t.kind === "window" ? t.address
+                                       : Logic.loneWindow(tileRows(), t.id, closeSkipSet())
+        if (!addr) return
+        closeWindow(addr, addr === cursorAddress)
     }
     // As conservative as reconcileMoves: absence from `windows` alone never clears an entry. A
     // window on a workspace that just became a lock placeholder is ALSO absent (find/drag never

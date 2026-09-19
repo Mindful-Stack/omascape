@@ -1172,6 +1172,27 @@ function cycleWindows(tiles, wsId, current, step, skip) {
     return list[((idx + step) % list.length + list.length) % list.length].address
 }
 
+// ✎ 2026-09-18 The one window a workspace names unambiguously, or "" when it names none or
+// several. A workspace is not a closable thing, so Ctrl+W on a workspace target does nothing —
+// EXCEPT here, where there is no ambiguity left to protect the user from: on a single-window
+// workspace, close and close-all are the same act, which is why `workspaceMenuRows` already
+// hides Close all below two windows. `skip` is the same pendingCloses set `cycleWindows` takes,
+// so a window already asked to close does not count: its tile is drawn dimmed, and the rule
+// matches what is on screen. Deliberately NOT folded into `target()` — widening the shared
+// target rule would also change what Enter does on a one-window workspace.
+function loneWindow(tiles, wsId, skip) {
+    if (!hasWs(wsId)) return ""
+    var found = ""
+    for (var i = 0; i < tiles.length; i++) {
+        var t = tiles[i]
+        if (t.wsid !== wsId) continue
+        if (skip && skip[t.address]) continue
+        if (found) return ""            // a second candidate: the workspace names no single window
+        found = t.address
+    }
+    return found
+}
+
 // Menu highlight movement: wrapping, and from "none" onto the first (down) or last (up) row.
 // Takes the ITEM LIST, not a count, so it can step past a separator (`{ separator: true }`, no
 // id, not hoverable or activatable): the highlight must never land on one, whether arrived at by
