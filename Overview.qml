@@ -63,6 +63,11 @@ Item {
     property color background: Color.menu.background
     property color foreground: Color.menu.text
     property color scrim: Color.menu.scrim
+    // The bar's own ground, a DIFFERENT token from the menu one (Bar.qml:71). Both fall through
+    // to the same base background on a theme without a shell.toml, so they match by accident
+    // there; a theme that sets [bar] background diverges them, and an attached card must follow
+    // the bar.
+    property color barBackground: Color.bar.background
     property color selBackground: Color.menu.selectedBackground
     property color selText: Color.menu.selectedText
     function tone(a) { return Qt.rgba(foreground.r, foreground.g, foreground.b, a) }
@@ -281,7 +286,9 @@ Item {
     // previously disagreed by 2 * card.pad, which is how the grid came to sit 10 px from the
     // edge of a 1920-logical screen (a 4K panel at 2x).
     readonly property real availCanvasW:
-        panel.width > 0 ? panel.width - 2 * card.pad - 2 * Logic.screenMargin(panel.width) : 1600
+        panel.width > 0
+            ? panel.width - 2 * card.pad - (root.barMode ? 0 : 2 * Logic.screenMargin(panel.width))
+            : 1600
     onAvailCanvasWChanged: if (opened) rebuild()
 
     function focusedScreen() {
@@ -1489,7 +1496,12 @@ Item {
         Region { id: emptyRegion }
         exclusionMode: ExclusionMode.Ignore
 
-        Rectangle { id: scrimRect; anchors.fill: parent; color: root.scrim; visible: config.scrim; opacity: 0 }
+        // Starts BELOW the bar when the card is attached to it: a card meeting a dimmed bar
+        // reads as covering it, not as hanging from it, which is the whole point of attaching.
+        Rectangle { id: scrimRect
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom
+                              top: parent.top; topMargin: root.barMode ? root.reservedTop : 0 }
+                    color: root.scrim; visible: config.scrim; opacity: 0 }
         MouseArea { anchors.fill: parent; enabled: root.opened; onClicked: root.close() }
 
         // A 28% shadow reads on light themes but vanishes on dark ones (Tokyo Night sweep),
@@ -1503,15 +1515,26 @@ Item {
                      color: Qt.rgba(0, 0, 0, root.darkTheme ? 0.55 : 0.28) }
         Rectangle {
             id: card
-            anchors.centerIn: parent
-            radius: root.cardRadius
-            color: root.background
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.verticalCenter: root.barMode ? undefined : parent.verticalCenter
+            anchors.top: root.barMode ? parent.top : undefined
+            anchors.topMargin: root.reservedTop
+            // Full width in bar mode. Setting `width` overrides the implicitWidth binding, so
+            // the Behavior on implicitWidth goes inert there — correct, since the width is the
+            // screen and must never animate.
+            width: root.barMode ? panel.width : implicitWidth
+            // Square against the bar, and no border of its own: with no radius there are no top
+            // corners to hide, so nothing is ever painted OVER the card. That matters because
+            // barBackground may carry alpha, and two stacked translucent fills composite darker
+            // than one (two at 50% give 75%), which is what a cover-up strip would produce.
+            radius: root.barMode ? 0 : root.cardRadius
+            border.width: root.barMode ? 0 : 1
+            color: root.barMode ? root.barBackground : root.background
             // With real air around the card it must read as elevated rather than as a lighter
             // rectangle. Accent-derived rather than a fixed neutral: a black hairline looks like
             // a bug on a light card and a white one vanishes on it. `accent` is already
             // `selText` and already tracks the theme, so this needs no new colour. One logical
             // px is two device px at 2x — crisp at exactly the scale that reported the problem.
-            border.width: 1
             border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
             opacity: 0        // the entrance brings it in; panel.visible follows this
             readonly property int pad: Math.round(Style.space(12))
@@ -1540,7 +1563,10 @@ Item {
             // allowed to widen a narrow card so the key hints are not clipped. The HEIGHT cap
             // does real work whenever there are enough monitor groups to overflow.
             readonly property real maxCardW: panel.width  > 0 ? panel.width  - 2 * Logic.screenMargin(panel.width)  : 1616
-            readonly property real maxCardH: panel.height > 0 ? panel.height - 2 * Logic.screenMargin(panel.height) : 900
+            readonly property real maxCardH: panel.height > 0
+                ? panel.height - (root.barMode ? root.reservedTop + Logic.screenMargin(panel.height)
+                                               : 2 * Logic.screenMargin(panel.height))
+                : 900
             // The hint row never widens past the screen (maxCardW still caps it), but it does
             // widen a narrow card: a layout with few/narrow workspaces must not clip the eight
             // key hints against the card edge.
@@ -1553,6 +1579,17 @@ Item {
             Behavior on implicitHeight { enabled: root.layoutMotion
                 NumberAnimation { duration: root.motion.normal; easing.type: root.motion.move } }
             MouseArea { anchors.fill: parent; onClicked: {} }
+
+            // The card's only visible edge in bar mode: the top is the join with the bar, the
+            // sides are the screen edges. A child rather than the card's own border, because the
+            // border would also draw down both sides and along the join.
+            Rectangle {
+                id: bottomRule
+                visible: root.barMode
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: 1
+                color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
+            }
 
             Item {
                 id: keyCatcher
