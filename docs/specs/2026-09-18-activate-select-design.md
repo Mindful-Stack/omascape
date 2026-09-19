@@ -176,8 +176,8 @@ and a later refactor that tidies the QML cannot reopen hover-targeting without a
 `resolveTarget()` (`Overview.qml:443`) passes `selectMode: config.activate === "select"` and may
 skip the hit test entirely when it is set, since nothing consumes the result.
 
-**`Logic.digitActivate(key, latch, boxes)`** — new. Maps a bare digit key to an action, the box to
-act on, and the next latch value:
+**`Logic.digitActivate(key, latch, boxes, autoRepeat)`** — new. Maps a bare digit key to an action,
+the box to act on, and the next latch value:
 
     { action: "select" | "enter" | "none", id: <1..10>, index: <box index or -1>, latch: <key or 0> }
 
@@ -186,14 +186,23 @@ uses. It takes `boxes` — plain layout data, so the function stays pure — and
 itself through the existing `indexOfWorkspace` (`logic.js:935`), returning that index so the
 caller can assign `selectedIndex` without repeating the lookup. Then:
 
+- `autoRepeat` → `{ action: "none", latch: <unchanged> }`;
 - no box for `id` (`index < 0`) → `{ action: "none", latch: 0 }`, whatever the latch held;
 - `latch !== key` → `{ action: "select", latch: key }`;
 - `latch === key` → `{ action: "enter", latch: 0 }` (the overview is closing; the latch must not
   survive into the next open).
 
-Returns `null` for a non-digit. The box test comes first, so a box that *disappears between the
-two presses* degrades to `"none"` with no special case: the second press cannot enter a workspace
-that is no longer on screen. The overview holds one int, `digitLatch`, cleared to `0` by every other
+Returns `null` for a non-digit. The box test comes before the latch test, so a box that
+*disappears between the two presses* degrades to `"none"` with no special case: the second press
+cannot enter a workspace that is no longer on screen.
+
+**The auto-repeat guard lives here, not in the key handler.** `Ctrl+W` guards on `e.isAutoRepeat`
+in QML (`Overview.qml:1537`) and the obvious move is to copy that, but QtTest's QML key API cannot
+synthesise an auto-repeat event at all (`tests/ui/actions.qml:431`), so a guard in the handler
+would be permanently untestable. In the pure function, "a repeat is a true no-op" becomes a Tier 1
+assertion with two halves — it must neither complete the gesture nor disturb a pending latch —
+and it is checked *before* the box lookup, so a repeat of a digit whose box has since gone still
+changes nothing. The overview holds one int, `digitLatch`, cleared to `0` by every other
 key at the top of the key handler and by every click, and reset by `open()`.
 
 **`Logic.parseConfig`** (`logic.js:994`) gains `activate: (o.activate === "select") ? "select" :
@@ -203,12 +212,16 @@ malformed config never changes behaviour.
 ## Overview wiring
 
 - `OmascapeConfig.qml`: `property string activate: "enter"`, assigned in `apply()`.
-- Key handler (`Overview.qml:1564`): the digit branch calls `Logic.digitActivate` under
-  `"select"` and keeps `setCursor(""); jump(id)` under `"enter"`. Both guard on
-  `!e.isAutoRepeat`, as `Ctrl+W` already does (`Overview.qml:1537`), so a held digit cannot
-  select and then immediately enter.
-- Latch clearing: one assignment at the top of the handler, before the branches, for every key
-  the digit branch does not consume.
+- Key handler (`Overview.qml:1564`): under `"enter"` the digit branch keeps `setCursor("");
+  jump(id)` and returns before `digitActivate` is consulted at all — so that policy cannot
+  inherit the missing-box rule, and `7` still creates workspace 7 there. Under `"select"` it
+  calls `Logic.digitActivate`, stores the returned `latch` unconditionally, returns on `"none"`,
+  assigns `selectedIndex` from the returned `index` (never `jump`/`hasWs`, which cannot tell a
+  missing box from a valid id), and calls `jump(id)` only on `"enter"`.
+- Latch clearing: the handler takes the latch into a local and zeroes the property in one move,
+  at the top, before the branches — so every key clears it and only the digit branch re-arms.
+  Pointer movement never reaches the handler, which is precisely why a mouse move cannot break a
+  pending repeat.
 - `dragArea.onReleased` (`Overview.qml:1875`): under `"select"` a non-moved left release calls a
   new `selectTile(addr)` instead of `focusWindow(addr)`. `onDoubleClicked` calls
   `focusWindow(addr)`.
@@ -275,14 +288,18 @@ malformed config never changes behaviour.
 - `digitActivate` with a `boxes` array that has no box for the id → `{ action: "none", index: -1,
   latch: 0 }`, **including when the latch already held that key** (the disappeared-box case) and
   when it held a different one (an inert digit must still clear a pending repeat).
+- `digitActivate` with `autoRepeat` → `"none"` with the latch **handed back unchanged**, both
+  when one was pending and when none was. This is Tier 1 and not Tier 2 by necessity: QtTest's
+  QML key API cannot produce an auto-repeat event.
 - `target` with `selectMode: true`: a live pointer over a tile is ignored and the cursor wins; a
   live pointer over a tile with no cursor and no query falls to the selected workspace; with
   `selectMode: false` the existing pointer precedence still holds (the current assertions, kept).
 
 **Tier 2 (`tests/ui/activate.qml`, added to `tests/ui/run.sh`):**
 
-- a digit selects without closing and rings the box; the repeat closes; a held digit does not
-  close; a mouse move between two digit presses does not break the repeat;
+- a digit selects without closing and rings the box; the repeat closes; a mouse move between two
+  digit presses does not break the repeat; entering leaves no latch behind, and a mid-session
+  policy change clears one;
 - a tile click rings the tile and sets the selected workspace, and the ring survives a rebuild
   (the `applyTiles` trap); a double-click closes;
 - `Ctrl+W` with the pointer over a *different* tile closes the selected one.
