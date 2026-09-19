@@ -126,45 +126,61 @@ tile = (source / 'WindowTile.qml').read_text()
 tile = re.sub(r'^import Quickshell.*\n', '', tile, flags=re.M)
 tile = re.sub(r'Quickshell.iconPath\(.*\)', '""', tile)
 # ClippingRectangle (Quickshell.Widgets) has no offscreen equivalent; a plain Rectangle keeps
-# every property used here (radius, border.*) valid. Losing the actual child-clipping is fine —
-# nothing this tier asserts on depends on it.
-tile = replaced(tile, '    ClippingRectangle {', '    Rectangle {', 'ClippingRectangle wrapper')
+# every property used here (radius, border.*) valid, including `radius` itself — which the peek
+# suite now reads back via testCornerRadius below, converting Task 5's own live-check-only item
+# (the peek tile's corners matching the card's radius, not the grid's) into a real assertion.
+# Losing the actual child-clipping is fine — nothing this tier asserts on depends on it.
+tile = replaced(tile, '    ClippingRectangle {',
+                       '    Rectangle {\n        id: capFrame',
+                 'ClippingRectangle wrapper')
 # ScreencopyView (Quickshell.Wayland) can't run offscreen either, but unlike the wrapper above its
-# own state is exactly what the icon-fallback and grace-period bindings that follow (the Image and
-# Text below it, and iconGraceMs/graceActive up in the property block) react to — so it is stubbed,
-# not deleted, and the stub's `hasContent` is pinned to false: precisely what the real type would
-# report offscreen anyway (no compositor, no captured frame, ever arrives). Every binding that
-# reads `cap.hasContent` or `cap.visible` then runs as genuine production code, which is what
-# makes the icon-vs-capture race in tests/ui/peek.qml a real test rather than a fixture fiction —
-# see that file's own header comment on what this tier can and cannot show.
-tile = replaced(tile, '''        ScreencopyView {
+# own state is exactly what the icon-fallback and grace-period bindings that follow react to, so
+# it is stubbed rather than deleted. Matched on only its 2-line header, NOT the whole body: the
+# `visible`, `captureSource` and `live` lines below stay byte-for-byte production code, now
+# assigning onto bare properties instead of the real type's. That is deliberately narrower than
+# "every binding runs unmodified" might suggest — `captureSource` and `live` are declared with no
+# behaviour behind them, so this stub cannot itself notice a bug in how the real ScreencopyView
+# would REACT to them. What it does catch: a rename of `WindowTile.handle` or `capMode` still
+# fails loudly (an undefined-property binding error), because `captureSource: tile.wantCapture ?
+# tile.handle : null` — the one line standing between "icon" mode and a capture request reaching a
+# locked workspace's window — is the literal expression still running here, not a paraphrase of
+# it. `hasContent` is pinned to false: precisely what the real type would report offscreen anyway
+# (no compositor, no captured frame, ever arrives).
+tile = replaced(tile, '        ScreencopyView {\n            id: cap\n',
+                       '''        Item {
             id: cap
-            anchors.fill: parent
-            visible: tile.wantCapture && cap.hasContent
-            captureSource: tile.wantCapture ? tile.handle : null
-            live: tile.capMode === "live"
-        }''', '''        Item {
-            id: cap
-            anchors.fill: parent
             property bool hasContent: false
-            visible: tile.wantCapture && cap.hasContent
-        }''', 'ScreencopyView capture stub')
-# The icon-fallback Image and letter-fallback Text carry no id in production (nothing there needs
-# one) — the peek icon-flash suite (tests/ui/peek.qml) needs one to read `visible` back, so this
-# gives each an id and re-exposes it as a plain alias on `tile`, the same test-only-plumbing
-# pattern the Overview.qml block above uses for its own testX aliases. Only iconUrl.length === 0
-# is reachable offscreen (Quickshell.iconPath is stubbed to "" above, so the Image itself never
-# shows), which is exactly why this file's own grace-period test reads testLetterVisible.
+            property var captureSource
+            property bool live
+''', 'ScreencopyView capture stub')
+# The icon-fallback Image carries no id in production (nothing there needs one) — the peek
+# icon-flash suite (tests/ui/peek.qml) needs one to read `visible` back. There is only one Image
+# in this file, so matching on its header plus the very next line is unambiguous.
 tile = replaced(tile, '        Image {\n            anchors.centerIn: parent',
                        '        Image {\n            id: iconImg\n            anchors.centerIn: parent',
                  'icon Image id')
-tile = replaced(tile, '        Text {\n            anchors.centerIn: parent',
-                       '        Text {\n            id: letterFallback\n            anchors.centerIn: parent',
+# The letter-fallback Text, same reasoning — but NOT matched the same way: this file has a SECOND
+# Text (the title label, `id: lbl`) whose own `anchors.centerIn: parent` sits on the very same
+# line as its id, purely because that one packs multiple bindings per line. Keying on "Text {" +
+# next-line-anchors the way the Image match above does would be coincidentally unique only for as
+# long as that formatting choice holds — two unrelated edits away from silently retargeting this
+# id onto the title label instead, which would make testLetterVisible read a property that never
+# changes and pass every assertion vacuously. Keying on the fallback's own unique `visible`
+# expression instead ties this to what the element actually IS, not how it happens to be
+# formatted today.
+tile = replaced(tile, '''        Text {
+            anchors.centerIn: parent
+            visible: !cap.visible && tile.iconUrl.length === 0 && (!tile.graceActive || tile.graceElapsed)''',
+                       '''        Text {
+            id: letterFallback
+            anchors.centerIn: parent
+            visible: !cap.visible && tile.iconUrl.length === 0 && (!tile.graceActive || tile.graceElapsed)''',
                  'letter-fallback Text id')
 tile = replaced(tile, '    id: tile\n',
                        '''    id: tile
     property alias testIconVisible: iconImg.visible
     property alias testLetterVisible: letterFallback.visible
+    property alias testCornerRadius: capFrame.radius
 ''', 'tile id (test alias anchor)')
 (dest / 'WindowTile.qml').write_text(tile)
 (dest / 'logic.js').write_text((source / 'logic.js').read_text())
@@ -221,7 +237,10 @@ for edge in ('left', 'right'):
 # No shell imports, so almost verbatim — except the window-peek's own WindowTile carries no id in
 # production (nothing there needs one either), and the icon-flash grace suite (tests/ui/peek.qml)
 # needs a way to reach it. Same test-only-plumbing pattern as the WindowTile.qml block above: give
-# it an id and re-expose it as a plain alias on `peek`.
+# it an id and re-expose it as a plain alias on `peek`. The mini-map's own Repeater already has an
+# id in production (`miniMap`, used by peek.fit above it) — re-exposed the same way, so the suite
+# can reach a FRESHLY-created mini-map tile (one instantiated with no handle poked in at all,
+# unlike the long-lived window-peek tile) via `testMiniMap.itemAt(i)`.
 peeklayer = (source / 'PeekLayer.qml').read_text()
 peeklayer = replaced(peeklayer, '''        WindowTile {
             anchors.fill: parent
@@ -230,8 +249,10 @@ peeklayer = replaced(peeklayer, '''        WindowTile {
             anchors.fill: parent
             visible: peek.isWindow''', 'window-peek WindowTile id')
 peeklayer = replaced(peeklayer, '    id: peek\n',
-                                  '    id: peek\n    property alias testWindowTile: peekWindowTile\n',
-                      'peek id (test alias anchor)')
+                                  '''    id: peek
+    property alias testWindowTile: peekWindowTile
+    property alias testMiniMap: miniMap
+''', 'peek id (test alias anchor)')
 (dest / 'PeekLayer.qml').write_text(peeklayer)
 # Shell-only helpers: the config loader needs Quickshell.Io, the shadow a GPU shader.
 # `motionEffective` is writable here so tests can flip the policy without a compositor.

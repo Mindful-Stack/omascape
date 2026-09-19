@@ -353,9 +353,68 @@ TestCase {
         compare(t.wantCapture, true, "precondition: a handle is present and capMode is live")
         compare(t.testLetterVisible, false,
                 "the fallback must not flash in before the grace elapses")
-        wait(t.iconGraceMs + 60)
-        compare(t.testLetterVisible, true,
-                "and must appear once the grace has genuinely elapsed with no content")
+        // A bounded poll, not an absolute wait()+margin: tryCompare returns as soon as the
+        // property actually flips, rather than always sleeping the full window regardless of
+        // how quickly it happened. The timeout is generous (grace + 1s) because it only bounds
+        // how long a FAILURE takes to report — it is not the thing this test is timing.
+        tryCompare(t, "testLetterVisible", true, t.iconGraceMs + 1000)
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: `graceActive` losing its `wantCapture` clause (e.g. reduced to just
+    // `iconGraceMs > 0 && !cap.hasContent`) — a regression the test above cannot catch, because
+    // that test's tile is long-lived: by the time its assertions run, ITS grace had already
+    // started and elapsed once already during the fixture's own init() (this same tile exists,
+    // with a handle from a previous test run in this shared window, well before this test's own
+    // press), so a dropped `wantCapture` clause happens to still read as "elapsed" there — a
+    // stale-grace artefact, not a real check of the requirement. The mini-map is the case that
+    // actually exercises "born fresh": its Repeater instantiates a brand-new WindowTile delegate
+    // on THIS press, with no handle poked into handleByAddress at all (offscreen there is no
+    // ToplevelManager, so handleByAddress starts and stays {} unless a test pokes it, which this
+    // one deliberately does not). `wantCapture` is therefore false from that tile's very first
+    // paint — nothing is expected, so the peek's own spec ("a handle-less window gets a large
+    // icon with no delay") must hold immediately, with no wait() at all: if `graceActive` were
+    // gated on iconGraceMs alone, this fresh tile would be born already "waiting" on a capture
+    // that was never even requested, and the fallback would wrongly stay hidden right here.
+    function test_a_freshly_created_minimap_tile_with_no_handle_shows_its_icon_immediately() {
+        var t = view.resolveTarget()
+        verify(t !== null && t.kind === "workspace", "precondition: the target is a workspace")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        verify(view.testPeek.workspaceWindows.length > 0, "precondition: the mini-map has tiles")
+        var mm = view.testPeek.testMiniMap
+        verify(mm !== null && mm !== undefined && mm.count > 0,
+               "the fixture must expose a populated mini-map Repeater")
+        var tile0 = mm.itemAt(0)
+        verify(tile0 !== null, "the fixture must expose a mini-map tile instance")
+        compare(tile0.wantCapture, false,
+                "precondition: no handle was poked in, so this tile is born with none")
+        compare(tile0.testLetterVisible, true,
+                "a handle-less tile must show its fallback immediately, with no delay")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: the peek's window tile drawing at the GRID's corner radius instead of the
+    // card's own (Task 5's fix, previously flagged as "cannot be verified offscreen" and left to
+    // a live-check item — see docs/specs/2026-09-18-peek-design.md and this repo's own peek
+    // live-check notes). The ClippingRectangle -> Rectangle substitution in prepare.py happens to
+    // make `radius` a real, readable property offscreen for the first time (see that file's own
+    // comment on `testCornerRadius`); bank that coverage rather than continuing to leave the
+    // hardest-to-judge-by-eye item on the manual checklist. A grid tile keeps the grid's own
+    // default (5, WindowTile.qml's own `cornerRadius`) since nothing in Overview.qml overrides it
+    // for the grid delegate — only the peek's window tile passes `cardRadius` explicitly.
+    function test_a_grid_tile_and_the_peeked_window_tile_draw_at_different_corner_radii() {
+        var children = view.testCanvas.children, gridTile = null
+        for (var i = 0; i < children.length; i++)
+            if (children[i].model && children[i].model.address === "0xB") gridTile = children[i]
+        verify(gridTile !== null, "precondition: the grid tile for 0xB exists")
+        compare(gridTile.testCornerRadius, 5, "a grid tile keeps the grid's own default")
+        hoverTile("0xB")
+        keyPress(Qt.Key_Space)
+        var t = view.testPeek.testWindowTile
+        verify(t !== null && t !== undefined, "the fixture must expose the peeked WindowTile")
+        compare(t.testCornerRadius, view.testPeek.cardRadius,
+                "the peek's window tile must draw at the CARD's radius, not the grid's")
         keyRelease(Qt.Key_Space)
     }
 

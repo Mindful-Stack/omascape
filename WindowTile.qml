@@ -97,8 +97,15 @@ Item {
     property int iconGraceMs: 0
     readonly property bool graceActive: iconGraceMs > 0 && wantCapture && !cap.hasContent
     property bool graceElapsed: false
+    // If `graceActive` oscillates faster than the grace itself — `handle` going null and then
+    // non-null again mid-hold, e.g. toplevel churn racing the compositor — `onRunningChanged`
+    // below resets and restarts the clock on every flip, which can suppress the icon
+    // indefinitely and leave nothing but bare `bg` on screen. That is benign (a blank box beats
+    // a flash) and hard to actually trigger: a handle that is merely EQUAL to its old value, not
+    // a genuinely new object, leaves `wantCapture` and this whole expression unchanged, so only
+    // a real address-losing-and-regaining-its-handle churn would do it. Noted so the next reader
+    // is not puzzled by a peek that goes quiet instead of falling back.
     Timer {
-        id: graceTimer
         interval: tile.iconGraceMs
         // Bound to the real Timer.running property rather than driven off an onGraceActiveChanged
         // handler on our own QML-declared property: a tile can be BORN already needing the grace
