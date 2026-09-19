@@ -132,8 +132,67 @@ if [[ $MODE == link ]]; then
   [[ -z $previous ]] || echo "was      $previous"
 fi
 
+# --- restart, and verify a REPLACEMENT ---------------------------------------
+# `quickshell list` without --show-dead reports only live instances, so a pid
+# that was not in the outgoing set is a new shell. Status, ping and replacement
+# are three separate facts: omarchy-restart-shell exits non-zero both when it
+# refuses outright (session locked; old shell still answers ping) and when it
+# restarted fine but could not re-secure the lock.
+pids_now() {
+  "$QUICKSHELL" list -p "$config_dir" --json 2>/dev/null |
+    grep -o '"pid"[[:space:]]*:[[:space:]]*[0-9]\{1,\}' |
+    grep -o '[0-9]\{1,\}' |
+    sort
+}
+
+ping_ok() {
+  env OMARCHY_PATH="$omarchy_path" OMARCHY_SHELL_IPC_TIMEOUT=0.5s \
+    "$OMARCHY_SHELL_BIN" shell ping >/dev/null 2>&1
+}
+
 if (( restart_ready )); then
   echo "session  $session_sig  (systemctl --user show-environment; answers hyprctl)"
+
+  # An empty instance list is legitimate (nothing running yet) and makes the
+  # pipeline's grep exit non-zero, which pipefail would turn into a silent abort.
+  before=$(pids_now || true)
+
+  restart_status=0
+  restart_out=$(env HYPRLAND_INSTANCE_SIGNATURE="$session_sig" \
+    "$OMARCHY" restart shell 2>&1) || restart_status=$?
+
+  # A replacement can exist while its QML and IPC are still coming up, so the
+  # deadline bounds BOTH facts: keep polling until a new pid answers ping, not
+  # until a new pid merely appears.
+  new_pid=""
+  ready=0
+  deadline=$((SECONDS + POLL_SECONDS))
+  while :; do
+    [[ -n $new_pid ]] ||
+      new_pid=$(comm -13 <(printf '%s\n' "$before") <(pids_now || true) | head -n 1)
+    if [[ -n $new_pid ]] && ping_ok; then
+      ready=1
+      break
+    fi
+    (( SECONDS < deadline )) || break
+    sleep 0.2
+  done
+
+  if (( ready )); then
+    echo "restart  ok — new instance pid $new_pid"
+    if (( restart_status != 0 )); then
+      echo "warning  omarchy restart shell exited $restart_status:" >&2
+      [[ -z $restart_out ]] || echo "$restart_out" >&2
+    fi
+  elif [[ -n $new_pid ]]; then
+    fail "a new shell (pid $new_pid) started but never answered ping within ${POLL_SECONDS}s; check: journalctl --user -t omarchy-shell -n 60"
+  elif ping_ok; then
+    [[ -z $restart_out ]] || echo "$restart_out" >&2
+    fail "no new shell instance appeared: the shell was not restarted and the previously loaded build is still running (the link IS in place)"
+  else
+    [[ -z $restart_out ]] || echo "$restart_out" >&2
+    fail "the shell is not running and no replacement appeared; check: journalctl --user -t omarchy-shell -n 60"
+  fi
 else
   echo "restart  skipped — $skip_reason"
 fi

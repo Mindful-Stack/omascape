@@ -300,5 +300,63 @@ is_link "no-session: the link is in place" "$(install_path "$box")"
 absent "no-session: no restart was attempted" "$box/state/restart-signature"
 has    "no-session: says the restart was skipped" "$out" "restart  skipped"
 
+# --- a refusal leaves the old build loaded, and fails ----------------------
+box=$(setup restart-refused)
+printf 'refuse\n' > "$box/state/restart-outcome"
+printf 'never\n' > "$box/state/replace-after"
+run "$box"
+same    "refused: exits 1" "$status" "1"
+has     "refused: surfaces the refusal verbatim" "$out" "Refusing to restart Omarchy shell while the session is locked."
+has     "refused: says the old build is still loaded" "$out" "still running"
+lacks   "refused: does not claim success" "$out" "restart  ok"
+is_link "refused: the link stays in place" "$(install_path "$box")"
+
+# --- a slow replacement still succeeds ------------------------------------
+box=$(setup restart-slow)
+printf '3\n' > "$box/state/replace-after"
+run "$box"
+same "slow: exits 0" "$status" "0"
+has  "slow: reports the new instance" "$out" "pid 2230186"
+
+# --- non-zero status WITH a replacement is a warning, not a failure --------
+box=$(setup restart-relock-warning)
+printf 'relock\n' > "$box/state/restart-outcome"
+run "$box"
+same "relock: exits 0" "$status" "0"
+has  "relock: warns" "$out" "warning"
+has  "relock: keeps the upstream wording" "$out" "session lock was not re-secured"
+
+# --- a replacement that is not yet ready still succeeds --------------------
+# The pid appears at once, but ping only answers from its 4th attempt: a real
+# shell whose QML and IPC are still loading.
+box=$(setup restart-slow-readiness)
+printf 'after:4\n' > "$box/state/ping"
+run "$box"
+same  "slow-ready: exits 0" "$status" "0"
+has   "slow-ready: reports the new instance" "$out" "pid 2230186"
+lacks "slow-ready: did not give up on readiness" "$out" "never answered ping"
+
+# --- the resolved signature is what the restart is actually handed ---------
+# Same three competing sources as the identity case, but now asserting the value
+# the restart received rather than the value the receipt printed.
+box=$(setup restart-gets-session-signature)
+mkdir -p "$box/run/hypr/aaa_nested_sig" "$box/run/hypr/zzz_session_sig"
+printf 'aaa_nested_sig\nzzz_session_sig\n' > "$box/state/answering"
+printf 'HYPRLAND_INSTANCE_SIGNATURE=zzz_session_sig\nOMARCHY_PATH=%s\n' "$box/omarchy" \
+  > "$box/state/session-env"
+run "$box"
+same "handoff: exits 0" "$status" "0"
+same "handoff: restart received the session's signature" \
+  "$(cat "$box/state/restart-signature" 2>/dev/null)" "zzz_session_sig"
+
+# --- no replacement and no ping is a failure with the journal hint ---------
+box=$(setup restart-dead)
+printf 'never\n' > "$box/state/replace-after"
+printf 'dead\n'  > "$box/state/ping"
+run "$box"
+same  "dead: exits 1" "$status" "1"
+has   "dead: gives the journal hint" "$out" "journalctl --user -t omarchy-shell -n 60"
+lacks "dead: does not claim success" "$out" "restart  ok"
+
 printf '\n  %d passed, %d failed\n' "$passed" "$failed"
 (( failed == 0 )) || exit 1
