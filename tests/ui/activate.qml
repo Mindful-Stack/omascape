@@ -108,4 +108,49 @@ TestCase {
         for (var i = 0; i < view.boxes.length; i++)
             verify(view.boxes[i].workspaceId !== 7, "workspace 7 must not have a box")
     }
+
+    function ctrlW() { keyClick(Qt.Key_W, Qt.ControlModifier) }
+
+    // Distinguishes: a resolveTarget that still passes pointerLive through in select mode, AND
+    // one that switched the pointer off for both policies — the same hover is resolved under
+    // each, so either mistake fails one half. The hover is a REAL move (pointerLive goes true):
+    // the point is that liveness no longer reaches the resolver, not that the pointer stopped.
+    //
+    // What it does NOT distinguish, verified by mutation: resolveTarget holds two independent
+    // guards — the local `selectMode` short-circuit around the hit test, and the `selectMode`
+    // argument handed to Logic.target — and EITHER ALONE satisfies this test. Removing both
+    // fails it. So this pins that the policy reaches the resolver, not which guard carried it;
+    // the pure-layer half is pinned separately by tst_actions.qml's selectMode cases.
+    //
+    // The selection is the one open() makes, the focused workspace. Deliberately not set with a
+    // digit: digits do not select until the policy reaches the key handler in the next task, and
+    // before that a digit jumps and closes the overview out from under the test.
+    function test_b_hover_does_not_retarget_in_select_mode() {
+        compare(view.selectedId, 1, "open() selects the focused workspace")
+        hoverTile("0xC")                         // a window on a DIFFERENT workspace
+        compare(view.pointerLive, true, "the pointer really did move")
+
+        var t = view.resolveTarget()
+        compare(t.kind, "workspace")
+        compare(t.id, 1, "select mode: the selection, not the hovered tile")
+
+        view.testConfig.activate = "enter"
+        var e = view.resolveTarget()
+        compare(e.kind, "window")
+        compare(e.address, "0xC", "enter mode: the same hover still names the tile")
+    }
+    // Distinguishes: Ctrl+W still acting on hover in select mode — the consequence the spec
+    // accepted explicitly. Hovering 0xA while 0xC is selected must close 0xC.
+    function test_b_ctrl_w_closes_the_selected_window_not_the_hovered_one() {
+        var p = tileCentre("0xC")
+        mouseClick(view, p.x, p.y)               // select 0xC (workspace 2)
+        wait(30)
+        view.compositor.commands = []
+        hoverTile("0xA")
+        ctrlW()
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf("0xC") >= 0,
+               "closed " + view.compositor.commands[0] + ", expected the selected 0xC")
+        verify(view.compositor.commands[0].indexOf("0xA") < 0)
+    }
 }

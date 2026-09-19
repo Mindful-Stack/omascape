@@ -440,9 +440,15 @@ Item {
         }
         return out
     }
+    // The `selectMode` short-circuit below is an OPTIMISATION, not a second line of defence: the
+    // rule itself lives in Logic.target, which is handed the same flag and skips its pointer
+    // branch on it. Skipping the hit test here only avoids building tileCandidates() and running
+    // tileAt() for a result select mode would discard. Either one alone produces correct
+    // behaviour; the pure one is the one the Tier 1 suite asserts.
     function resolveTarget() {
+        var selectMode = config.activate === "select"
         var live = false, tileAddr = "", wsId = -1
-        if (pointerLive) {
+        if (!selectMode && pointerLive) {
             var p = pointerPoint()
             if (p.inView) {
                 live = true
@@ -453,7 +459,8 @@ Item {
                 }
             }
         }
-        return Logic.target({ pointerLive: live, pointerTileAddress: tileAddr,
+        return Logic.target({ selectMode: selectMode,
+                              pointerLive: live, pointerTileAddress: tileAddr,
                               pointerWorkspaceId: wsId, query: root.query,
                               matchAddress: root.selectedMatchAddress,
                               cursorAddress: root.cursorAddress, selectedId: root.selectedId })
