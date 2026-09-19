@@ -226,12 +226,17 @@ function rowRanks(boxes) {
 // left, so the LAST row finishes exactly at 1 by construction. Adding rows therefore tightens
 // the stagger rather than lengthening the entrance -- a three-monitor layout must not take
 // noticeably longer to appear than a one-monitor layout.
+// ROW_SPAN = 0.6: Each row's own motion occupies 60% of the timeline, leaving 40% for row starts.
+// Higher values overlap rows and soften the stagger until it stops reading as a stagger; lower
+// values make each row snap in and exaggerate it. 0.6 keeps the stagger legible while preserving
+// smooth per-row motion. This is a tuned value and open to adjustment as needed.
 var ROW_SPAN = 0.6
 function rowPhase(progress, rank, rowCount) {
     var p = Number(progress)
-    // Non-finite means fully arrived, never fully hidden: a NaN reaching a delegate's opacity
-    // must leave the grid visible. An invisible card that still holds keyboard focus is the
-    // worst outcome available here, so every guard below fails toward 1.
+    // Non-finite inputs must never return 0, or a NaN reaching a delegate's opacity would leave
+    // the grid invisible while the card still holds keyboard focus — the worst outcome available.
+    // Non-finite progress returns full opacity (1); non-finite rank degrades to rank 0; non-finite
+    // rowCount returns progress unchanged (no stagger). Each path yields something visible.
     if (!isFinite(p)) return 1
     if (p <= 0) return 0
     if (p >= 1) return 1
