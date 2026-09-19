@@ -551,7 +551,7 @@ Add to `tests/ui/activate.qml`:
     }
     // Distinguishes: Ctrl+W still acting on hover in select mode — the consequence the spec
     // accepted explicitly. Hovering 0xA while 0xC is selected must close 0xC.
-    function test_b_ctrl_w_closes_the_selected_window_not_the_hovered_one() {
+    function test_d_ctrl_w_closes_the_selected_window_not_the_hovered_one() {
         var p = tileCentre("0xC")
         mouseClick(view, p.x, p.y)               // select 0xC (workspace 2)
         wait(30)
@@ -611,7 +611,7 @@ tests assert it. Say that in the comment rather than implying two lines of defen
 - [ ] **Step 4: Verify**
 
 Run: `bash tests/ui/run.sh 2>&1 | grep -A4 hover_does_not_retarget`
-Expected: PASS. `test_b_ctrl_w_closes_the_selected_window_not_the_hovered_one` still fails — Task 7.
+Expected: PASS. `test_d_ctrl_w_closes_the_selected_window_not_the_hovered_one` still fails — Task 7.
 
 Run: `bash tests/run.sh 2>&1 | grep -E "Actions|Find|Close|Totals"`
 Expected: every **other** UI suite still green. They all run in the default `"enter"` policy, so a
@@ -1033,7 +1033,7 @@ Both selection functions make a new selection, so add `digitLatch = 0` as the fi
 
 Run: `bash tests/ui/run.sh 2>&1 | grep -A3 -E "test_d_|ctrl_w_closes_the_selected"`
 Expected: all seven `test_d_` PASS, **and**
-`test_b_ctrl_w_closes_the_selected_window_not_the_hovered_one` from Task 5 now PASSes — it was
+`test_d_ctrl_w_closes_the_selected_window_not_the_hovered_one` from Task 5 now PASSes — it was
 waiting on click-to-select.
 
 Run: `bash tests/run.sh`

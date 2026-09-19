@@ -89,8 +89,8 @@ TestCase {
     // Distinguishes: a fixture whose stub config has no `activate` property. Then
     // config.activate is undefined, every `=== "select"` test in this file is silently false and
     // the overview runs in enter mode while the suite still passes. Note this proves only that
-    // the STUB declares the name — that production reads the same name is proved by the first
-    // test that asserts on behaviour, not here.
+    // the STUB declares the name — that production reads the same name is proved by
+    // test_b_hover_does_not_retarget_in_select_mode, not here.
     function test_a_the_fixture_carries_the_activate_policy() {
         compare(view.testConfig.activate, "select",
                 "prepare.py's stub OmascapeConfig must declare `activate`")
@@ -109,8 +109,13 @@ TestCase {
             verify(view.boxes[i].workspaceId !== 7, "workspace 7 must not have a box")
     }
 
+    // ---- select-mode targeting -------------------------------------------------------------
     function ctrlW() { keyClick(Qt.Key_W, Qt.ControlModifier) }
 
+    // This is the behavioural proof `test_a_the_fixture_carries_the_activate_policy` defers to:
+    // flipping the policy flips the answer, which only production actually reading the key can
+    // produce.
+    //
     // Distinguishes: a resolveTarget that still passes pointerLive through in select mode, AND
     // one that switched the pointer off for both policies — the same hover is resolved under
     // each, so either mistake fails one half. The hover is a REAL move (pointerLive goes true):
@@ -141,7 +146,7 @@ TestCase {
     }
     // Distinguishes: Ctrl+W still acting on hover in select mode — the consequence the spec
     // accepted explicitly. Hovering 0xA while 0xC is selected must close 0xC.
-    function test_b_ctrl_w_closes_the_selected_window_not_the_hovered_one() {
+    function test_d_ctrl_w_closes_the_selected_window_not_the_hovered_one() {
         var p = tileCentre("0xC")
         mouseClick(view, p.x, p.y)               // select 0xC (workspace 2)
         wait(30)
