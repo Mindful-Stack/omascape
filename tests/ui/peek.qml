@@ -136,10 +136,13 @@ TestCase {
 
     // Distinguishes: a Space routed as ordinary keyboard intent. This is the whole point of
     // Task 3 — the key handler clears pointerLive for non-action keys BEFORE resolving, so a
-    // mis-routed Space peeks the Tab cursor (0xA) instead of the hovered tile (0xB). Both
-    // targets exist and differ, which is what makes the assertion discriminate.
+    // mis-routed Space peeks the arrow cursor (0xA) instead of the hovered tile (0xB). Both
+    // targets exist and differ, which is what makes the assertion discriminate. Right, not Tab,
+    // sets the precondition: since ec6083b, Tab steps workspaces and clears the cursor as a side
+    // effect, so it can no longer be the key that puts a window under keyboard target in the
+    // first place — only an arrow does that now.
     function test_space_prefers_the_pointer_over_the_keyboard_target() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         compare(view.cursorAddress, "0xA", "precondition: the keyboard target is 0xA")
         hoverTile("0xB")
         keyPress(Qt.Key_Space)
@@ -148,32 +151,37 @@ TestCase {
         compare(view.cursorAddress, "0xA", "and the cursor is untouched by the hold")
     }
 
-    // Distinguishes: a peek that snapshots its target at press time. Tab moves the cursor while
-    // the key is still down; a snapshotting implementation keeps showing the first window.
+    // Distinguishes: a peek that snapshots its target at press time. An arrow moves the window
+    // cursor while the key is still down; a snapshotting implementation keeps showing the first
+    // window. Right, not Tab: since ec6083b, Tab steps workspaces and clears the cursor as a
+    // side effect rather than moving it, so only an arrow exercises the cursor-follows-live-hold
+    // path this test is named for.
     function test_the_peek_follows_the_cursor_while_held() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         var first = view.cursorAddress
         keyPress(Qt.Key_Space)
         compare(view.testPeek.peekTarget.address, first)
-        keyClick(Qt.Key_Tab)
-        verify(view.cursorAddress !== first, "precondition: Tab moved the cursor")
+        keyClick(Qt.Key_Right)
+        verify(view.cursorAddress !== first, "precondition: Right moved the cursor")
         compare(view.testPeek.peekTarget.address, view.cursorAddress,
                 "the peek re-targeted without a release")
         keyRelease(Qt.Key_Space)
     }
 
-    // Distinguishes: a peek that follows the Tab cursor but not the arrows. The arrows move the
-    // SELECTION, which is a different resolve branch from the cursor — an implementation that
-    // re-reads the target only in the Tab path passes the test above and fails this one. Right,
-    // not Down: this file's two seeded workspaces (ws1, ws2) land side-by-side in one row (see
-    // seed()), so Right is the axis with a neighbour here — Down has no box below and would
-    // no-op regardless of the implementation, which is not what this test is for.
+    // Distinguishes: a peek that follows the arrow-key cursor but not Tab's workspace selection.
+    // Tab moves the SELECTION (and, as a side effect, clears the cursor), which is a different
+    // resolve branch from the cursor — an implementation that re-reads the target only in the
+    // arrow path passes the test above and fails this one. This used to be an arrow test too
+    // (Down, then Right after a fixture-driven rewrite), back when arrows drove the selection;
+    // since ec6083b inverted the keys, Tab is the one and only selection key, so it no longer
+    // needs a geometry-dependent direction to find a neighbour — cycleWorkspace steps the boxes
+    // list itself, not the screen layout.
     function test_the_peek_follows_the_selection_while_held() {
         keyPress(Qt.Key_Space)
         compare(view.testPeek.peekTarget.kind, "workspace")
         var first = view.testPeek.peekTarget.id
-        keyClick(Qt.Key_Right)
-        verify(view.selectedId !== first, "precondition: Right moved the selection")
+        keyClick(Qt.Key_Tab)
+        verify(view.selectedId !== first, "precondition: Tab moved the selection")
         compare(view.testPeek.peekTarget.id, view.selectedId,
                 "the peek re-targeted to the newly selected workspace")
         keyRelease(Qt.Key_Space)
@@ -395,9 +403,13 @@ TestCase {
     // Escape clears the cursor, which retargets the peek to the selected workspace — intentional
     // navigation, not disappearance. Nothing left the model, so the peek must FOLLOW, not cancel.
     // This is the negative control for the test above; without it, "cancel whenever the target
-    // changes" passes everything else in this file.
+    // changes" passes everything else in this file. Since ec6083b, Tab ALSO clears the cursor —
+    // as a side effect of stepping the workspace selection — so this test deliberately uses an
+    // arrow to set the cursor and Escape to clear it, not Tab for either: the point here is
+    // Escape's clear-without-cancel, and folding Tab's own clearing side effect in would test
+    // something else entirely.
     function test_clearing_the_cursor_retargets_without_cancelling() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         keyPress(Qt.Key_Space)
         compare(view.testPeek.peekTarget.kind, "window")
         keyClick(Qt.Key_Escape)                  // clears the cursor; the window still exists
@@ -485,10 +497,14 @@ TestCase {
         view.rebuild()
         keyClick("s", Qt.ControlModifier)        // reveal the scratchpad row
         wait(30)
-        keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Down)
-        // Walk down to the scratchpad row rather than assuming its index.
+        // Walk to the scratchpad row with Tab, not an arrow: the scratchpad is a WORKSPACE (a
+        // row of the mini-map's own boxes list, walked by cycleWorkspace), and since ec6083b
+        // Tab is the key that steps workspace selection — arrows now step the window cursor
+        // inside whichever workspace is already selected, which would never reach it.
+        keyClick(Qt.Key_Tab); keyClick(Qt.Key_Tab); keyClick(Qt.Key_Tab)
+        // Walk to the scratchpad row rather than assuming its index.
         var guard = 0
-        while (view.selectedId !== -2 && guard++ < 8) keyClick(Qt.Key_Down)
+        while (view.selectedId !== -2 && guard++ < 8) keyClick(Qt.Key_Tab)
         compare(view.selectedId, -2, "precondition: the scratchpad row is selected")
         keyPress(Qt.Key_Space)
         compare(view.testPeek.shown, true)
@@ -538,20 +554,22 @@ TestCase {
     }
 
     // Distinguishes: peekedKey pinned to the target at PRESS time rather than following a
-    // mid-hold retarget. Peeks window A (the Tab cursor's first stop), retargets onto B with a
-    // second Tab while still held, then closes B — the window the layer is ACTUALLY showing, not
+    // mid-hold retarget. Peeks window A (the arrow cursor's first stop), retargets onto B with a
+    // second Right while still held, then closes B — the window the layer is ACTUALLY showing, not
     // the one it started on. Without onPeekTargetChanged keeping peekedKey in step with the
     // retarget, it would still read "w:A" here, wmap would still have an entry for A (A was never
     // touched), the model check would see nothing gone, and this would wrongly stay open — even
-    // though what's on screen (B) just vanished.
+    // though what's on screen (B) just vanished. Right, not Tab: since ec6083b, Tab steps the
+    // workspace selection and clears the cursor rather than moving it, so it can no longer
+    // retarget the WINDOW cursor this test is pinning.
     function test_closing_the_retargeted_window_cancels_the_hold() {
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         var first = view.cursorAddress
         keyPress(Qt.Key_Space)
         compare(view.testPeek.peekTarget.address, first, "precondition: peeking the first window")
-        keyClick(Qt.Key_Tab)
+        keyClick(Qt.Key_Right)
         var second = view.cursorAddress
-        verify(second !== first, "precondition: Tab retargeted to a different window")
+        verify(second !== first, "precondition: Right retargeted to a different window")
         compare(view.testPeek.peekTarget.address, second, "precondition: the peek followed to it")
         compare(view.peekedKey, "w:" + second, "precondition: peekedKey names the CURRENT target")
         // Close the retargeted window (second); the original (first) survives untouched.

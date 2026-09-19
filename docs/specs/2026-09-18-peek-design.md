@@ -111,8 +111,8 @@ resolved target; zoom/pan inside the peek; a peek for the monitor-group header.
 | `Space` down, no target                | nothing; no layer, no flicker — and nothing for the rest of that hold |
 | `Space` down, menu open                | dismisses the menu and nothing else; the still-held key does not then peek |
 | `Space` down, dialog open              | consumed by the dialog; no peek                               |
-| `Space` held, `Tab` / `Shift+Tab`      | cursor advances; **peek re-targets live**                    |
-| `Space` held, arrows                   | selection or match moves; peek re-targets live               |
+| `Space` held, `Tab` / `Shift+Tab`      | selection advances (cycles matches, if a query is active); **peek re-targets live** |
+| `Space` held, arrows                   | cursor moves (navigates matches, if a query is active); peek re-targets live |
 | `Space` held, pointer moves            | hover retargets; peek follows                                |
 | `Space` held, `Escape` clears the cursor | target falls back to the selected workspace; peek retargets to it |
 | `Space` held, target disappears        | hold **cancelled**: layer goes, and no target re-opens it before release |
