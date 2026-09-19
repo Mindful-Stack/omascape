@@ -270,8 +270,10 @@ TestCase {
     }
 
     // Distinguishes: a click that still focuses and closes, and one that sets only the cursor
-    // without the workspace — applyTiles clears a cursor that is not on selectedId, so the
-    // rebuild wait below is the real assertion, not padding.
+    // without the workspace — the `selectedId` compare kills that one outright, before the
+    // rebuild. The rebuild half is a regression guard rather than the primary assertion: it
+    // pins the consequence (applyTiles wiping a cursor that is not on selectedId) so a future
+    // change that reintroduces the cursor-only click fails on the symptom as well as the cause.
     function test_d_a_tile_click_selects_and_survives_a_rebuild() {
         var p = tileCentre("0xC")                 // workspace 2
         mouseClick(view, p.x, p.y)
@@ -329,6 +331,25 @@ TestCase {
         compare(view.opened, true, "the click must have cleared the latch")
     }
     // Distinguishes: a drag that also counts as a click and so selects on drop.
+    // Distinguishes: a click that resolves the tile's workspace through `_windowByAddress`, which
+    // for the ~1.8 s of an optimistic drop still reports the SOURCE workspace while the tile is
+    // already drawn in the target (submitDrop notes the disagreement at Overview.qml:966). The
+    // click would then select a box the tile is not in, and the next rebuild would clear the ring.
+    function test_d_a_click_on_a_just_dropped_tile_selects_the_box_it_landed_in() {
+        var from = tileCentre("0xA"), to = wellCentre(3)
+        mousePress(view, from.x, from.y, Qt.LeftButton)
+        mouseMove(view, from.x + 12, from.y + 2, 20)
+        mouseMove(view, to.x, to.y, 20)
+        mouseRelease(view, to.x, to.y, Qt.LeftButton)
+        wait(30)
+
+        // The optimistic row now says workspace 3; the compositor stub still reports 1.
+        var p = tileCentre("0xA")
+        mouseClick(view, p.x, p.y)
+        wait(30)
+        compare(view.cursorAddress, "0xA")
+        compare(view.selectedId, 3, "the box the tile is drawn in, not the one it came from")
+    }
     // A drag needs TWO moves, as tests/ui/drag.qml:57 does it: a short one to cross Qt's
     // startDragDistance and arm `drag.active`, then the real one. A single jump leaves `moved`
     // false, the release is a click, and the test would "fail" on production code that is

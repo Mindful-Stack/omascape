@@ -514,6 +514,16 @@ Item {
         else Hyprland.dispatch('hl.dsp.focus({ window = "address:' + addr + '" })')
         close()
     }
+    // The workspace a tile is currently DRAWN in. Not the same as `_windowByAddress[addr]
+    // .workspaceId` for the ~1.8 s of an optimistic drop: the row carries the target while the
+    // compositor still reports the source (submitDrop says so at :966). A click must act on the
+    // box the user actually clicked into, so every selection path reads the row, not the report
+    // — which is also why this reads the model rather than taking the id from a caller.
+    function displayedWorkspaceOf(addr) {
+        for (var i = 0; i < tilesModel.count; i++)
+            if (tilesModel.get(i).address === addr) return tilesModel.get(i).wsid
+        return -1
+    }
     // Click-to-select under the "select" policy. Sets BOTH the window cursor and the box
     // selection: applyTiles clears a cursor that is not on selectedId (see :1180), so a click
     // that set only the cursor would lose its ring at the next rebuild.
@@ -522,7 +532,7 @@ Item {
         var win = _windowByAddress[addr]
         if (!win) return
         if (query.length) { selectMatchOrClearQuery(addr); return }
-        selectedIndex = Logic.indexOfWorkspace(boxes, win.workspaceId)
+        selectedIndex = Logic.indexOfWorkspace(boxes, displayedWorkspaceOf(addr))
         setCursor(addr)
         ensureSelectedVisible()
     }
@@ -531,7 +541,7 @@ Item {
         setQuery("")
         var win = _windowByAddress[addr]
         if (!win) return
-        selectedIndex = Logic.indexOfWorkspace(boxes, win.workspaceId)
+        selectedIndex = Logic.indexOfWorkspace(boxes, displayedWorkspaceOf(addr))
         setCursor(addr)
         ensureSelectedVisible()
     }
@@ -1771,6 +1781,12 @@ Item {
                                 anchors.fill: parent
                                 enabled: root.opened
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                // The same one-dispatch hazard the tile has, and the same two
+                                // things hold it: `enabled: root.opened` above and jump()'s own
+                                // close(). No `!root.opened` line here, deliberately — a well
+                                // click that slipped through would only re-select a box, and
+                                // open() resets the selection anyway, where a tile click would
+                                // leave a stale cursor.
                                 onClicked: function (m) {
                                     if (m.button !== Qt.LeftButton) return
                                     if (config.activate === "select")
@@ -1958,11 +1974,14 @@ Item {
                                         root.submitDrop(addr, targetWs, dropX, dropY, ptr.x, ptr.y)
                                     root.endDrag()
                                     if (!wasMoved) {
-                                        // A double-click's second `released` can arrive after
-                                        // focusWindow() has already closed the overview; selecting
-                                        // into a closed overview would leave stale state for the
-                                        // next summon. The guard makes both delivery orders of
-                                        // `doubleClicked` and `released` equivalent.
+                                        // Belt and braces, and known to be the braces: what
+                                        // actually guarantees a double-click dispatches exactly
+                                        // once is `enabled: root.opened` above plus close()'s own
+                                        // idempotence — focusWindow() closes on `doubleClicked`,
+                                        // the area is disabled, and the second `released` is
+                                        // never delivered. This line is what would catch it if
+                                        // that ordering ever changed, since selecting into a
+                                        // closed overview leaves state for the next summon.
                                         if (!root.opened) return
                                         if (config.activate === "select") root.selectTile(addr)
                                         else root.focusWindow(addr)
