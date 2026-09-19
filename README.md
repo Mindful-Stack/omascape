@@ -425,6 +425,9 @@ APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inli
    `mise run unlink` puts the clone back. Running it from the installed clone itself is fine: it
    is already the live checkout, so only the restart happens.
 
+   `mise run dev` and `mise run dev-off` are aliases for `link` and `unlink` — both spellings do
+   the same thing, while which pair reads better is still being settled.
+
    The plugin id is global, so **whichever worktree linked last is the one running.** To see
    which:
 
