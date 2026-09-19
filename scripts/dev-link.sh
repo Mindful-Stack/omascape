@@ -42,11 +42,6 @@ case "${1:-}" in
 *) fail "unknown argument: $1" ;;
 esac
 
-# Refuse a broken manifest before anything is touched; the shell silently ignores
-# a plugin whose manifest does not validate.
-"$OMARCHY" plugin validate "$REPO" >/dev/null ||
-  fail "omarchy plugin validate failed for $REPO; nothing was changed"
-
 # --- identify the desktop session, before touching anything -----------------
 # UWSM finalizes the session's HYPRLAND_INSTANCE_SIGNATURE into the systemd user
 # environment; omarchy-restart-shell already reads OMARCHY_PATH from there. The
@@ -102,6 +97,13 @@ fi
 # --- take over the install path ---------------------------------------------
 previous=""
 if [[ $MODE == link ]]; then
+  # Refuse a broken manifest before anything is touched; the shell silently
+  # ignores a plugin whose manifest does not validate. Only when LINKING: on
+  # --unlink the checkout's manifest is irrelevant, and letting it block the
+  # restore would make a broken checkout unrecoverable.
+  "$OMARCHY" plugin validate "$REPO" >/dev/null ||
+    fail "omarchy plugin validate failed for $REPO; nothing was changed"
+
   mkdir -p -- "$PLUGINS_DIR"
 
   # Running from the installed clone itself is a supported loop (README: "edit
@@ -153,6 +155,10 @@ else
   if [[ -d $STASH ]]; then
     mv -- "$STASH" "$INSTALL"
     echo "restored $PLUGIN_ID <- ${STASH##*/}"
+    # A warning, never fatal: the restore IS the recovery path, so refusing to
+    # finish it because the restored copy is imperfect would leave no install at all.
+    "$OMARCHY" plugin validate "$INSTALL" >/dev/null 2>&1 ||
+      echo "warning  the restored install does not pass omarchy plugin validate; the shell will ignore it" >&2
   else
     echo "unlinked $PLUGIN_ID (no stashed install to restore)"
   fi
@@ -166,9 +172,18 @@ fi
 # refuses outright (session locked; old shell still answers ping) and when it
 # restarted fine but could not re-secure the lock.
 pids_now() {
-  "$QUICKSHELL" list -p "$config_dir" --json 2>/dev/null |
-    grep -o '"pid"[[:space:]]*:[[:space:]]*[0-9]\{1,\}' |
-    grep -o '[0-9]\{1,\}' |
+  # --all, then filter by config path ourselves. `list -p` reports only instances
+  # of the CALLER's Wayland display: from a TTY or over ssh it finds none while the
+  # desktop shell is running, which would turn a successful restart into a reported
+  # failure. RS="}" splits one record per instance, so this holds for pretty or
+  # compact JSON, and a config path containing a space survives.
+  "$QUICKSHELL" list --all --json 2>/dev/null |
+    awk -v want="\"$config_dir/shell.qml\"" 'BEGIN { RS = "}" }
+      index($0, want) && match($0, /"pid"[[:space:]]*:[[:space:]]*[0-9]+/) {
+        s = substr($0, RSTART, RLENGTH)
+        gsub(/[^0-9]/, "", s)
+        print s
+      }' |
     sort
 }
 

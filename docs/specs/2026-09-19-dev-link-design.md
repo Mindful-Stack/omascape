@@ -91,8 +91,13 @@ changes plugin *runtime* code.
    `UWSM_WAIT_VARNAMES=HYPRLAND_INSTANCE_SIGNATURE`), and on this machine it is exactly the one
    live instance. `omarchy-restart-shell` already reads `OMARCHY_PATH` from that same source, so
    this is the house-consistent answer rather than a new invention.
-9. **✎ `quickshell list` identifies instances.**
-   `quickshell list -p "$OMARCHY_PATH/shell" --json` →
+9. **✎ `quickshell list` identifies instances — but `-p` filters by the caller's display.**
+   ✎✎ `quickshell list -p <config>` reports only instances on the **caller's** `WAYLAND_DISPLAY`:
+   with it unset (a TTY, ssh, a tool call) it prints *"No running instances"* while the desktop
+   shell is running, which would turn a successful restart into a reported failure. Verified
+   2026-09-19. So the listing must be `--all`, filtered by `config_path` in the script — which is
+   also what keeps another config's shell from being mistaken for our replacement.
+   `quickshell list --all --json` →
    `[{"id":"mtsb1k5jllt","pid":2230186,"launch_time":"2026-09-19T07:27:20",…}]`. A restart can
    therefore be verified by *replacement* — a pid absent from the outgoing set — rather than by
    something answering ping. ✎ Without `--show-dead` the listing holds only live instances, so the
@@ -150,7 +155,10 @@ about to run it, `set -euo pipefail`, a `fail()` helper, refuse rather than clob
 
 ### Link mode, in order
 
-1. **Validate.** `omarchy plugin validate .`; a bad manifest refuses before anything is touched.
+1. **Validate — when linking only.** `omarchy plugin validate .`; a bad manifest refuses before
+   anything is touched. ✎ `--unlink` does **not** validate the checkout: restoring the ordinary
+   install is the recovery path, and a broken development manifest must not be able to block it. The
+   restored install is validated afterwards as a *warning*, never fatally.
 2. **Identify the desktop session, before touching anything.** Read `HYPRLAND_INSTANCE_SIGNATURE`
    and `OMARCHY_PATH` from `systemctl --user show-environment` (finding 8), then **verify** that
    signature answers `hyprctl version`. The inherited environment is never trusted, and no
@@ -196,7 +204,9 @@ about to run it, `set -euo pipefail`, a `fail()` helper, refuse rather than clob
    `if ! err=$(… 2>&1); then …` so a non-zero status neither aborts the script under `set -e` nor
    is mistaken for failure, and its stderr is kept for the receipt.
 6. **Verify replacement, not liveness** (finding 10). ✎ Poll until **both** hold, within a 10s
-   deadline: a `pid` from `quickshell list -p "$CONFIG_DIR" --json` that was not in the outgoing set,
+   deadline: a `pid` from `quickshell list --all --json`, filtered to `$CONFIG_DIR/shell.qml`
+   (finding 9 — never `-p`, which hides instances from a display-less caller), that was not in the
+   outgoing set,
    *and* `omarchy-shell shell ping` answering. A replacement exists before its QML and IPC are up, so
    a single ping attempt taken the moment the pid appears would fail a healthy slow start. Four
    outcomes:
@@ -223,6 +233,8 @@ unchanged.
 | ✎ Run from the installed checkout itself (`$REPO` *is* the install path) | nothing linked or stashed — it is already live; the restart still runs, exit 0 |
 | ✎ Worktree elsewhere inside the plugins directory | exit 1, nothing touched — it would be discovered twice under one id |
 | ✎ Replaced but never answering within the deadline | exit 1, names the new pid, journal hint |
+| ✎ `--unlink` with an invalid manifest in the checkout | restores anyway, exit 0 — validation is link-only |
+| ✎ Caller has no (or a foreign) `WAYLAND_DISPLAY` | unaffected: the listing is `--all` filtered by config path |
 | ✎ No session signature (or it does not answer) **and something else answers** | exit 1, nothing touched — the restart cannot be aimed, and no answerer may be chosen |
 | Stash path occupied | exit 1, nothing touched |
 | ✎ No session signature **and nothing answers anywhere** (e.g. over ssh) | link done, restart skipped with its reason, **exit 0** — the deploy half is the point, and there is no compositor to endanger |
@@ -249,6 +261,10 @@ Cases:
   unguarded form aborts at the assignment instead), and the same with an answerer present → exit 1,
   nothing touched;
 - ✎ a replacement pid that appears at once while ping answers only from its fourth attempt → exit 0;
+- ✎ a caller on a foreign `WAYLAND_DISPLAY` still verifies the restart (the stub models the real
+  display filter, so *every* case in the suite holds the script to `--all`);
+- ✎ an instance of another config appearing after the restart is **not** adopted as the replacement;
+- ✎ `--unlink` with a checkout whose manifest fails validation still restores the stash, exit 0;
 - a real install directory is stashed, its contents intact, and the symlink created;
 - an existing symlink is re-pointed, and no second stash is made;
 - an occupied stash path refuses with exit 1 and leaves the install path exactly as it was;

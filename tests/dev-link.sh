@@ -83,16 +83,36 @@ STUB
   # never changed, which silently turned every success case into a failure.
   cat > "$box/bin/quickshell" <<'STUB'
 #!/bin/bash
+# Models the real `quickshell list` display filter: WITHOUT --all it reports only
+# instances of the CALLER's Wayland display, so a display-less caller (ssh, a TTY,
+# a tool call) sees none even while the desktop shell is running — and prints a
+# human message, not JSON. Every case here runs display-less, so the whole suite
+# holds the script to using --all and filtering by config path itself.
+if [[ " $* " != *" --all "* && ${WAYLAND_DISPLAY:-} != "$(cat "$STUB_STATE/session-display")" ]]; then
+  echo "No running instances for \"$(cat "$STUB_STATE/config-path")/shell.qml\""
+  exit 1
+fi
 n=$(( $(cat "$STUB_STATE/calls" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$STUB_STATE/calls"
 mode=$(cat "$STUB_STATE/replace-after")
-old='[{"id":"old","pid":2229103,"launch_time":"2026-09-19T07:00:00"}]'
-new='[{"id":"new","pid":2230186,"launch_time":"2026-09-19T07:27:20"}]'
+decoy=$(cat "$STUB_STATE/decoy-after")
+config=$(cat "$STUB_STATE/config-path")
+entries=()
 case $mode in
-none)  echo '[]' ;;
-never) echo "$old" ;;
-*)     if (( n > mode )); then echo "$new"; else echo "$old"; fi ;;
+none)  ;;
+never) entries+=("{\"config_path\":\"$config/shell.qml\",\"id\":\"old\",\"launch_time\":\"2026-09-19T07:00:00\",\"pid\":2229103}") ;;
+*)     if (( n > mode )); then
+         entries+=("{\"config_path\":\"$config/shell.qml\",\"id\":\"new\",\"launch_time\":\"2026-09-19T07:27:20\",\"pid\":2230186}")
+       else
+         entries+=("{\"config_path\":\"$config/shell.qml\",\"id\":\"old\",\"launch_time\":\"2026-09-19T07:00:00\",\"pid\":2229103}")
+       fi ;;
 esac
+# An instance of ANOTHER config, appearing only after the restart: a script that
+# does not filter by config path would mistake it for the replacement.
+if [[ $decoy != never ]] && (( n > decoy )); then
+  entries+=("{\"config_path\":\"/other/config/shell.qml\",\"id\":\"decoy\",\"launch_time\":\"2026-09-19T07:30:00\",\"pid\":9999999}")
+fi
+printf '[%s]\n' "$(IFS=,; echo "${entries[*]}")"
 STUB
 
   # omarchy-shell: `shell ping` honours state/ping — `ok`, `dead`, or `after:N`
@@ -116,12 +136,15 @@ STUB
   # missing-file fallback: a stub that silently mis-defaults corrupts every case
   # that depends on it.
   printf 'session_sig\n' > "$box/state/answering"
-  printf 'HYPRLAND_INSTANCE_SIGNATURE=session_sig\nOMARCHY_PATH=%s\n' "$box/omarchy" \
-    > "$box/state/session-env"
+  printf 'HYPRLAND_INSTANCE_SIGNATURE=session_sig\nOMARCHY_PATH=%s\nWAYLAND_DISPLAY=wayland-1\n' \
+    "$box/omarchy" > "$box/state/session-env"
   printf 'ok\n' > "$box/state/validate"
   printf 'ok\n' > "$box/state/restart-outcome"
   printf 'ok\n' > "$box/state/ping"
   printf '1\n' > "$box/state/replace-after"
+  printf 'never\n' > "$box/state/decoy-after"
+  printf 'wayland-1\n' > "$box/state/session-display"
+  printf '%s\n' "$box/omarchy/shell" > "$box/state/config-path"
   printf 'ok\n' > "$box/state/systemctl"
   mkdir -p "$box/omarchy/shell"
   printf '%s\n' "$box"
@@ -403,6 +426,41 @@ if [[ $out =~ branch[[:space:]]+[^[:space:]]+[[:space:]]@[[:space:]][0-9a-f]{7} 
 else
   bad "receipt: names the branch and short sha" "no branch line in: $out"
 fi
+
+# --- a caller on the wrong display still verifies the restart --------------
+# `quickshell list -p` reports only the caller's display, so from a TTY or ssh it
+# finds nothing while the desktop shell runs, and a successful restart would look
+# like a refusal. Confirmed against the real binary on 2026-09-19.
+box=$(setup wrong-display)
+extra_env=(WAYLAND_DISPLAY=wayland-99)
+run "$box"
+extra_env=()
+same  "display: exits 0 from a foreign display" "$status" "0"
+has   "display: found the replacement anyway" "$out" "pid 2230186"
+lacks "display: did not report a phantom failure" "$out" "no new shell instance appeared"
+
+# --- an instance of another config is not our replacement ------------------
+box=$(setup filters-by-config)
+printf 'never\n' > "$box/state/replace-after"   # our shell never comes back
+printf '1\n' > "$box/state/decoy-after"         # someone else's does
+run "$box"
+same  "config-filter: exits 1" "$status" "1"
+has   "config-filter: reports the restart as not done" "$out" "no new shell instance appeared"
+lacks "config-filter: did not adopt the stranger pid" "$out" "9999999"
+
+# --- --unlink works even when the checkout's manifest is broken ------------
+# Restoring the ordinary install is the recovery path; a broken development
+# manifest must not be able to block it.
+box=$(setup unlink-invalid-manifest)
+printf 'fail\n' > "$box/state/validate"
+mkdir -p "$(stash_path "$box")"
+echo marker > "$(stash_path "$box")/CLONE_MARKER"
+ln -s "$src" "$(install_path "$box")"
+run "$box" --unlink
+same   "unlink-invalid: exits 0" "$status" "0"
+is_dir "unlink-invalid: the clone is back" "$(install_path "$box")"
+same   "unlink-invalid: its contents survived" "$(cat "$(install_path "$box")/CLONE_MARKER" 2>/dev/null)" "marker"
+absent "unlink-invalid: the stash is gone" "$(stash_path "$box")"
 
 printf '\n  %d passed, %d failed\n' "$passed" "$failed"
 (( failed == 0 )) || exit 1
