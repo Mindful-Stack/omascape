@@ -1138,8 +1138,11 @@ function tileAt(candidates, px, py) {
 // to choose between them; it is written terminal anyway so a future refactor cannot reopen the
 // fall-through by "simplifying" it back in.) With no query, the window cursor, then the selected
 // workspace.
+// Under the "select" activate policy the pointer is not a targeting device at all — pointing
+// highlights, clicking selects — so the branch below is skipped entirely and the keyboard
+// precedence is the whole rule. See docs/specs/2026-09-18-activate-select-design.md.
 function target(input) {
-    if (input.pointerLive) {
+    if (!input.selectMode && input.pointerLive) {
         if (input.pointerTileAddress) return { kind: "window", address: input.pointerTileAddress }
         if (hasWs(input.pointerWorkspaceId)) return { kind: "workspace", id: input.pointerWorkspaceId }
         return null

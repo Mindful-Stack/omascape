@@ -54,7 +54,8 @@ TestCase {
 
     function input(o) {
         var base = { pointerLive: false, pointerTileAddress: "", pointerWorkspaceId: -1,
-                     query: "", matchAddress: "", cursorAddress: "", selectedId: -1 }
+                     query: "", matchAddress: "", cursorAddress: "", selectedId: -1,
+                     selectMode: false }
         for (var k in o) base[k] = o[k]
         return base
     }
@@ -75,6 +76,27 @@ TestCase {
     // Destructive actions must have no target rather than a surprising one.
     function test_target_live_pointer_over_nothing_is_null() {
         compare(Logic.target(input({ pointerLive: true, cursorAddress: "0xC", selectedId: 3 })), null)
+    }
+    // Distinguishes: select mode honouring the pointer anyway (returns "0xP"), or switching the
+    // pointer off for BOTH modes (the enter-mode assertions above would go red together with
+    // this one). Each case below removes one keyboard level under a live pointer, so a resolver
+    // that merely returned null in select mode also fails.
+    // See docs/specs/2026-09-18-activate-select-design.md.
+    function test_target_select_mode_ignores_a_live_pointer() {
+        var t = Logic.target(input({ selectMode: true, pointerLive: true,
+                                     pointerTileAddress: "0xP", cursorAddress: "0xC", selectedId: 3 }))
+        compare(t.kind, "window"); compare(t.address, "0xC", "the cursor wins, not the pointer")
+
+        var w = Logic.target(input({ selectMode: true, pointerLive: true,
+                                     pointerTileAddress: "0xP", selectedId: 3 }))
+        compare(w.kind, "workspace"); compare(w.id, 3, "falls to the selected workspace")
+
+        var m = Logic.target(input({ selectMode: true, pointerLive: true, pointerTileAddress: "0xP",
+                                     query: "sl", matchAddress: "0xM" }))
+        compare(m.address, "0xM", "a live query still outranks everything")
+
+        compare(Logic.target(input({ selectMode: true, pointerLive: true, pointerTileAddress: "0xP" })),
+                null, "no keyboard target is still terminal")
     }
     // Distinguishes: the keyboard precedence order collapsing. Each assertion removes one level.
     function test_target_keyboard_order_is_match_then_cursor_then_workspace() {
