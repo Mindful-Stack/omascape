@@ -1336,7 +1336,11 @@ Item {
                           duration: root.motion.normal; easing.type: root.motion.move }
         NumberAnimation { target: card; property: "opacity"; to: 1
                           duration: root.motion.enter; easing.type: root.motion.move }
-        NumberAnimation { target: card; property: "scale"; from: 0.96; to: 1
+        // Bar mode does not scale. transformOrigin would move the pivot but not stop horizontal
+        // scaling, and a full-width card that shrinks away from both screen edges contradicts
+        // the one thing the attachment is for. The row stagger carries the motion instead.
+        NumberAnimation { target: card; property: "scale"
+                          from: root.barMode ? 1 : 0.96; to: 1
                           duration: root.motion.enter; easing.type: root.motion.entrance
                           easing.overshoot: root.motion.overshoot }
     }
@@ -1346,7 +1350,7 @@ Item {
                           duration: root.motion.exit; easing.type: root.motion.move }
         NumberAnimation { target: card; property: "opacity"; to: 0
                           duration: root.motion.exit; easing.type: root.motion.move }
-        NumberAnimation { target: card; property: "scale"; to: 0.98
+        NumberAnimation { target: card; property: "scale"; to: root.barMode ? 1 : 0.98
                           duration: root.motion.exit; easing.type: root.motion.move }
     }
     // Ask Hyprland for fresh client data, then rebuild every 60ms until five quiet ticks have

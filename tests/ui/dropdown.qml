@@ -169,4 +169,73 @@ TestCase {
             compare(view.testCard.y, centredY, "cycle " + i + ": returns to centre")
         }
     }
+
+    // Sampled DURING the animation, not at rest. At rest a scaled and an unscaled card are
+    // identical, so an end-state assertion passes against exactly the bug it should catch.
+    //
+    // mapToItem gives the card's REAL rendered edges: it applies the full transform chain, so
+    // this states the property (the card's painted bounds stay pinned to the screen edges) and
+    // not the mechanism. A later switch to a vertical-only Scale transform would still pass;
+    // reinstating the uniform `scale` property would not.
+    //
+    // enterAnim scales 0.96 -> 1 about the top CENTRE: transformOrigin changes the pivot but
+    // not the fact that scaling is uniform, so on a 1920 panel the sides would travel 38.4px
+    // inward on entrance and 19.2px on exit -- with a full-width card, visibly off both edges.
+    function test_the_card_stays_pinned_to_the_screen_edges_while_animating() {
+        view = createTemporaryObject(overview, tc)
+        verify(view)
+        screenA = createTemporaryObject(screenStub, tc, { name: "A" })
+        // Stretch the entrance so sampling is not a race: durations are Math.round(200 * scale).
+        view.motion.scale = 10
+        view.testConfig.anchor = "bar"
+        view.testPanel.width = 1920
+        view.testPanel.height = 1080
+        var monA = monitor("A", 0, 26)
+        var wss = []
+        for (var k = 1; k <= 10; k++) wss.push({ id: k, monitor: monA, toplevels: { values: [] } })
+        view.compositor.monitors = { values: [monA] }
+        view.compositor.focusedMonitor = monA
+        view.compositor.focusedWorkspace = { id: 1 }
+        view.compositor.workspaces = { values: wss }
+        view.testScreens = [screenA]
+
+        view.open()
+        for (var i = 0; i < 4; i++) {
+            wait(120)
+            var l = view.testCard.mapToItem(view.testPanel, 0, 0).x
+            var r = view.testCard.mapToItem(view.testPanel, view.testCard.width, 0).x
+            fuzzyCompare(l, 0, 0.5, "left edge during entrance, sample " + i)
+            fuzzyCompare(r, 1920, 0.5, "right edge during entrance, sample " + i)
+        }
+        view.close()
+        for (var j = 0; j < 3; j++) {
+            wait(120)
+            var l2 = view.testCard.mapToItem(view.testPanel, 0, 0).x
+            var r2 = view.testCard.mapToItem(view.testPanel, view.testCard.width, 0).x
+            fuzzyCompare(l2, 0, 0.5, "left edge during exit, sample " + j)
+            fuzzyCompare(r2, 1920, 0.5, "right edge during exit, sample " + j)
+        }
+    }
+
+    // ...and the centred card must KEEP its scale entrance. Without this, "fix" the bug by
+    // deleting the scale animation outright and every other test still passes.
+    function test_the_centred_card_still_scales_on_entry() {
+        view = createTemporaryObject(overview, tc)
+        verify(view)
+        screenA = createTemporaryObject(screenStub, tc, { name: "A" })
+        view.motion.scale = 10
+        view.testConfig.anchor = "center"
+        view.testPanel.width = 1920
+        view.testPanel.height = 1080
+        var monA = monitor("A", 0, 26)
+        view.compositor.monitors = { values: [monA] }
+        view.compositor.focusedMonitor = monA
+        view.compositor.focusedWorkspace = { id: 1 }
+        view.compositor.workspaces = { values: [{ id: 1, monitor: monA, toplevels: { values: [] } }] }
+        view.testScreens = [screenA]
+        view.open()
+        wait(120)
+        verify(view.testCard.scale < 1,
+               "the centred entrance still scales, got " + view.testCard.scale)
+    }
 }
