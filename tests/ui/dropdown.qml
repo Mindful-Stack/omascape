@@ -144,4 +144,29 @@ TestCase {
         verify(Qt.colorEqual(top, mid),
                "the top edge must be the same fill as the body, got " + top + " vs " + mid)
     }
+
+    // Every seed() above sets anchor ONCE before open() -- nothing flips the mode on an
+    // already-open picker, which is exactly why a ternary pair that yields `undefined` for the
+    // unused anchor (see Overview.qml) passed all of them: it survives its FIRST flip and only
+    // corrupts on the second. `barMode` can flip live in practice -- hiding the bar while the
+    // picker is open drops `reservedTop` to 0 -- and `card` is never recreated across
+    // open()/close(), so a corrupt anchor stays corrupt for the rest of that picker's life,
+    // including centred mode, the default every existing user is on. Two full cycles, because one
+    // cycle alone can pass against a partially-broken implementation.
+    function test_the_card_returns_to_centre_after_a_live_bar_mode_flip() {
+        seed(26, 10, "center")
+        var centredY = view.testCard.y
+        verify(centredY > 0, "precondition: a centred card is not flush with the top")
+        // 250ms clears the width/height Behavior on the card (motion.normal, ~160ms scaled) that
+        // the mode switch also triggers -- unrelated to the anchor bug, but a short wait here
+        // would flake on that settle time regardless of which anchor implementation is under test.
+        for (var i = 0; i < 2; i++) {
+            view.testConfig.anchor = "bar"
+            wait(250)
+            compare(view.testCard.y, 26, "cycle " + i + ": attaches to the bar")
+            view.testConfig.anchor = "center"
+            wait(250)
+            compare(view.testCard.y, centredY, "cycle " + i + ": returns to centre")
+        }
+    }
 }

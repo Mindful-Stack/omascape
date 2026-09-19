@@ -1516,8 +1516,25 @@ Item {
         Rectangle {
             id: card
             anchors.horizontalCenter: parent.horizontalCenter
-            anchors.verticalCenter: root.barMode ? undefined : parent.verticalCenter
-            anchors.top: root.barMode ? parent.top : undefined
+            // NOT a ternary pair (`verticalCenter: barMode ? undefined : parent.verticalCenter` /
+            // `top: barMode ? parent.top : undefined`). A QML binding that evaluates to
+            // `undefined` is DESTROYED, not merely skipped for that one evaluation, so such a pair
+            // survives exactly one mode flip and then stays corrupt — silently, no anchor-conflict
+            // warning — for the rest of the card's life. `card` is never recreated across
+            // open()/close(), and `barMode` can flip live (hiding the bar while the picker is open
+            // drops `reservedTop` to 0), so this is reachable, not theoretical. `AnchorChanges`
+            // inside a `State` exists precisely because anchors can't be rebound by a ternary; it
+            // reverses cleanly on state exit.
+            anchors.verticalCenter: parent.verticalCenter
+            states: State {
+                name: "bar"
+                when: root.barMode
+                AnchorChanges {
+                    target: card
+                    anchors.verticalCenter: undefined
+                    anchors.top: card.parent.top
+                }
+            }
             anchors.topMargin: root.reservedTop
             // Full width in bar mode. Setting `width` overrides the implicitWidth binding, so
             // the Behavior on implicitWidth goes inert there — correct, since the width is the
