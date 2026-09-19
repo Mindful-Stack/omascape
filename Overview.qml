@@ -536,11 +536,18 @@ Item {
         setCursor(addr)
         ensureSelectedVisible()
     }
-    // Task 8 replaces this body with the match/non-match split.
+    // A click while a query is live. target() ranks the match above the cursor and the selected
+    // workspace, so a click that only set the cursor would ring one window and act on another.
+    // The split is on something already visible: matches ring in the accent, non-matches are
+    // dimmed. A click INSIDE the filter moves the selected match and keeps the query — the same
+    // thing Tab does. A click OUTSIDE it ends the query, then selects normally.
     function selectMatchOrClearQuery(addr) {
-        setQuery("")
-        var win = _windowByAddress[addr]
+        // MUTANT: match branch removed (the task-7 stub behaviour)
+        setQuery("")                 // runs restorePreQuerySelection(); the click's own
+        var win = _windowByAddress[addr]   // selection must be applied AFTER it, never before
         if (!win) return
+        // displayedWorkspaceOf, not win.workspaceId: during an optimistic drop the row and the
+        // compositor's report disagree, and the click must follow the tile the user clicked.
         selectedIndex = Logic.indexOfWorkspace(boxes, displayedWorkspaceOf(addr))
         setCursor(addr)
         ensureSelectedVisible()

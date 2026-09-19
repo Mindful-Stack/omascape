@@ -388,4 +388,64 @@ TestCase {
                "closed " + view.compositor.commands[0] + ", expected the selected 0xC")
         verify(view.compositor.commands[0].indexOf("0xA") < 0)
     }
+
+    function type(s) { for (var i = 0; i < s.length; i++) keyClick(s.charAt(i)) }
+
+    // Distinguishes: a click on a MATCH that sets the cursor instead of moving the match — the
+    // ring would then say one thing and Enter another, and followMatch would undo it on the next
+    // rebuild. "a" matches alpha and charlie; the click picks the one find did not select.
+    function test_e_clicking_a_match_moves_the_selected_match() {
+        type("a")
+        verify(view.query.length > 0)
+        var p = tileCentre("0xC")
+        mouseClick(view, p.x, p.y)
+        wait(30)
+        compare(view.query, "a", "the query survives a click inside it")
+        compare(view.selectedMatchAddress, "0xC")
+        compare(view.cursorAddress, "", "the match branch must never set the cursor")
+
+        view.rebuild()   // synchronous; the idiom every other UI suite uses
+        compare(view.selectedMatchAddress, "0xC", "rematchAfterRebuild must preserve it")
+
+        var t = view.resolveTarget()
+        compare(t.kind, "window"); compare(t.address, "0xC", "Enter and Ctrl+W act on the click")
+    }
+    // Distinguishes: a click on a DIMMED tile being ignored (a visible tile left inert), or
+    // selecting while the query stays live — where target() would keep returning the old match.
+    function test_e_clicking_a_non_match_clears_the_query() {
+        type("bravo")                             // matches 0xB only
+        compare(view.selectedMatchAddress, "0xB")
+        var p = tileCentre("0xC")                 // charlie: not a match
+        mouseClick(view, p.x, p.y)
+        wait(30)
+        compare(view.query, "", "clicking outside the filter ends it")
+        compare(view.cursorAddress, "0xC")
+        compare(view.selectedId, 2)
+
+        view.rebuild()   // synchronous; the idiom every other UI suite uses
+        compare(view.cursorAddress, "0xC", "and survives the rebuild")
+        var t = view.resolveTarget()
+        compare(t.address, "0xC")
+    }
+    // Distinguishes: restorePreQuerySelection running AFTER the click's own selection and
+    // stomping it — the ordering trap called out in the spec.
+    function test_e_clicking_a_well_clears_the_query_then_selects() {
+        type("bravo")
+        var w = wellCentre(3)
+        mouseClick(view, w.x, w.y)
+        wait(30)
+        compare(view.query, "")
+        compare(view.selectedId, 3, "the click's own selection must outlive setQuery(\"\")")
+        compare(view.cursorAddress, "")
+    }
+    // Distinguishes: a double-click inside a query that selects twice instead of committing.
+    function test_e_double_clicking_a_match_enters_it() {
+        type("a")
+        var p = tileCentre("0xC")
+        mouseDoubleClickSequence(view, p.x, p.y)
+        wait(30)
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf("address:0xC") >= 0)
+    }
 }
