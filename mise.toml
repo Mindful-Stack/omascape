@@ -6,15 +6,18 @@ run = "bash tests/run.sh"
 description = "Tier 2: nested-Hyprland integration (local; needs Hyprland + Quickshell + foot + jq)"
 run = "bash tests/integration/move.sh"
 
-# dev/dev-off are aliases while the naming is being settled; both spellings run the
-# same script. Task listings show only the primary name, so the aliases are named
-# in the descriptions too.
-[tasks.link]
-description = "Point the live Omarchy plugin dir at this worktree and restart the shell (alias: dev)"
-alias = "dev"
+# Named after Omarchy's own `omarchy dev link` / `dev unlink` / `dev status`, which
+# do the same three things one level up. The short spellings stay as aliases.
+[tasks."dev:link"]
+description = "Point the live Omarchy plugin dir at this worktree and restart the shell (alias: link)"
+alias = "link"
 run = "bash scripts/dev-link.sh"
 
-[tasks.unlink]
-description = "Restore the ordinary clone install and restart the shell (alias: dev-off)"
-alias = "dev-off"
+[tasks."dev:unlink"]
+description = "Restore the ordinary clone install and restart the shell (alias: unlink)"
+alias = "unlink"
 run = "bash scripts/dev-link.sh --unlink"
+
+[tasks."dev:status"]
+description = "Show which checkout the live plugin dir points at, and whether the running shell is it"
+run = "bash scripts/dev-link.sh --status"

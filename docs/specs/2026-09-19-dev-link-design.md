@@ -161,16 +161,20 @@ changes plugin *runtime* code.
 ### Targets
 
 ```toml
-[tasks.link]
-description = "Point the live Omarchy plugin dir at this worktree and restart the shell"
-run = "bash scripts/dev-link.sh"
-
-[tasks.unlink]
-description = "Restore the ordinary clone install and restart the shell"
-run = "bash scripts/dev-link.sh --unlink"
+[tasks."dev:link"]   # alias: link
+[tasks."dev:unlink"] # alias: unlink
+[tasks."dev:status"]
 ```
 
-One script, two modes, so stash and restore stay in one place. Style follows
+✎ Named after Omarchy's own `omarchy dev link` / `dev unlink` / `dev status`, which do the same
+three things one level up (`/usr/share/omarchy/bin/omarchy-dev-{link,unlink,status}`); `link` and
+`unlink` remain as short aliases. `dev:status` is read-only — it reports the link target, its
+branch/sha/dirty state, any stashed install, and whether the **running** shell is actually that
+build: a shell older than the link is still serving the previous checkout, because the engine
+caches compiled source per path (finding 11). It therefore runs before the session-identity block,
+which can refuse; a read-only command must never refuse.
+
+One script, three modes, so stash and restore stay in one place. Style follows
 `scripts/add-keybind.sh`: `#!/bin/bash`, a header comment that explains itself to a reader who is
 about to run it, `set -euo pipefail`, a `fail()` helper, refuse rather than clobber, and
 `PLUGIN_ID="se.mindfulstack.omascape"` hardcoded — CI installs no `jq`.
