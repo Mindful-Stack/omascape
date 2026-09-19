@@ -304,6 +304,11 @@ TestCase {
         view.compositor.workspaces = { values: wss }
         view.testScreens = [screenA]
         view.open()
+        // wait(150) against a 10x-stretched entrance (motion.scale) lands entranceProgress near
+        // 0.21 (OutCubic at t/duration = 0.075). Row 1 (of 2) doesn't start ramping until
+        // progress >= (1 - ROW_SPAN) / (rowCount - 1) = 0.4, so this sample is safely mid-row-0
+        // and pre-row-1 -- but that margin is a function of ROW_SPAN and the stretched duration,
+        // not a law: change either in logic.js/Overview.qml and re-check this wait against 0.4.
         wait(150)
         // Ten workspaces at maxCols 5 is two rows. Workspace 1 is in the first, 6 in the second.
         var first = view.boxOpacityFor(1)
@@ -355,5 +360,52 @@ TestCase {
         wait(30)
         compare(view.entranceProgress, 1, "progress is set directly, not animated")
         fuzzyCompare(view.boxOpacityFor(6), 1, 0.01, "the last row is visible at once")
+    }
+
+    // Finding 3 from the spec review. open() captures targetScreen once; focus keeps moving.
+    // Reading live focus would re-anchor the card and resize its height cap underneath an open
+    // picker whenever focus landed on a monitor reserving a different amount -- or flip bar mode
+    // off entirely on a monitor with no top bar.
+    //
+    // The fixture keeps compositor.focusedMonitor independently settable from testScreens, which
+    // is the one property that makes this test able to tell the bug from the fix.
+    function test_focus_moving_to_another_monitor_does_not_move_the_card() {
+        view = createTemporaryObject(overview, tc)
+        verify(view)
+        screenA = createTemporaryObject(screenStub, tc, { name: "A" })
+        screenB = createTemporaryObject(screenStub, tc, { name: "B" })
+        view.testConfig.anchor = "bar"
+        view.testPanel.width = 1920
+        view.testPanel.height = 1080
+        var monA = monitor("A", 0, 26)          // the picker's screen: a 26px bar
+        var monB = monitor("B", 1080, 52)       // a 2x-scaled screen: a 52px bar
+        view.compositor.monitors = { values: [monA, monB] }
+        view.compositor.focusedMonitor = monA
+        view.compositor.focusedWorkspace = { id: 1 }
+        view.compositor.workspaces = { values: [
+            { id: 1, monitor: monA, toplevels: { values: [] } },
+            { id: 2, monitor: monB, toplevels: { values: [] } } ] }
+        view.testScreens = [screenA, screenB]
+        view.open()
+        wait(120)
+        compare(view.targetScreen, screenA, "precondition: opened on A")
+        compare(view.reservedTop, 26, "precondition: A's bar")
+        var y = view.testCard.y, h = view.testCard.height
+
+        // Focus moves to B without the picker closing.
+        view.compositor.focusedMonitor = monB
+        view.monitorEpoch++
+        wait(60)
+        compare(view.reservedTop, 26, "still A's reservation, not B's 52")
+        compare(view.testCard.y, y, "the card must not re-anchor")
+        compare(view.testCard.height, h, "nor resize")
+
+        // ...and a focused monitor with NO top bar must not drop bar mode either.
+        view.compositor.monitors = { values: [monA, monitor("B", 1080, 0)] }
+        view.compositor.focusedMonitor = view.compositor.monitors.values[1]
+        view.monitorEpoch++
+        wait(60)
+        verify(view.barMode, "bar mode must survive focus landing on a bar-less monitor")
+        compare(view.testCard.y, y, "and the card stays put")
     }
 }

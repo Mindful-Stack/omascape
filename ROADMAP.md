@@ -90,31 +90,19 @@ panel at 2x) — reported by a tester, never visible on the author's 2048-logica
 `maxCellW` clamps first. See `docs/specs/2026-09-18-card-presence-design.md`. The border and
 shadow are **unswept by eye** as of this entry.
 
-### 12. Bar-attached drop-down — prototyped, parked (2026-09-18)
-Anchor the card to the focused monitor's reserved top strip instead of centring it, so it hangs
-off the bar. **Prototyped on branch `dropdown` (`fd6fbe4`), reverted to centred for now** — it
-works and the tests pass, but it wants to land on its own terms rather than inside the presence
-PR. Two requirements before it ships:
-- **It must be a config key, not a replacement.** Centred stays the default; the user chooses.
-  `OmascapeConfig` + `Logic.parseConfig` is the place, alongside `scrim`/`hint`/`motion`.
-- **Its own PR**, on top of card presence (it depends on `Logic.screenMargin`).
+### 12. ~~Bar-attached drop-down~~ ✅ done (2026-09-19)
+Anchor the card to the picker's own screen's reserved top strip instead of centring it, so it
+hangs off the bar. Opt-in via a config key (`anchor: "bar"`, alongside `scrim`/`hint`/`motion`);
+centred stays the default. See `docs/specs/2026-09-19-bar-dropdown-design.md` and
+`docs/plans/2026-09-19-bar-dropdown.md`.
 
-What the prototype already establishes, so it need not be rediscovered:
-- `reserved[1]` from `Hyprland.focusedMonitor.lastIpcObject` is the only source for where the bar
-  ends — the overlay is an Overlay-layer surface with `exclusionMode: Ignore`, so `panel.height`
-  is the whole screen and the bar sits underneath it.
-- The entrance is free: `enterAnim` already scales `0.96 → 1`, and `transformOrigin: Item.Top`
-  turns it into a drop. No new animation.
-- **Square top corners cannot use per-corner radius.** `topLeftRadius` is Qt 6.7+ and an unknown
-  property is a *compile* error on CI's Qt 6.4, so it passes locally and breaks the build. Qt 6.4
-  has no per-side borders either. The prototype uses three strips over the card's top edge (a
-  cover in the card colour, which also removes the top border segment, plus two 1px side strips).
-- The scrim must start below the bar, or the card appears to cover the bar rather than hang from it.
-- The vertical invariant changes: an attached card keeps no top margin by design, so
-  `maxCardH` becomes `panel.height − cardTopY − screenMargin` and tall layouts scroll sooner.
-- **Unverified:** whether `card.color` (`Color.menu.background`) reads as continuous with the
-  bar's own ground across themes. That is the whole risk of the square-corner treatment and it
-  has not been looked at by eye.
+The earlier prototype (branch `dropdown`, `fd6fbe4`, recorded in this entry until now) is
+superseded, not extended — it kept the card centred and inset with three cover-up strips faking
+square top corners, and used a scale entrance. The shipped version instead attaches the card
+directly under the bar (no strips, genuinely square top corners by construction), drops it in
+with a staggered per-row entrance, and resolves the reservation through the picker's own
+`targetScreen` — captured once at `open()` — rather than live focus, so a focus change to another
+monitor can't re-anchor or resize an open picker underneath the user.
 
 ## Maintenance gotchas (verified in-session)
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell
