@@ -69,4 +69,17 @@ TestCase {
         verify(!view.barMode, "barMode must be false with nothing reserved")
         verify(view.testCard.x > 0, "a centred card keeps a side margin, got x=" + view.testCard.x)
     }
+
+    // The other half of `barMode`. The sibling test above seeds top=0, so reservedTop is 0
+    // there regardless of anchor — it cannot tell "no bar" from "bar mode turned off", because
+    // the reservedTop term alone already forces barMode false. This one seeds a REAL top
+    // reservation (asserted as a precondition, so it can't pass by accidentally having nothing
+    // reserved either) with the default "center" anchor, and pins that barMode still requires
+    // the user to have opted in via config.anchor === "bar" — not just a bar being present.
+    function test_a_reservation_alone_does_not_enable_bar_mode() {
+        seed(26, 10, "center")
+        compare(view.reservedTop, 26, "precondition: a real reservation must be present")
+        verify(!view.barMode, "barMode must stay off without anchor: \"bar\", even with a real reservation")
+        verify(view.testCard.x > 0, "a centred card keeps a side margin, got x=" + view.testCard.x)
+    }
 }
