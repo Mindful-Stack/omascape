@@ -145,6 +145,10 @@ about to run it, `set -euo pipefail`, a `fail()` helper, refuse rather than clob
    confirms or denies the identity the session already asserted. `$OMARCHY_PATH/shell` becomes
    `CONFIG_DIR`, the same derivation `omarchy-restart-shell` uses.
 
+   ✎ A failing `systemctl --user show-environment` (no user bus) counts as "the session named
+   nothing", and must not abort the script: under `set -euo pipefail` an unguarded pipeline failure
+   kills it at the assignment, taking the skip path below with it.
+
    ✎ When the session's signature is missing or does not answer, the rule is **whether anything
    else is answering**, because that is exactly the condition under which a restart cannot be
    aimed safely:
@@ -154,7 +158,17 @@ about to run it, `set -euo pipefail`, a `fail()` helper, refuse rather than clob
      desktop whose identity cannot be established) → **refuse, change nothing**. Never pick among
      answerers, and never restart into an unidentified compositor (finding 7).
 3. **Take over the install path**, `$HOME/.config/omarchy/plugins/$PLUGIN_ID` — deliberately not
-   `XDG_CONFIG_HOME`, with a comment naming finding 12 so nobody "fixes" it later:
+   `XDG_CONFIG_HOME`, with a comment naming finding 12 so nobody "fixes" it later.
+
+   ✎ Two cases come first, before any mutation, because the worktree can *be* inside the plugins
+   directory — the README's "edit the installed folder directly" loop is exactly that:
+   - the install path is a real directory whose physical path **is** this worktree → it is already
+     the live checkout; nothing to link, and only the restart is owed. (Stashing it and linking to
+     `$REPO` would point the install path at itself, and the plugin would disappear.)
+   - the worktree is somewhere else under the plugins directory → **refuse**: Omarchy would discover
+     it a second time under the same id.
+
+   Then, as before:
    - a symlink already → note the old target, `ln -sfn` to this worktree;
    - a real directory → `mv` it to `.$PLUGIN_ID.install`, then link;
    - that stash path already occupied → **refuse**, change nothing;
@@ -168,14 +182,18 @@ about to run it, `set -euo pipefail`, a `fail()` helper, refuse rather than clob
    `env HYPRLAND_INSTANCE_SIGNATURE=$session omarchy restart shell`, run as
    `if ! err=$(… 2>&1); then …` so a non-zero status neither aborts the script under `set -e` nor
    is mistaken for failure, and its stderr is kept for the receipt.
-6. **Verify replacement, not liveness** (finding 10). Poll `quickshell list -p "$CONFIG_DIR" --json`
-   for up to 10s for a `pid` that was not in the outgoing set, then confirm `omarchy-shell shell
-   ping`. Three outcomes:
+6. **Verify replacement, not liveness** (finding 10). ✎ Poll until **both** hold, within a 10s
+   deadline: a `pid` from `quickshell list -p "$CONFIG_DIR" --json` that was not in the outgoing set,
+   *and* `omarchy-shell shell ping` answering. A replacement exists before its QML and IPC are up, so
+   a single ping attempt taken the moment the pid appears would fail a healthy slow start. Four
+   outcomes:
    - replaced and answering → **ok**, whatever the restart's exit status was; if that status was
      non-zero its stderr is printed as a warning (the re-lock case).
    - **not replaced** and the outgoing instance still answers → the restart **refused**. Print its
      stderr verbatim (e.g. the session-locked refusal) and say plainly that the old worktree is
      still loaded. Exit 1.
+   - ✎ replaced but never answering within the deadline → exit 1, naming the new pid, with the
+     `journalctl --user -t omarchy-shell -n 60` hint.
    - not replaced and nothing answers → the shell is down. Exit 1 with the
      `journalctl --user -t omarchy-shell -n 60` hint.
 7. **Print the receipt:** link target, branch + short sha + dirty flag, the session signature and
@@ -189,6 +207,9 @@ unchanged.
 | Condition | Result |
 | --- | --- |
 | Manifest fails validation | exit 1, nothing touched |
+| ✎ Run from the installed checkout itself (`$REPO` *is* the install path) | nothing linked or stashed — it is already live; the restart still runs, exit 0 |
+| ✎ Worktree elsewhere inside the plugins directory | exit 1, nothing touched — it would be discovered twice under one id |
+| ✎ Replaced but never answering within the deadline | exit 1, names the new pid, journal hint |
 | ✎ No session signature (or it does not answer) **and something else answers** | exit 1, nothing touched — the restart cannot be aimed, and no answerer may be chosen |
 | Stash path occupied | exit 1, nothing touched |
 | ✎ No session signature **and nothing answers anywhere** (e.g. over ssh) | link done, restart skipped with its reason, **exit 0** — the deploy half is the point, and there is no compositor to endanger |
@@ -207,6 +228,14 @@ binaries (✎ `OMARCHY_SHELL_BIN`, not `OMARCHY_SHELL`, so it cannot collide wit
 Cases:
 
 - ✎ a manifest that fails `omarchy plugin validate` refuses with exit 1 before anything is touched;
+- ✎ run from a copy of the script sitting at the install path (so `$REPO` *is* the install path) →
+  exit 0, the directory untouched and **not** turned into a symlink to itself, nothing stashed, and
+  the restart still happens;
+- ✎ run from another checkout under the plugins directory → exit 1, nothing touched;
+- ✎ `systemctl` exiting non-zero with nothing answering → links and skips the restart, exit 0 (the
+  unguarded form aborts at the assignment instead), and the same with an answerer present → exit 1,
+  nothing touched;
+- ✎ a replacement pid that appears at once while ping answers only from its fourth attempt → exit 0;
 - a real install directory is stashed, its contents intact, and the symlink created;
 - an existing symlink is re-pointed, and no second stash is made;
 - an occupied stash path refuses with exit 1 and leaves the install path exactly as it was;
