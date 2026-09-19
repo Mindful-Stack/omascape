@@ -380,13 +380,21 @@ passed, 0 failed`, `PASS: 24 generated Lua chunks`.
 
 `Overview.qml` is about to reference `Color.bar.background` (Task 7). `prepare.py:32` strips the
 `qs.Commons` import, and line 33 only rewrites `Color.menu.*` — so the new reference would reach
-the fixture unresolved and **every UI suite would fail to compile at once**. Immediately after the
+the fixture unresolved. ✎ *(corrected after review, 2026-09-19: an earlier draft said this would
+"fail to compile at once". It does NOT — verified by injecting `Color.foreground` and running a
+suite: it is a runtime `ReferenceError` that emits a QWARN while every test PASSES with exit code
+0. Worse, Step 4's `grep -E "^Totals|^PASS:"` filters QWARN out, so this failure class would sail
+through the very check meant to catch it. That is why this task also adds a guard in `prepare.py`
+that raises when any `Color.` survives the rewrites — the harness has to make the failure loud,
+because Qt will not.)* Immediately after the
 existing `Color\.menu\.` line:
 
 ```python
 # Bar-mode paints Color.bar.background (Bar.qml:71), a different token from the menu one. Same
 # treatment as Color.menu.*: there is no Color singleton here, and an unresolved reference is a
-# compile error that takes all eight suites down together, not just the one under test.
+# reference degrades SILENTLY -- a QWARN and a still-passing suite -- so any future use of another
+# Color.* namespace needs its own rewrite here, or nothing will catch it. The guard further down
+# is what turns that silence into a hard failure.
 qml = re.sub(r'Color\.bar\.\w+', '"#777777"', qml)
 ```
 
@@ -403,6 +411,27 @@ In the `OmascapeConfig.qml` stub string, after the `motion` line:
 
 **Property:** the default must be `"center"` — the seven existing suites must be unable to notice
 this change.
+
+- [ ] **Step 3b: Make an unresolved `Color.` reference fail loudly**
+
+Added after review. The check in Step 4 cannot catch this class on its own, so `prepare.py` must
+police itself. After every rewrite has been applied and before the file is written out:
+
+```python
+# An unresolved Color reference is NOT a compile error here -- it is a runtime ReferenceError
+# that prints a QWARN and lets the whole suite pass with exit code 0 (verified 2026-09-19). The
+# totals check cannot see it, so the fixture builder has to refuse to build instead.
+leftover = re.findall(r'Color\.\w+(?:\.\w+)?', qml)
+if leftover:
+    raise SystemExit("prepare.py: unresolved Color reference(s) in the fixture: "
+                     + ", ".join(sorted(set(leftover)))
+                     + " -- add a rewrite above, or the suites will pass while the "
+                       "binding silently fails at runtime.")
+```
+
+**Property:** the guard must be seen to FIRE. Temporarily add a `Color.foreground` reference to
+`Overview.qml`, run `python3 tests/ui/prepare.py "$(pwd)" /tmp/somedir`, confirm a non-zero exit,
+then remove it. A guard nobody has watched trip is not yet a guard.
 
 - [ ] **Step 4: Verify no existing suite moved**
 
