@@ -112,7 +112,7 @@ and ring the display.
 
 | | centred (default) | bar mode |
 |---|---|---|
-| card anchors | `centerIn: parent` | `left`/`right` to the panel, `top` at `reservedTop` |
+| card anchors | `verticalCenter` | `AnchorChanges` in a `State` — `top` at `reservedTop` † |
 | card width | content, capped by `maxCardW` | exactly `panel.width` |
 | `radius` / `border` | 20 / 1px accent all round | **0 / none** — bottom rule is a child |
 | entrance + exit | opacity **and** scale | **opacity only** |
@@ -133,6 +133,15 @@ readonly property int reservedTop: {
 }
 readonly property bool barMode: config.anchor === "bar" && reservedTop > 0
 ```
+
+† **Not a ternary yielding `undefined`.** ✎ *(added after review, 2026-09-19.)* A QML binding whose
+expression evaluates to `undefined` is **destroyed**, not skipped for that evaluation, so
+`verticalCenter: barMode ? undefined : parent.verticalCenter` survives exactly one flip and then
+stays corrupt — silently, with no anchor-conflict warning. Reproduced: centred y=100 → bar y=26 →
+back to centred y=**26**. The card is never recreated across `open()`/`close()` and `barMode` can
+flip live (hiding the bar drops `reservedTop` to 0), so one occurrence permanently corrupts the
+**default** centred mode for every user. `AnchorChanges` inside a `State` is what QML provides for
+this; it reverses cleanly on state exit and is Qt 5.0+, so CI-safe. Verified over three cycles.
 
 Anchoring both `left` and `right` overrides `implicitWidth`, so in bar mode `card.width` is
 `panel.width` and the `Behavior on implicitWidth` goes inert. That is correct — the width is the

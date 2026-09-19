@@ -755,8 +755,25 @@ the same time, which is an anchor conflict QML resolves by warning and ignoring 
 
 ```qml
             anchors.horizontalCenter: parent.horizontalCenter
-            anchors.verticalCenter: root.barMode ? undefined : parent.verticalCenter
-            anchors.top: root.barMode ? parent.top : undefined
+            // ✎ CORRECTED after review, 2026-09-19. An earlier draft wrote these as a ternary
+            // pair yielding `undefined` for the unused anchor. That is BROKEN: a QML binding
+            // whose expression evaluates to `undefined` is DESTROYED, not skipped for that
+            // evaluation, so the pair survives one flip and then stays corrupt -- silently, with
+            // no anchor-conflict warning. Reproduced in isolation: centred y=100, bar y=26, back
+            // to centred y=26. `card` is never recreated across open()/close() and `barMode` can
+            // flip live (hiding the bar drops `reservedTop` to 0), so this permanently corrupts
+            // the DEFAULT centred mode. Use AnchorChanges in a State -- Qt 5.0+, verified over
+            // three flip cycles:
+            anchors.verticalCenter: parent.verticalCenter
+            states: State {
+                name: "bar"
+                when: root.barMode
+                AnchorChanges {
+                    target: card
+                    anchors.verticalCenter: undefined
+                    anchors.top: card.parent.top
+                }
+            }
             anchors.topMargin: root.reservedTop
             // Full width in bar mode. Setting `width` overrides the implicitWidth binding, so
             // the Behavior on implicitWidth goes inert there — correct, since the width is the
