@@ -148,8 +148,9 @@ would fire once at startup and never again.
 
 So the entrance is **one root-level progress property with N bindings**, not N timers:
 
-- `root.entranceProgress`, a real 0 → 1, driven by a single `NumberAnimation` of **fixed** total
-  duration (~220 ms) started by `open()`.
+- `root.entranceProgress`, a real 0 → 1, driven by a single `NumberAnimation` started by `open()`
+  over `root.motion.enter` — the existing 200 ms token, not a new constant, so the entrance keeps
+  following the motion policy and the suites' `motion.scale` hook for free.
 - `Logic.rowRanks(boxes)` → `{ ranks: { workspaceId: k }, rowCount: n }`, ranking distinct box `y`
   values ascending, globally across monitor groups so the stagger sweeps the whole card. It reads
   `layout()`'s own `box.y`, upstream of the `by` role mapping at `:1106`.
