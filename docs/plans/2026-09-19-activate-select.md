@@ -42,6 +42,14 @@ Things about this codebase that are not guessable and that this plan depends on:
 - **`prepare.py`'s `replaced()` helper fails loudly** if a block it patches no longer matches
   exactly once. None of this plan's edits touch those blocks, but if `prepare.py` starts raising
   `matches 0 time(s), expected 1`, that is why.
+- **`config` is an id, not a property of `root`.** `Overview.qml:90` declares
+  `OmascapeConfig { id: config }`, so every read is a bare `config.activate` — from nested
+  delegates too. `root.config` is `undefined` and throws `TypeError: Cannot read property
+  'activate' of undefined` at runtime, which in the UI suite surfaces as a wave of unrelated-
+  looking failures across several suites rather than one clear error.
+- **A synthetic drag needs two `mouseMove`s**, a short one to cross Qt's `startDragDistance` and
+  then the real one (`tests/ui/drag.qml:57`). One jump leaves `drag.active` false, the release
+  counts as a click, and a drag test then fails against correct code.
 
 ---
 
@@ -908,11 +916,19 @@ Use `mouseDoubleClickSequence`. If a Qt build in use does not expose it, the fal
         compare(view.opened, true, "the click must have cleared the latch")
     }
     // Distinguishes: a drag that also counts as a click and so selects on drop.
+    //
+    // A drag needs TWO moves, as tests/ui/drag.qml:57 does it: a short one to cross Qt's
+    // startDragDistance and arm `drag.active`, then the real one. A single jump leaves `moved`
+    // false, so the release is a click and this test fails against perfectly correct production
+    // code. The `draggingAddress` check makes that failure mode loud instead of misleading.
     function test_d_a_moved_drag_does_not_select() {
         var from = tileCentre("0xA"), to = wellCentre(3)
-        mousePress(view, from.x, from.y)
-        mouseMove(view, to.x, to.y); wait(30)
-        mouseRelease(view, to.x, to.y); wait(30)
+        mousePress(view, from.x, from.y, Qt.LeftButton)
+        mouseMove(view, from.x + 12, from.y + 2, 20)
+        mouseMove(view, to.x, to.y, 20)
+        verify(view.draggingAddress === "0xA", "the drag must really have started")
+        mouseRelease(view, to.x, to.y, Qt.LeftButton)
+        wait(30)
         compare(view.cursorAddress, "", "a moved drag is not a click")
     }
     // Distinguishes: the default policy regressing. Under "enter" a single click still focuses.
@@ -982,7 +998,7 @@ Task 8 fills it in; this task's tests never run with a live query.
                                         // next summon. The guard makes both delivery orders of
                                         // `doubleClicked` and `released` equivalent.
                                         if (!root.opened) return
-                                        if (root.config.activate === "select") root.selectTile(addr)
+                                        if (config.activate === "select") root.selectTile(addr)
                                         else root.focusWindow(addr)
                                     }
 ```
@@ -992,7 +1008,7 @@ and add, as a sibling of `onReleased` inside the same `MouseArea`:
 ```qml
                                 onDoubleClicked: function (m) {
                                     if (m.button !== Qt.LeftButton) return
-                                    if (root.config.activate !== "select") return
+                                    if (config.activate !== "select") return
                                     root.endDrag()
                                     root.focusWindow(model.address)
                                 }
@@ -1011,13 +1027,13 @@ converge. The test's `commands.length === 1` is what proves it.
 ```qml
                                 onClicked: function (m) {
                                     if (m.button !== Qt.LeftButton) return
-                                    if (root.config.activate === "select")
+                                    if (config.activate === "select")
                                         root.selectWorkspaceBox(boxItem.model.workspaceId)
                                     else root.jump(boxItem.model.workspaceId)
                                 }
                                 onDoubleClicked: function (m) {
                                     if (m.button !== Qt.LeftButton) return
-                                    if (root.config.activate !== "select") return
+                                    if (config.activate !== "select") return
                                     root.jump(boxItem.model.workspaceId)
                                 }
 ```

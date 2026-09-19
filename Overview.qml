@@ -468,7 +468,7 @@ Item {
     // The "select" policy's digit latch: the key code of the digit press that made the current
     // selection, or 0. A press of the SAME key completes the gesture. Cleared by every other key
     // that reaches the handler — but NOT by pointer movement, which changes nothing in select
-    // mode. Click-to-select clears it too, once that exists.
+    // mode. Click-to-select clears it too: selectTile and selectWorkspaceBox both zero it first.
     property int digitLatch: 0
     // ---- Actions: the arrow-key window cursor ----------------------------------------------
     // The keyboard's window target inside the selected workspace. "" = none. Mirrored into the
@@ -513,6 +513,38 @@ Item {
         if (win && Logic.isScratchpad(win.workspaceId)) Hyprland.dispatch(Logic.scratchpadFocusLua(addr))
         else Hyprland.dispatch('hl.dsp.focus({ window = "address:' + addr + '" })')
         close()
+    }
+    // Click-to-select under the "select" policy. Sets BOTH the window cursor and the box
+    // selection: applyTiles clears a cursor that is not on selectedId (see :1180), so a click
+    // that set only the cursor would lose its ring at the next rebuild.
+    function selectTile(addr) {
+        digitLatch = 0
+        var win = _windowByAddress[addr]
+        if (!win) return
+        if (query.length) { selectMatchOrClearQuery(addr); return }
+        selectedIndex = Logic.indexOfWorkspace(boxes, win.workspaceId)
+        setCursor(addr)
+        ensureSelectedVisible()
+    }
+    // Task 8 replaces this body with the match/non-match split.
+    function selectMatchOrClearQuery(addr) {
+        setQuery("")
+        var win = _windowByAddress[addr]
+        if (!win) return
+        selectedIndex = Logic.indexOfWorkspace(boxes, win.workspaceId)
+        setCursor(addr)
+        ensureSelectedVisible()
+    }
+    // Click-to-select for a well. A live query is cleared first, then the box is selected; the
+    // window cursor is dropped so Enter enters the workspace rather than a stale window.
+    function selectWorkspaceBox(id) {
+        digitLatch = 0
+        if (query.length) setQuery("")         // runs restorePreQuerySelection(); must come first
+        var idx = Logic.indexOfWorkspace(boxes, id)
+        if (idx < 0) return
+        selectedIndex = idx
+        setCursor("")
+        ensureSelectedVisible()
     }
     // Enter: whatever the target rule names.
     function activateTarget() {
@@ -1740,7 +1772,15 @@ Item {
                                 enabled: root.opened
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 onClicked: function (m) {
-                                    if (m.button === Qt.LeftButton) root.jump(boxItem.model.workspaceId)
+                                    if (m.button !== Qt.LeftButton) return
+                                    if (config.activate === "select")
+                                        root.selectWorkspaceBox(boxItem.model.workspaceId)
+                                    else root.jump(boxItem.model.workspaceId)
+                                }
+                                onDoubleClicked: function (m) {
+                                    if (m.button !== Qt.LeftButton) return
+                                    if (config.activate !== "select") return
+                                    root.jump(boxItem.model.workspaceId)
                                 }
                                 onPressed: function (m) {
                                     if (m.button === Qt.RightButton)
@@ -1917,7 +1957,22 @@ Item {
                                     if (wasMoved && Logic.hasWs(targetWs))
                                         root.submitDrop(addr, targetWs, dropX, dropY, ptr.x, ptr.y)
                                     root.endDrag()
-                                    if (!wasMoved) { root.focusWindow(addr) }
+                                    if (!wasMoved) {
+                                        // A double-click's second `released` can arrive after
+                                        // focusWindow() has already closed the overview; selecting
+                                        // into a closed overview would leave stale state for the
+                                        // next summon. The guard makes both delivery orders of
+                                        // `doubleClicked` and `released` equivalent.
+                                        if (!root.opened) return
+                                        if (config.activate === "select") root.selectTile(addr)
+                                        else root.focusWindow(addr)
+                                    }
+                                }
+                                onDoubleClicked: function (m) {
+                                    if (m.button !== Qt.LeftButton) return
+                                    if (config.activate !== "select") return
+                                    root.endDrag()
+                                    root.focusWindow(model.address)
                                 }
                             }
                         }

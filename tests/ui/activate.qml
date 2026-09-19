@@ -269,6 +269,90 @@ TestCase {
         verify(view.compositor.commands[0].indexOf('workspace = "7"') >= 0)
     }
 
+    // Distinguishes: a click that still focuses and closes, and one that sets only the cursor
+    // without the workspace — applyTiles clears a cursor that is not on selectedId, so the
+    // rebuild wait below is the real assertion, not padding.
+    function test_d_a_tile_click_selects_and_survives_a_rebuild() {
+        var p = tileCentre("0xC")                 // workspace 2
+        mouseClick(view, p.x, p.y)
+        wait(30)
+        compare(view.opened, true, "a single click must not leave")
+        compare(view.compositor.commands.length, 0)
+        compare(view.cursorAddress, "0xC")
+        compare(view.selectedId, 2, "the click must move the box selection too")
+
+        view.rebuild()   // synchronous; the idiom every other UI suite uses
+        compare(view.cursorAddress, "0xC", "the cursor must survive applyTiles")
+        compare(view.selectedId, 2)
+    }
+    // Distinguishes: a double-click that focuses twice, or that leaves the overview open. The
+    // command count is the sharp half: Qt delivers `released` around `doubleClicked` and both
+    // paths run, so exactly one dispatch proves the guards hold.
+    function test_d_a_double_click_enters_the_window() {
+        var p = tileCentre("0xC")
+        mouseDoubleClickSequence(view, p.x, p.y)
+        wait(30)
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1, "exactly one focus dispatch")
+        verify(view.compositor.commands[0].indexOf("address:0xC") >= 0)
+    }
+    // Distinguishes: a well click that jumps (enter-mode behaviour) or that leaves a stale
+    // window cursor behind, which would make Enter focus a window instead of entering the box.
+    function test_d_a_well_click_selects_the_workspace() {
+        var p = tileCentre("0xA")
+        mouseClick(view, p.x, p.y)                // cursor onto a window first
+        wait(30)
+        var w = wellCentre(3)                     // workspace 3 is empty
+        mouseClick(view, w.x, w.y)
+        wait(30)
+        compare(view.opened, true)
+        compare(view.selectedId, 3)
+        compare(view.cursorAddress, "", "a well click clears the window cursor")
+    }
+    // Distinguishes: a well double-click that selects twice instead of committing.
+    function test_d_a_well_double_click_enters_the_workspace() {
+        var w = wellCentre(3)
+        mouseDoubleClickSequence(view, w.x, w.y)
+        wait(30)
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf('workspace = "3"') >= 0)
+    }
+    // Distinguishes: a click clearing the latch only for digits. A click makes a NEW selection,
+    // so a pending repeat of the old digit must not complete afterwards.
+    function test_d_a_click_clears_the_digit_latch() {
+        keyClick(Qt.Key_2)
+        var p = tileCentre("0xA")
+        mouseClick(view, p.x, p.y)
+        wait(30)
+        keyClick(Qt.Key_2)
+        compare(view.opened, true, "the click must have cleared the latch")
+    }
+    // Distinguishes: a drag that also counts as a click and so selects on drop.
+    // A drag needs TWO moves, as tests/ui/drag.qml:57 does it: a short one to cross Qt's
+    // startDragDistance and arm `drag.active`, then the real one. A single jump leaves `moved`
+    // false, the release is a click, and the test would "fail" on production code that is
+    // perfectly correct — which is exactly what it did before this was fixed.
+    function test_d_a_moved_drag_does_not_select() {
+        var from = tileCentre("0xA"), to = wellCentre(3)
+        mousePress(view, from.x, from.y, Qt.LeftButton)
+        mouseMove(view, from.x + 12, from.y + 2, 20)
+        mouseMove(view, to.x, to.y, 20)
+        verify(view.draggingAddress === "0xA", "the drag must really have started")
+        mouseRelease(view, to.x, to.y, Qt.LeftButton)
+        wait(30)
+        compare(view.cursorAddress, "", "a moved drag is not a click")
+    }
+    // Distinguishes: the default policy regressing. Under "enter" a single click still focuses.
+    function test_d_enter_policy_click_still_focuses() {
+        view.testConfig.activate = "enter"
+        var p = tileCentre("0xC")
+        mouseClick(view, p.x, p.y)
+        wait(30)
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1)
+    }
+
     // Distinguishes: Ctrl+W still acting on hover in select mode — the consequence the spec
     // accepted explicitly. Hovering 0xA while 0xC is selected must close 0xC.
     function test_d_ctrl_w_closes_the_selected_window_not_the_hovered_one() {
