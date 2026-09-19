@@ -1743,7 +1743,42 @@ Item {
                     // branch: this plugin has exactly one focus item, so everything is routed
                     // through here. `handleKey`'s own return is not consulted — while the dialog
                     // is open nothing else may act on the key, consumed or not.
-                    if (root.confirmOpen) { confirmDialog.handleKey(e); return }
+                    //
+                    // Bare Space needs one more thing done to it than "route to the dialog and
+                    // return", or it reopens the peek the instant the dialog closes (review find):
+                    // ConfirmDialog.handleKey() does not consume Space at all, so nothing above
+                    // ever recorded that it was physically down. Dismiss the dialog with Escape
+                    // while Space is still held (auto-repeating) and the very next repeat reaches
+                    // the Space branch below with `peeking` and `peekCancelled` both still false —
+                    // a hold this key never legitimately started, opened by a press the dialog
+                    // already swallowed. The menu branch below doesn't need this: `menuDismissKey`
+                    // (below) already latches the dismissing key's own repeats until release; the
+                    // dialog has no such latch, so it has to build one here instead.
+                    //
+                    // Read directly off e.modifiers rather than `chord`: `chord` is computed
+                    // further down, below every early return in this function, so it does not
+                    // exist yet at this point in the branch — this dialog handler is one of those
+                    // early returns.
+                    //
+                    // Order matters and is NOT swappable: `peekAbort()` only latches
+                    // `peekCancelled` while `peekKeyDown` is already true (see both properties'
+                    // own comments, and the review fix that put that guard there) — it exists
+                    // specifically so a modal that opens and closes with Space never pressed does
+                    // not falsely latch a cancel that only a real Space release would ever clear.
+                    // Setting `peekKeyDown` first is what makes this a case `peekAbort()` is
+                    // WILLING to latch: the key really is down right now, physically, so recording
+                    // that before aborting is honest, not a workaround. Every later repeat of this
+                    // same held Space runs this same pair again — harmless, since both are already
+                    // set — right up until the real key-up, which is what finally clears them
+                    // (`Keys.onReleased` below) and frees a genuinely fresh press to open normally.
+                    if (root.confirmOpen) {
+                        if (!(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+                                && e.key === Qt.Key_Space) {
+                            root.peekKeyDown = true
+                            root.peekAbort()
+                        }
+                        confirmDialog.handleKey(e); return
+                    }
                     // The menu owns every key while it is open — checked before `finding`, so a
                     // letter dismisses instead of extending the query.
                     if (root.menuOpen) { root.menuKey(e); return }

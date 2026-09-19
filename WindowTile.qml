@@ -65,10 +65,18 @@ Item {
     // the icon fallback's 40px cap, which reads as a postage stamp in a 60% box, and hover
     // itself. `decorated: false` gates the whole response at the HoverHandler rather than
     // per-consumer, so it drops the title chip, the 1.03 lift and the in-layer z raise
-    // together — a peek is not a click target, so none of the three apply to it. Only ever set
-    // this false on a non-interactive instance: on a grid tile it would also shrink that
-    // tile's action hit-test rect, which is read off the *painted* scale/z
-    // (Overview.tileCandidates), back to bare model geometry.
+    // together — a peek is not a click target, so none of the three apply to it. It also now
+    // gates the fullscreen badge's own MouseArea (review find, round 2): PeekLayer's mini-map
+    // passes `fullscreen` through so a recovered-slot window's badge is still visible there
+    // (the badge is the only sign of that state once the window isn't filling the workspace —
+    // see the badge's own comment), but with no `unfullscreenRequested` handler wired up on
+    // that path, the badge's click target had nothing to do except swallow the click and fire a
+    // signal into the void. Gating on `decorated` reuses the exact same "is this a live click
+    // target" signal the HoverHandler already reads, rather than adding a second flag that could
+    // drift from it. Only ever set this false on a non-interactive instance: on a grid tile it
+    // would also shrink that tile's action hit-test rect, which is read off the *painted*
+    // scale/z (Overview.tileCandidates), back to bare model geometry, AND disable its badge's
+    // click target — a grid tile's fullscreen badge is meant to be clickable.
     property int iconMax: 40
     property bool decorated: true
     // Same opt-in as iconMax/decorated, for the same reason: the grid's r5 (box radius 8 minus
@@ -323,6 +331,13 @@ Item {
         }
         MouseArea {
             anchors.fill: parent
+            // Non-interactive instances (decorated: false — a mini-map or window peek tile) keep
+            // the badge VISIBLE but disabled: the badge itself still tells a display-only preview
+            // that its window is fullscreen/maximized, but nothing there connects
+            // unfullscreenRequested, so an enabled click target would swallow the click (left and
+            // middle both) and fire a signal no one is listening for. See `decorated`'s own
+            // comment above.
+            enabled: tile.decorated
             acceptedButtons: Qt.LeftButton | Qt.MiddleButton
             preventStealing: true
             onClicked: function (m) { if (m.button === Qt.LeftButton) tile.unfullscreenRequested() }

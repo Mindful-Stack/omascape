@@ -25,6 +25,11 @@ TestCase {
     property var winB
 
     Component { id: overview; Overview {} }
+    // Reconfigured per test (target/signalName set right before use, cleared after): the
+    // fullscreen-badge tests below need to spy on a dynamically-created mini-map tile's own
+    // `unfullscreenRequested`, which does not exist until a hold opens it, so it cannot be
+    // wired up as a static `target:` binding the way most SignalSpy usages in this repo are.
+    SignalSpy { id: badgeSpy }
 
     // Workspace 1 holds two tiled windows side by side (A left, B right); workspace 2 holds one.
     function client(addr, cls, x) {
@@ -649,6 +654,35 @@ TestCase {
         keyRelease(Qt.Key_Space)
     }
 
+    // Distinguishes: a Space PRESSED WHILE THE DIALOG IS OPEN reopening the peek the instant the
+    // dialog closes (review find). The test above covers the other order — a hold already live
+    // when the dialog opens — and that case needs no extra latch: openCloseAllConfirm() already
+    // calls peekAbort() itself. This one is the order the review actually reproduced: the dialog
+    // opens with NO Space down at all, the user then holds Space (which the dialog owns and
+    // swallows), and dismisses with Escape — all without ever releasing the key. Before the fix,
+    // nothing recorded that Space was physically down while the dialog had it, so the very next
+    // auto-repeat (simulated here as an ordinary second keyPress, per this file's own convention
+    // — QtTest cannot synthesize isAutoRepeat, and Overview.qml's Space branch is deliberately
+    // guarded on state rather than that flag) reached the Space branch with `peeking` and
+    // `peekCancelled` both still false, and opened — a hold this key never legitimately started.
+    function test_a_space_held_through_the_close_all_dialog_does_not_reopen_on_dismissal() {
+        var t = view.resolveTarget()
+        verify(t !== null && t.kind === "workspace", "precondition: the target is a workspace")
+        view.openCloseAllConfirm(t.id)
+        compare(view.confirmOpen, true, "precondition: the dialog is open, with no Space ever pressed")
+        keyPress(Qt.Key_Space)                    // first pressed WHILE the dialog owns the key
+        compare(view.testPeek.shown, false, "the dialog swallows it: no peek opens underneath")
+        keyClick(Qt.Key_Escape)                    // dismiss with Space still down; no release in between
+        compare(view.confirmOpen, false, "precondition: the dialog is gone")
+        keyPress(Qt.Key_Space)                     // the still-held key's next repeat
+        compare(view.testPeek.shown, false,
+                "a hold the dialog swallowed must not open once the dialog is gone")
+        keyRelease(Qt.Key_Space)
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true, "but a genuine fresh press after release still works")
+        keyRelease(Qt.Key_Space)
+    }
+
     // Distinguishes: peekedKey pinned to the target at PRESS time rather than following a
     // mid-hold retarget. Peeks window A (the arrow cursor's first stop), retargets onto B with a
     // second Right while still held, then closes B — the window the layer is ACTUALLY showing, not
@@ -746,6 +780,94 @@ TestCase {
         keyPress(Qt.Key_Space)
         compare(view.testPeek.shown, true, "a fresh press must not be dead from a stale flag")
         keyRelease(Qt.Key_Space)
+    }
+
+    // ---- fullscreen badge on display-only mini-map tiles (review find) --------------------
+
+    // Depth-first search for a child by objectName: plain QtQuick Items have no findChild()
+    // exposed to QML/JS, and a freshly-created mini-map tile (unlike testWindowTile/testMiniMap
+    // themselves) carries no fixture alias of its own. objectName: "fsBadge" (WindowTile.qml) is
+    // the one hook production code already exposes for reaching it.
+    function findByObjectName(item, name) {
+        if (item.objectName === name) return item
+        var kids = item.children
+        for (var i = 0; i < kids.length; i++) {
+            var found = findByObjectName(kids[i], name)
+            if (found) return found
+        }
+        return null
+    }
+
+    // Distinguishes: PeekLayer.qml:130 passing `fullscreen` through to the mini-map's tiles
+    // without also disabling the badge's own click target (review find). A fullscreen window
+    // sits in its RECOVERED slot in a mini-map rather than filling the workspace, so the badge
+    // is the one thing that still shows its state there — hiding it outright would lose that
+    // information, which is why the fix keeps it VISIBLE and disables only its MouseArea (gated
+    // on `decorated`, already false for every peek tile — WindowTile.qml's own comment). Both
+    // halves are asserted: a badge that was merely made invisible would wrongly pass a test that
+    // checks only the click, and vice versa. The click itself is exercised for real (mouseClick
+    // at the badge's actual geometry) rather than reading `enabled` off the MouseArea directly,
+    // so this also catches a fix that disables the wrong element or leaves the badge unreachable
+    // for some other reason. `unfullscreenRequested` is the observable: PeekLayer never connects
+    // it (the whole point of the review find — a signal fired into the void), so a disabled
+    // MouseArea and a connected-but-inert one look identical from any handler's point of view,
+    // but the signal itself still tells the two apart from the click side.
+    function test_a_fullscreen_minimap_tile_shows_its_badge_but_the_badge_does_not_intercept_clicks() {
+        var fsClient = client("0xB", "bravo", 900)
+        fsClient.fullscreen = 2
+        view.compositor.workspaces = { values: [
+            wsRow(1, [client("0xA", "alpha", 100), fsClient]),
+            wsRow(2, [client("0xC", "charlie", 100)])
+        ] }
+        view.rebuild()
+        var t = view.resolveTarget()
+        verify(t !== null && t.kind === "workspace", "precondition: the target is a workspace")
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.shown, true)
+        var mm = view.testPeek.testMiniMap
+        verify(mm !== null && mm.count > 0, "the fixture must expose a populated mini-map Repeater")
+        var fsTile = null
+        for (var i = 0; i < mm.count; i++) if (mm.itemAt(i).fullscreen > 0) fsTile = mm.itemAt(i)
+        verify(fsTile !== null, "precondition: one mini-map tile is fullscreen")
+        var badge = findByObjectName(fsTile, "fsBadge")
+        verify(badge !== null, "precondition: the fullscreen mini-map tile has a badge")
+        compare(badge.visible, true,
+                "the badge stays visible: it is the only sign a display-only tile is fullscreen")
+        badgeSpy.target = fsTile
+        badgeSpy.signalName = "unfullscreenRequested"
+        badgeSpy.clear()
+        var p = badge.mapToItem(tc, badge.width / 2, badge.height / 2)
+        mouseClick(tc, p.x, p.y, Qt.LeftButton)
+        compare(badgeSpy.count, 0,
+                "a click on a non-interactive tile's badge must not fire the unhandled signal")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: a fix that disables the badge everywhere rather than only on non-interactive
+    // (`decorated: false`) instances. The grid delegate never sets `decorated` false, so its
+    // badge must stay a live click target — this repo's own drag.qml already covers that path
+    // end-to-end (compositor dispatch and all); this is the narrower, local guard that this fix
+    // specifically does not touch `enabled` for an interactive instance.
+    function test_a_fullscreen_grid_tile_keeps_its_badge_clickable() {
+        var fsClient = client("0xB", "bravo", 900)
+        fsClient.fullscreen = 2
+        view.compositor.workspaces = { values: [
+            wsRow(1, [client("0xA", "alpha", 100), fsClient]),
+            wsRow(2, [client("0xC", "charlie", 100)])
+        ] }
+        view.rebuild()
+        var children = view.testCanvas.children, gridTile = null
+        for (var i = 0; i < children.length; i++)
+            if (children[i].model && children[i].model.address === "0xB") gridTile = children[i]
+        verify(gridTile !== null, "precondition: the grid tile for 0xB exists")
+        var badge = findByObjectName(gridTile, "fsBadge")
+        verify(badge !== null, "precondition: the grid tile's badge is visible while fullscreen")
+        badgeSpy.target = gridTile
+        badgeSpy.signalName = "unfullscreenRequested"
+        badgeSpy.clear()
+        var p = badge.mapToItem(tc, badge.width / 2, badge.height / 2)
+        mouseClick(tc, p.x, p.y, Qt.LeftButton)
+        compare(badgeSpy.count, 1, "a grid tile's badge must still fire the signal on click")
     }
 
     // Distinguishes: a peek that is undiscoverable. Space is not a key anyone guesses, and it is
