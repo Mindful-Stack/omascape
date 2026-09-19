@@ -120,7 +120,7 @@ instead of its windows.
 
 > **Renamed from Omyview on 2026-09-16.** The plugin id, the config file names and the
 > Hyprland layer namespace all changed, so an existing Omyview install does not upgrade into
-> this one. See [Migrating from Omyview](#migrating-from-omyview).
+> this one — remove it and install this one fresh.
 
 
 ### Requirements
@@ -203,7 +203,7 @@ Press **SUPER+A**. The overlay opens on your focused monitor.
 | **Click an empty box**   | Jump to that workspace                                    |
 | **Click the ⛶ badge**    | Turn fullscreen off for that window (overview stays open) |
 | **← → ↑ ↓** (query empty) | Move a keyboard cursor between the windows on the selected workspace |
-| **Ctrl+W**               | Close the targeted window (hovered, cursored, or the selected find match) |
+| **Ctrl+W**               | Close the targeted window (hovered, cursored, or the selected find match) — or, on a workspace holding exactly one window, that window, without first stepping into it |
 | **Right-click** a window, workspace, or its number badge | Open the actions menu — close, float/tile, fullscreen, lock, move/swap monitors, close all |
 | **?**                    | Show / hide a second row of key hints                      |
 | **Type a letter**        | Start a fuzzy find over window class and title             |
@@ -233,24 +233,6 @@ omarchy plugin remove se.mindfulstack.omascape
 ```
 
 …then delete the SUPER+A bind you added and `hyprctl reload`.
-
-### Migrating from Omyview
-
-Omascape is the same plugin under a new name. Nothing about how it works changed; every
-identifier did. To move across:
-
-```bash
-omarchy plugin remove se.mindfulstack.omyview
-omarchy plugin add https://github.com/Mindful-Stack/omascape.git --enable
-
-# keep your settings and your armed workspaces
-mv ~/.config/omarchy/omyview.json       ~/.config/omarchy/omascape.json       2>/dev/null
-mv ~/.config/omarchy/omyview-locks.json ~/.config/omarchy/omascape-locks.json 2>/dev/null
-```
-
-Then edit your Hyprland config: point the toggle bind at `se.mindfulstack.omascape`, and change
-any `namespace = "omyview"` layer rule (the optional blur and no-animation rules below) to
-`"omascape"`. Finish with `hyprctl reload`, then `omarchy restart shell`.
 
 ### What it touches on your system
 
@@ -443,9 +425,14 @@ APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inli
 
 ### Testing
 
-There's no unit-test harness — this is a visual overlay, so "testing" means reloading the
-shell and checking behavior. Before opening a PR, confirm:
+`mise run test` is the Tier 1 suite: pure layout/actions/find logic plus offscreen Qt
+mouse-event tests (see [Drag regression checks](#drag-regression-checks) for what it covers
+and what it needs installed). `mise run test-integration` adds a nested Hyprland run.
 
+Plenty of the overlay is still visual, though, so testing also means reloading the shell and
+checking behavior by hand. Before opening a PR, confirm:
+
+- [ ] `mise run test` passes.
 - [ ] `omarchy plugin validate .` passes.
 - [ ] SUPER+A opens and closes the overlay; `Esc` and click-outside close it.
 - [ ] Number keys `1`–`0` jump to the right workspace; Tab + `Enter` work; arrows step windows; click works.

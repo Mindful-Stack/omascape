@@ -254,8 +254,12 @@ Item {
     // the scratchpad group is extra and always carries its own chip.
     readonly property bool multiMonitor: groups.filter(function (g) { return !g.special }).length > 1
     // Card interior logical width available to the canvas: panel.width (logical, not
-    // screen.width*dpr) minus the card's own padding and a little breathing room.
-    readonly property real availCanvasW: panel.width > 0 ? panel.width - 2 * card.pad - 16 : 1600
+    // screen.width*dpr) minus the card's own padding and the screen margin. Shares
+    // Logic.screenMargin with the card's own caps below so the two cannot drift apart — they
+    // previously disagreed by 2 * card.pad, which is how the grid came to sit 10 px from the
+    // edge of a 1920-logical screen (a 4K panel at 2x).
+    readonly property real availCanvasW:
+        panel.width > 0 ? panel.width - 2 * card.pad - 2 * Logic.screenMargin(panel.width) : 1600
     onAvailCanvasWChanged: if (opened) rebuild()
 
     function focusedScreen() {
@@ -682,8 +686,16 @@ Item {
     function closeTarget() {
         if (dragTile !== null) return          // a drag owns the pointer; actions wait
         var t = resolveTarget()
-        if (!t || t.kind !== "window") return
-        closeWindow(t.address, t.address === cursorAddress)
+        if (!t) return
+        // ✎ 2026-09-18 A workspace is not a closable thing — EXCEPT when it names exactly one
+        // window, which close and close-all would treat identically anyway (Logic.loneWindow, and
+        // the `windowCount > 1` gate the menu's Close all already carries). Resolved here rather
+        // than in Logic.target so the carve-out belongs to close alone: widening the shared target
+        // rule would also turn Enter on such a workspace from a jump into a focus.
+        var addr = t.kind === "window" ? t.address
+                                       : Logic.loneWindow(tileRows(), t.id, closeSkipSet())
+        if (!addr) return
+        closeWindow(addr, addr === cursorAddress)
     }
     // As conservative as reconcileMoves: absence from `windows` alone never clears an entry. A
     // window on a workspace that just became a lock placeholder is ALSO absent (find/drag never
@@ -1633,6 +1645,11 @@ Item {
 
         // A 28% shadow reads on light themes but vanishes on dark ones (Tokyo Night sweep),
         // so the alpha follows the card's luminance.
+        // SoftShadow's own defaults (blur 28, offset 0,6). A deeper shadow was tried on this
+        // branch — blur 48, offset (0,12), alpha 0.65/0.38 — on the reasoning that the card must
+        // lift off the desktop now that there is real air around it. Reverted after looking at
+        // it: raising blur, offset and alpha together was too much, and the border added below
+        // already does the lifting the deeper shadow was for. Doing both was double.
         SoftShadow { target: card; scale: card.scale; opacity: card.opacity
                      color: Qt.rgba(0, 0, 0, root.darkTheme ? 0.55 : 0.28) }
         Rectangle {
@@ -1640,6 +1657,13 @@ Item {
             anchors.centerIn: parent
             radius: root.cardRadius
             color: root.background
+            // With real air around the card it must read as elevated rather than as a lighter
+            // rectangle. Accent-derived rather than a fixed neutral: a black hairline looks like
+            // a bug on a light card and a white one vanishes on it. `accent` is already
+            // `selText` and already tracks the theme, so this needs no new colour. One logical
+            // px is two device px at 2x — crisp at exactly the scale that reported the problem.
+            border.width: 1
+            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
             opacity: 0        // the entrance brings it in; panel.visible follows this
             readonly property int pad: Math.round(Style.space(12))
             // Space under the grid for the key hints or, while a query is active, the find
@@ -1661,9 +1685,13 @@ Item {
             }
             // Cap the card to the screen so the Flickable viewport can be smaller than the
             // content (`availCanvasW` already keeps canvas width <= this, minus the degenerate
-            // narrow-screen case, which is expected to 2-D scroll per the spec).
-            readonly property real maxCardW: panel.width > 0 ? panel.width - 16 : 1616
-            readonly property real maxCardH: panel.height > 0 ? panel.height - 64 : 900
+            // narrow-screen case, which is expected to 2-D scroll per the spec). Because
+            // availCanvasW is exactly this minus 2 * pad, the WIDTH cap never binds on grid
+            // width — the only thing that reaches it is the hint row, which is deliberately
+            // allowed to widen a narrow card so the key hints are not clipped. The HEIGHT cap
+            // does real work whenever there are enough monitor groups to overflow.
+            readonly property real maxCardW: panel.width  > 0 ? panel.width  - 2 * Logic.screenMargin(panel.width)  : 1616
+            readonly property real maxCardH: panel.height > 0 ? panel.height - 2 * Logic.screenMargin(panel.height) : 900
             // The hint row never widens past the screen (maxCardW still caps it), but it does
             // widen a narrow card: a layout with few/narrow workspaces must not clip the eight
             // key hints against the card edge.

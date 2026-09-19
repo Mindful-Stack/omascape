@@ -263,6 +263,19 @@ function peekFit(srcW, srcH, boxW, boxH) {
     return { w: srcW * k, h: srcH * k }
 }
 
+// Breathing room between the picker and the screen edge, both axes. A FRACTION, because the two
+// absolute constants this replaces (`availCanvasW`'s `- 16` and the card's `- 16` / `- 64`) were
+// sized for a ~1600-logical card: at 1920 logical — a 4K panel at 2x, and the commonest laptop
+// logical width there is — they left the grid 10 px from the edge. Floored so a genuinely narrow
+// screen keeps today's behaviour rather than losing its margin altogether. Guarded like every
+// other layout input: a NaN here would reach the card as a zero-size Rectangle, i.e. an invisible
+// overlay that still holds keyboard focus.
+function screenMargin(px) {
+    var n = Number(px)
+    if (!isFinite(n) || n <= 0) return 16
+    return Math.round(Math.max(16, n * 0.05))
+}
+
 function layout(input) {
     var P = input.params
     var monByName = _index(input.monitors, "name")
@@ -1228,6 +1241,27 @@ function cycleWindows(tiles, wsId, current, step, skip) {
     for (var j = 0; j < list.length; j++) if (list[j].address === current) { idx = j; break }
     if (idx < 0) return (step > 0 ? list[0] : list[list.length - 1]).address
     return list[((idx + step) % list.length + list.length) % list.length].address
+}
+
+// ✎ 2026-09-18 The one window a workspace names unambiguously, or "" when it names none or
+// several. A workspace is not a closable thing, so Ctrl+W on a workspace target does nothing —
+// EXCEPT here, where there is no ambiguity left to protect the user from: on a single-window
+// workspace, close and close-all are the same act, which is why `workspaceMenuRows` already
+// hides Close all below two windows. `skip` is the same pendingCloses set `cycleWindows` takes,
+// so a window already asked to close does not count: its tile is drawn dimmed, and the rule
+// matches what is on screen. Deliberately NOT folded into `target()` — widening the shared
+// target rule would also change what Enter does on a one-window workspace.
+function loneWindow(tiles, wsId, skip) {
+    if (!hasWs(wsId)) return ""
+    var found = ""
+    for (var i = 0; i < tiles.length; i++) {
+        var t = tiles[i]
+        if (t.wsid !== wsId) continue
+        if (skip && skip[t.address]) continue
+        if (found) return ""            // a second candidate: the workspace names no single window
+        found = t.address
+    }
+    return found
 }
 
 // Menu highlight movement: wrapping, and from "none" onto the first (down) or last (up) row.

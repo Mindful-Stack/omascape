@@ -1319,4 +1319,33 @@ TestCase {
         verify(isFinite(f.w) && isFinite(f.h), "got " + f.w + "x" + f.h)
         verify(f.w >= 0 && f.h >= 0)
     }
+
+    // ---- Screen margin (docs/specs/2026-09-18-card-presence-design.md) --------------------
+    // Breathing room between the picker and the screen edge. A FRACTION, because the two
+    // absolute constants this replaces were sized for a ~1600-logical card and left 10 px on
+    // a 1920-logical one (a 4K panel at 2x — the commonest laptop logical width there is).
+    function test_screen_margin_is_five_percent_with_a_floor() {
+        compare(Logic.screenMargin(1920), 96, "4K at 2x: the reported case")
+        compare(Logic.screenMargin(2048), 102, "2560 at 1.25x: 102.4 rounds down")
+        compare(Logic.screenMargin(1080), 54, "the vertical axis uses the same function")
+        // THE case that discriminates Math.round from Math.floor. Every other width above is
+        // either exact (1920 x 0.05 = 96) or rounds the same way under both (102.4, 54.0), so
+        // without this line a floor() implementation passes the whole function.
+        compare(Logic.screenMargin(1919), 96, "95.95 rounds UP; flooring would give 95")
+    }
+    // The floor is what keeps a genuinely narrow screen behaving as it does today rather than
+    // losing its margin entirely: 5% of 200 is 10, less than the 16 the old constants used.
+    function test_screen_margin_floors_at_sixteen() {
+        compare(Logic.screenMargin(200), 16, "the floor binds below 320")
+        compare(Logic.screenMargin(320), 16, "exactly at the floor's crossover")
+    }
+    // panel.width is 0 until the surface maps, and a NaN would flow into availW, cell width,
+    // every box, the canvas and finally the card — which a Rectangle paints as nothing at all.
+    // The same failure mode as the phantom-monitor guard above.
+    function test_screen_margin_never_yields_a_non_number() {
+        compare(Logic.screenMargin(0), 16, "unmapped surface")
+        compare(Logic.screenMargin(-5), 16, "nonsense width")
+        compare(Logic.screenMargin(NaN), 16, "NaN must not propagate")
+        compare(Logic.screenMargin(undefined), 16, "missing argument")
+    }
 }

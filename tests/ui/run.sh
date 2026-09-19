@@ -12,6 +12,8 @@ cp "$src/tests/ui/close.qml" "$fixture/tst_close_ui.qml"
 cp "$src/tests/ui/actions.qml" "$fixture/tst_actions_ui.qml"
 cp "$src/tests/ui/monitors.qml" "$fixture/tst_monitors_ui.qml"
 cp "$src/tests/ui/peek.qml" "$fixture/tst_peek_ui.qml"
+
+cp "$src/tests/ui/presence.qml" "$fixture/tst_presence_ui.qml"
 runner=/usr/lib/qt6/bin/qmltestrunner
 command -v qmltestrunner6 >/dev/null 2>&1 && runner=qmltestrunner6
 QT_QPA_PLATFORMTHEME=generic QT_QPA_PLATFORM=offscreen "$runner" -input "$fixture" "$@"

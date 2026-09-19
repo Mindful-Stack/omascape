@@ -16,7 +16,9 @@ Workspace lock (2026-09-12): Ctrl+L arms a workspace's windows black in every sc
 see docs/specs/2026-09-12-lock-design.md. Actions (2026-09-17): a single target rule, a
 Tab-driven window cursor, Ctrl+W, and a right-click context menu (Close, Float/Tile,
 Fullscreen/Exit, Lock/Unlock, Move/Swap monitors, Close all windows), plus a two-tier `?` hint
-row, see docs/specs/2026-09-15-actions-design.md.
+row, see docs/specs/2026-09-15-actions-design.md. Ctrl+W on a workspace holding exactly one
+window closes it without stepping into the tile first (2026-09-18); above one window it stays
+inert rather than escalating to Close all.
 
 ## Next steps
 
@@ -81,6 +83,39 @@ dev machine cannot do:
       scratchpad row depends on — unprobed; if it's rejected, that row closes nothing and reports
       "workspace not found" instead of silently doing the wrong thing.
 
+### 11. ~~Card presence: screen margin and elevation~~ ✅ done (2026-09-18)
+`Logic.screenMargin` (5%, floored at 16) replaces two drifted absolute constants; card border
+and a deeper shadow. Fixes a grid that sat 10 px from the edge on a 1920-logical screen (a 4K
+panel at 2x) — reported by a tester, never visible on the author's 2048-logical one, where
+`maxCellW` clamps first. See `docs/specs/2026-09-18-card-presence-design.md`. The border and
+shadow are **unswept by eye** as of this entry.
+
+### 12. Bar-attached drop-down — prototyped, parked (2026-09-18)
+Anchor the card to the focused monitor's reserved top strip instead of centring it, so it hangs
+off the bar. **Prototyped on branch `dropdown` (`fd6fbe4`), reverted to centred for now** — it
+works and the tests pass, but it wants to land on its own terms rather than inside the presence
+PR. Two requirements before it ships:
+- **It must be a config key, not a replacement.** Centred stays the default; the user chooses.
+  `OmascapeConfig` + `Logic.parseConfig` is the place, alongside `scrim`/`hint`/`motion`.
+- **Its own PR**, on top of card presence (it depends on `Logic.screenMargin`).
+
+What the prototype already establishes, so it need not be rediscovered:
+- `reserved[1]` from `Hyprland.focusedMonitor.lastIpcObject` is the only source for where the bar
+  ends — the overlay is an Overlay-layer surface with `exclusionMode: Ignore`, so `panel.height`
+  is the whole screen and the bar sits underneath it.
+- The entrance is free: `enterAnim` already scales `0.96 → 1`, and `transformOrigin: Item.Top`
+  turns it into a drop. No new animation.
+- **Square top corners cannot use per-corner radius.** `topLeftRadius` is Qt 6.7+ and an unknown
+  property is a *compile* error on CI's Qt 6.4, so it passes locally and breaks the build. Qt 6.4
+  has no per-side borders either. The prototype uses three strips over the card's top edge (a
+  cover in the card colour, which also removes the top border segment, plus two 1px side strips).
+- The scrim must start below the bar, or the card appears to cover the bar rather than hang from it.
+- The vertical invariant changes: an attached card keeps no top margin by design, so
+  `maxCardH` becomes `panel.height − cardTopY − screenMargin` and tall layouts scroll sooner.
+- **Unverified:** whether `card.color` (`Color.menu.background`) reads as continuous with the
+  bar's own ground across themes. That is the whole risk of the square-corner treatment and it
+  has not been looked at by eye.
+
 ## Maintenance gotchas (verified in-session)
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell
   rescanPlugins` reloads the registry but NOT the live QML component.
@@ -108,7 +143,7 @@ dev machine cannot do:
 - Coalesced refresh: an event while the settle timer runs *owes* a refresh on the next tick.
   Never skip it — a request already in flight cannot contain the change the event announces
   (the nested-compositor un-fullscreen case catches this).
-- **Every new compositor chunk must raise the count guard in `tests/lua-check.sh`** (currently 23)
+- **Every new compositor chunk must raise the count guard in `tests/lua-check.sh`** (currently 24)
   — it fails the build if fewer chunks than expected parse, which is the only thing standing
   between a chunk that silently failed to generate and a green test run.
 - **Right-button presses must stay out of the drag release path.** `onReleased` submits a drop or
