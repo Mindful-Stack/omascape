@@ -176,9 +176,11 @@ Three properties this must hold:
   rule.
 - **Bar mode only.** A top-down stagger under a card that scales from its centre reads as a bug.
 
-`rowPhase` returns **1** on a non-finite input, not 0. A NaN must never leave the grid invisible —
-the same reasoning as `screenMargin`'s guard, where the failure mode was an invisible overlay
-holding keyboard focus.
+`rowPhase` never returns **0** for a non-finite input. ✎ *(corrected 2026-09-19: an earlier draft
+said it "returns 1", which is true only of a non-finite `progress`. A non-finite `rank` degrades to
+rank 0 and a non-finite `rowCount` to no stagger — all still visible, none of them 1.)* A NaN must
+never leave the grid invisible — the same reasoning as `screenMargin`'s guard, where the failure
+mode was an invisible overlay holding keyboard focus.
 
 The card's own scale animation is **not** used in bar mode (see the decision above): the shade
 fades in at full size while the rows drop into it. `card.scale` stays 1, so `SoftShadow`'s

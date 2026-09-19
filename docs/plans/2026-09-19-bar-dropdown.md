@@ -310,7 +310,9 @@ function rowPhase(progress, rank, rowCount) {
     var p = Number(progress)
     // Non-finite means fully arrived, never fully hidden: a NaN reaching a delegate's opacity
     // must leave the grid visible. An invisible card that still holds keyboard focus is the
-    // worst outcome available here, so every guard below fails toward 1.
+    // worst outcome available here. The shared invariant is that NO guard returns 0 for a
+    // non-finite input -- they degrade differently (progress -> 1, rank -> rank 0,
+    // rowCount -> no stagger) but none of them vanishes.
     if (!isFinite(p)) return 1
     if (p <= 0) return 0
     if (p >= 1) return 1
