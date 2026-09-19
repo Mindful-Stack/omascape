@@ -144,6 +144,103 @@ TestCase {
         compare(e.kind, "window")
         compare(e.address, "0xC", "enter mode: the same hover still names the tile")
     }
+
+    // ---- select-mode digits: Logic.digitActivate wired through the latch -------------------
+    // Distinguishes: a digit that still jumps (the overview would close and dispatch), or one
+    // that selects without moving the box selection.
+    function test_c_a_digit_selects_without_leaving() {
+        keyClick(Qt.Key_2)
+        compare(view.opened, true, "a first press must not leave the overview")
+        compare(view.selectedId, 2)
+        compare(view.compositor.commands.length, 0, "nothing dispatched on a select")
+    }
+    // Distinguishes: a latch keyed on the workspace instead of the key press, and a second press
+    // that re-selects instead of committing.
+    function test_c_the_same_digit_again_enters() {
+        keyClick(Qt.Key_2)
+        keyClick(Qt.Key_2)
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf('workspace = "2"') >= 0,
+               "dispatched: " + view.compositor.commands[0])
+    }
+    // Distinguishes: a latch that ignores intervening input — the bug where 2, 3, 2 enters 2.
+    function test_c_a_different_digit_clears_the_latch() {
+        keyClick(Qt.Key_2); keyClick(Qt.Key_3); keyClick(Qt.Key_2)
+        compare(view.opened, true, "no press was ever a repeat")
+        compare(view.selectedId, 2)
+    }
+    // Distinguishes: a latch cleared only by digits. Tab moves the selection, so a later repeat
+    // of the old digit must not complete.
+    function test_c_another_key_clears_the_latch() {
+        keyClick(Qt.Key_2); keyClick(Qt.Key_Tab); keyClick(Qt.Key_2)
+        compare(view.opened, true)
+    }
+    // Distinguishes: a latch cleared by pointer movement. Under select mode a mouse move changes
+    // nothing at all, so it must not silently break a pending repeat.
+    function test_c_a_mouse_move_does_not_clear_the_latch() {
+        keyClick(Qt.Key_2)
+        hoverTile("0xA")
+        keyClick(Qt.Key_2)
+        compare(view.opened, false, "the repeat must still complete after a mouse move")
+    }
+    // Distinguishes: THE missing-box gap. Workspace 7 has no box (see the seed), so neither
+    // press may select, dispatch or leave — and the inert digit must also clear a pending latch,
+    // or 2, 7, 2 would enter workspace 2 with a keystroke in between that did not count.
+    function test_c_a_digit_with_no_box_is_inert() {
+        keyClick(Qt.Key_7)
+        compare(view.opened, true)
+        compare(view.selectedId, 1, "selection untouched (workspace 1 is focused at open)")
+        compare(view.compositor.commands.length, 0)
+
+        keyClick(Qt.Key_7)
+        compare(view.opened, true, "a second inert press must not enter either")
+        compare(view.compositor.commands.length, 0)
+
+        keyClick(Qt.Key_2); keyClick(Qt.Key_7); keyClick(Qt.Key_2)
+        compare(view.opened, true, "the inert digit must have cleared the latch")
+    }
+    // Auto-repeat has NO test here on purpose: QtTest's QML key API cannot set isAutoRepeat
+    // (tests/ui/actions.qml:431 says so for the Ctrl+W guard). That is why the rule lives in
+    // digitActivate, where test_digitActivate_an_auto_repeat_is_a_true_no_op covers both
+    // failure modes. Holding a digit is a live-check item, not an offscreen one.
+
+    // Distinguishes: a latch that outlives the summon it was armed in, which would make the
+    // first digit press of the NEXT open enter instead of select.
+    function test_c_entering_leaves_no_latch_behind() {
+        keyClick(Qt.Key_2); keyClick(Qt.Key_2)
+        compare(view.opened, false)
+        compare(view.digitLatch, 0, "the latch must not survive the close")
+    }
+    // Distinguishes: a policy flip that leaves a stale latch, so the first digit after switching
+    // back completes a gesture begun under the old policy.
+    function test_c_a_policy_change_clears_the_latch() {
+        keyClick(Qt.Key_2)
+        compare(view.digitLatch, Qt.Key_2)
+        view.testConfig.activate = "enter"
+        view.testConfig.activate = "select"
+        compare(view.digitLatch, 0)
+        keyClick(Qt.Key_2)
+        compare(view.opened, true, "that press selects; it does not complete the old gesture")
+    }
+    // Distinguishes: the default policy regressing. Under "enter" a single digit still jumps.
+    function test_c_enter_policy_is_unchanged() {
+        view.testConfig.activate = "enter"
+        keyClick(Qt.Key_2)
+        compare(view.opened, false, "one press jumps under the default policy")
+        compare(view.compositor.commands.length, 1)
+    }
+    // Distinguishes: the missing-box rule leaking into enter mode. Under "enter", 7 must still
+    // dispatch and let Hyprland create workspace 7 — that is today's behaviour and it is not in
+    // this feature's scope to change.
+    function test_c_enter_policy_still_jumps_to_a_missing_workspace() {
+        view.testConfig.activate = "enter"
+        keyClick(Qt.Key_7)
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf('workspace = "7"') >= 0)
+    }
+
     // Distinguishes: Ctrl+W still acting on hover in select mode — the consequence the spec
     // accepted explicitly. Hovering 0xA while 0xC is selected must close 0xC.
     function test_d_ctrl_w_closes_the_selected_window_not_the_hovered_one() {

@@ -465,6 +465,10 @@ Item {
                               matchAddress: root.selectedMatchAddress,
                               cursorAddress: root.cursorAddress, selectedId: root.selectedId })
     }
+    // The "select" policy's digit latch: the key code of the digit press that made the current
+    // selection, or 0. A press of the SAME key completes the gesture. Cleared by every other key
+    // and by every click — but NOT by pointer movement, which changes nothing in select mode.
+    property int digitLatch: 0
     // ---- Actions: the arrow-key window cursor ----------------------------------------------
     // The keyboard's window target inside the selected workspace. "" = none. Mirrored into the
     // tiles model as the `cursor` role so the ring is a binding, not an imperative repaint.
@@ -1252,6 +1256,7 @@ Item {
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
+        digitLatch = 0
         // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
         // "most recent input device wins" means the device that summoned the overview, not
@@ -1386,6 +1391,12 @@ Item {
     Connections {
         target: config
         function onWorkspacesChanged() { if (root.opened) root.rebuild() }
+    }
+    // A mid-session policy flip must not leave a stale latch behind: the first digit after
+    // switching back to "select" would otherwise complete a gesture begun under the old policy.
+    Connections {
+        target: config
+        function onActivateChanged() { root.digitLatch = 0 }
     }
 
     // Share-time reminder frame: one per screen, four strips each (LockFrame.qml). Lives outside
@@ -1533,6 +1544,12 @@ Item {
 
                     var chord = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
                     var finding = root.query.length > 0
+                    // Take the latch: EVERY key clears it, and only the digit branch below
+                    // re-arms — from `latch`, the value as it was on entry. Pointer movement
+                    // never reaches here, which is exactly why a mouse move cannot break a
+                    // pending repeat.
+                    var latch = root.digitLatch
+                    root.digitLatch = 0
                     // Action keys read pointer liveness; everything else is keyboard intent and
                     // clears it BEFORE any resolve below can see it.
                     if (!Logic.isActionKey(e.key, chord, Qt.ControlModifier)) root.pointerLive = false
@@ -1568,8 +1585,21 @@ Item {
                         // same hand.
                         if (e.key === Qt.Key_Tab) { root.setCursor(""); root.selectByTab(1); return }
                         if (e.key === Qt.Key_Backtab) { root.setCursor(""); root.selectByTab(-1); return }
-                        if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) { root.setCursor(""); root.jump(e.key - Qt.Key_0); return }
-                        if (e.key === Qt.Key_0) { root.setCursor(""); root.jump(10); return }
+                        if (e.key >= Qt.Key_0 && e.key <= Qt.Key_9) {
+                            if (config.activate !== "select") {
+                                root.setCursor("")
+                                root.jump(e.key === Qt.Key_0 ? 10 : e.key - Qt.Key_0)
+                                return
+                            }
+                            var d = Logic.digitActivate(e.key, latch, root.boxes, e.isAutoRepeat)
+                            root.digitLatch = d.latch      // an auto-repeat hands `latch` back
+                            if (d.action === "none") return
+                            root.setCursor("")
+                            root.selectedIndex = d.index
+                            root.ensureSelectedVisible()
+                            if (d.action === "enter") root.jump(d.id)
+                            return
+                        }
                         if (e.key === Qt.Key_Left) { root.navigateCursor("left"); return }
                         if (e.key === Qt.Key_Right) { root.navigateCursor("right"); return }
                         if (e.key === Qt.Key_Up) { root.navigateCursor("up"); return }
