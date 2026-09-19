@@ -250,6 +250,11 @@ compositor and no Omarchy: the script takes `HYPRCTL`, `OMARCHY`, `OMARCHY_SHELL
 binaries (✎ `OMARCHY_SHELL_BIN`, not `OMARCHY_SHELL`, so it cannot collide with anything
 `omarchy-shell` itself reads), and the suite points them at stubs with `HOME` in a temp dir.
 
+✎ The suite must pass with `WAYLAND_DISPLAY` set, unset, and set to a foreign value. The stub
+models the real display filter, so a test that calls it the wrong way passes only on a machine whose
+display name happens to match the fixture's — which is how CI caught a fixture self-check that was
+green locally.
+
 Cases:
 
 - ✎ a manifest that fails `omarchy plugin validate` refuses with exit 1 before anything is touched;

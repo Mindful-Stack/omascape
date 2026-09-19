@@ -183,12 +183,26 @@ echo "dev-link:"
 # bash arithmetic error and returned the old pid forever, which would have made
 # each ordinary success case fail for a reason having nothing to do with the
 # script under test.
+# Called with --all, the way the script calls it: a bare `list` is display-filtered
+# (see the next block), and asking for it here passed on a dev machine whose
+# WAYLAND_DISPLAY happened to equal the fixture's and failed on a headless runner.
 box=$(setup fixture-self-check)
-first=$(STUB_STATE="$box/state" "$box/bin/quickshell" list 2>"$box/state/stub-err")
-second=$(STUB_STATE="$box/state" "$box/bin/quickshell" list 2>>"$box/state/stub-err")
+first=$(STUB_STATE="$box/state" "$box/bin/quickshell" list --all 2>"$box/state/stub-err")
+second=$(STUB_STATE="$box/state" "$box/bin/quickshell" list --all 2>>"$box/state/stub-err")
 has  "fixture: first call reports the outgoing instance" "$first" "2229103"
 has  "fixture: second call reports the replacement" "$second" "2230186"
 same "fixture: the stub writes nothing to stderr" "$(cat "$box/state/stub-err")" ""
+
+# --- the fixture's display filter, asserted rather than assumed --------------
+# replace-after=never so the answer never depends on the call counter.
+box=$(setup fixture-display-filter)
+printf 'never\n' > "$box/state/replace-after"
+foreign=$(STUB_STATE="$box/state" WAYLAND_DISPLAY=wayland-99 "$box/bin/quickshell" list 2>/dev/null || true)
+own=$(STUB_STATE="$box/state" WAYLAND_DISPLAY=wayland-1 "$box/bin/quickshell" list 2>/dev/null || true)
+anywhere=$(STUB_STATE="$box/state" env -u WAYLAND_DISPLAY "$box/bin/quickshell" list --all 2>/dev/null || true)
+lacks "fixture: a bare list hides instances from a foreign display" "$foreign" "2229103"
+has   "fixture: a bare list shows them on the session's own display" "$own" "2229103"
+has   "fixture: --all shows them with no display at all" "$anywhere" "2229103"
 
 # --- a real install is stashed, not destroyed, and replaced by the link ------
 box=$(setup stashes-real-install)
