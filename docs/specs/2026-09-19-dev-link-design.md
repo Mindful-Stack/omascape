@@ -124,11 +124,33 @@ changes plugin *runtime* code.
     set). Only changes directly under the plugins directory are seen; creating the symlink itself
     fired two.
 
-    **Open question, and the real argument for a copy-based `deploy` target:** whether
-    `reloadPlugins` picks up changed QML *source*, or only re-registers manifests the way
-    `rescanPlugins` does. If it does reload source, a copy-based deploy would need no shell restart
-    at all — a materially better loop than this one. Not measured; worth its own experiment before
-    anyone builds `deploy`.
+    **✎✎ Measured 2026-09-19 — the reload does NOT pick up changed source, so the restart stays
+    mandatory and a copy-based `deploy` buys nothing here.** Method: a throwaway `keepLoaded`
+    overlay plugin installed as a real directory (not a symlink) that logs a version string from its
+    QML and from an imported `probe.js`, driven with no restart at all (one shell process, pid
+    3108994, throughout):
+
+    | Change on disk | Reload fired | Component re-created | Version logged |
+    | --- | --- | --- | --- |
+    | plugin first added | yes | yes | `qml=v1 js=v1` — a **new** file compiles fresh |
+    | `probe.js` → v2 | yes | yes | `qml=v1 js=v1` — **stale** |
+    | `Probe.qml` → v2 | yes | yes | `qml=v1 js=v1` — **stale** |
+
+    The component really is destroyed and rebuilt each time (`Component.onCompleted` fires again),
+    but it is rebuilt from the engine's cached compilation unit, so neither QML nor imported JS
+    changes take effect. Only files the engine has never compiled load fresh.
+
+    **Cause, and a second upstream bug:** `finishPluginReload` (`shell.qml:757`) guards its cache
+    clear with `if (typeof Qt.clearComponentCache === "function")`, and `Qt.clearComponentCache` is
+    **`undefined` in QML** — it exists only as the C++ `QQmlEngine::clearComponentCache()`. Verified
+    directly (`typeof … = undefined` under `qmltestrunner`) and corroborated by the stale-source
+    result. The intent is in the code; the call has never run.
+
+    **Also measured:** omascape itself survives the reload cycle. It was unloaded and re-created
+    several times during this experiment, and toggling the overview open and closed afterwards
+    produced no errors — captures and lock rules re-establish cleanly. That matters for the shipped
+    design, because `mise run link` writing the symlink triggers this same global reload before its
+    restart.
 12. **✎ The plugins directory is hardcoded, so `XDG_CONFIG_HOME` must be ignored.**
     `PluginRegistry.qml:11` is `home + "/.config/omarchy/plugins"` and the CLI catalog hardcodes
     the same path. Honoring `XDG_CONFIG_HOME` would link into a directory nothing scans: the link
@@ -302,4 +324,9 @@ is live. Keep the existing warning that editing QML needs a restart rather than 
   reads `OMARCHY_PATH`, rather than only deriving it when the variable is empty; and it should
   establish that the launch channel answers *before* `quickshell kill`, so a caller with a stale
   environment cannot lose the bar with no supervisor to recover it.
+- **A second upstream Omarchy issue**, from finding 11: the plugin hot reload tears components down
+  and rebuilds them but never clears the QML type cache, because its guard tests for a `Qt.`
+  function that does not exist in QML. So saving a file under `~/.config/omarchy/plugins/` reloads
+  the component from cached source and appears to work while serving the old code — which also makes
+  the shell README's "saving a file reloads plugin code automatically" misleading as written.
 - **The 171 stale `$XDG_RUNTIME_DIR/hypr/*` directories** the integration suite leaves behind.
