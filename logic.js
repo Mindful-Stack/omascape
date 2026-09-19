@@ -1127,9 +1127,13 @@ function tileAt(candidates, px, py) {
     return best ? best.address : ""
 }
 
-// "Most recent input device wins." A live pointer (see Overview.pointerLive) names what it is
-// over and nothing else — over empty canvas an action has NO target, deliberately: silently
-// falling back to the keyboard would make Ctrl+W close a window the user is not looking at.
+// "Most recent input device wins" — under the "enter" activate policy. A live pointer (see
+// Overview.pointerLive) names what it is over and nothing else — over empty canvas an action has
+// NO target, deliberately: silently falling back to the keyboard would make Ctrl+W close a window
+// the user is not looking at.
+// Under the "select" policy the pointer is not a targeting device at all — pointing highlights,
+// clicking selects — so the pointer branch is skipped entirely and the keyboard precedence below
+// is the whole rule, empty canvas included. See docs/specs/2026-09-18-activate-select-design.md.
 // Otherwise the keyboard: while a query is active the target is the find match and nothing
 // else — a query with no match is a TERMINAL "no target", not a fall-through to the cursor or
 // the selected workspace. Without that, a mistyped search plus Enter would jump to whatever
@@ -1138,9 +1142,6 @@ function tileAt(candidates, px, py) {
 // to choose between them; it is written terminal anyway so a future refactor cannot reopen the
 // fall-through by "simplifying" it back in.) With no query, the window cursor, then the selected
 // workspace.
-// Under the "select" activate policy the pointer is not a targeting device at all — pointing
-// highlights, clicking selects — so the branch below is skipped entirely and the keyboard
-// precedence is the whole rule. See docs/specs/2026-09-18-activate-select-design.md.
 function target(input) {
     if (!input.selectMode && input.pointerLive) {
         if (input.pointerTileAddress) return { kind: "window", address: input.pointerTileAddress }
