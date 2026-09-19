@@ -179,5 +179,66 @@ is_dir "stash: the real install moved aside" "$(stash_path "$box")"
 same   "stash: its contents survived" "$(cat "$(stash_path "$box")/CLONE_MARKER" 2>/dev/null)" "marker"
 has    "stash: receipt names the link" "$out" "linked   se.mindfulstack.omascape -> $src"
 
+# --- an existing symlink is re-pointed, and no second stash appears ---------
+box=$(setup repoints-symlink)
+mkdir -p "$box/elsewhere"
+ln -s "$box/elsewhere" "$(install_path "$box")"
+run "$box"
+same   "repoint: exits 0" "$status" "0"
+same   "repoint: now points at this worktree" "$(readlink "$(install_path "$box")")" "$src"
+absent "repoint: nothing was stashed" "$(stash_path "$box")"
+absent "repoint: did not link inside the old target" "$box/elsewhere/${src##*/}"
+has    "repoint: receipt names the previous target" "$out" "was      $box/elsewhere"
+
+# --- run from the installed checkout itself: already live, never self-linked -
+# REPO == INSTALL here, because the script is executed from a copy sitting at the
+# install path — the README's "edit the installed folder directly" loop.
+#
+# Verified by disabling the guards (2026-09-19): with only the first gone, the
+# inside-the-plugins-dir refusal backstops it and just the exit status and the
+# message go red; with BOTH gone the checkout really is moved to the stash and
+# replaced by a symlink to itself, and all six assertions here fail — including
+# "its own files are still there", because the script it was run from becomes
+# unreachable through the self-link.
+box=$(setup installed-checkout)
+mkdir -p "$(install_path "$box")/scripts"
+cp "$src/scripts/dev-link.sh" "$(install_path "$box")/scripts/"
+cp "$src/manifest.json" "$(install_path "$box")/"
+script_path="$(install_path "$box")/scripts/dev-link.sh"
+run "$box"
+script_path=""
+same   "installed: exits 0" "$status" "0"
+is_dir "installed: the checkout is still a real directory" "$(install_path "$box")"
+same   "installed: it did not become a self-link" \
+  "$(readlink "$(install_path "$box")" 2>/dev/null)" ""
+absent "installed: nothing was stashed" "$(stash_path "$box")"
+has    "installed: says it is already the installed checkout" "$out" "already the installed checkout"
+same   "installed: its own files are still there" \
+  "$(test -f "$(install_path "$box")/scripts/dev-link.sh" && echo yes)" "yes"
+
+# --- another checkout inside the plugins dir is refused --------------------
+box=$(setup checkout-inside-plugins-dir)
+mkdir -p "$(plugin_dir "$box")/other-checkout/scripts"
+cp "$src/scripts/dev-link.sh" "$(plugin_dir "$box")/other-checkout/scripts/"
+cp "$src/manifest.json" "$(plugin_dir "$box")/other-checkout/"
+script_path="$(plugin_dir "$box")/other-checkout/scripts/dev-link.sh"
+run "$box"
+script_path=""
+same   "inside: exits 1" "$status" "1"
+absent "inside: no symlink was created" "$(install_path "$box")"
+has    "inside: explains the duplicate id" "$out" "discover it a second time"
+
+# --- an occupied stash path refuses, and changes nothing --------------------
+box=$(setup refuses-occupied-stash)
+mkdir -p "$(install_path "$box")" "$(stash_path "$box")"
+echo live > "$(install_path "$box")/CLONE_MARKER"
+echo older > "$(stash_path "$box")/OTHER_MARKER"
+run "$box"
+same   "occupied: exits 1" "$status" "1"
+is_dir "occupied: install path is still a real directory" "$(install_path "$box")"
+same   "occupied: install contents untouched" "$(cat "$(install_path "$box")/CLONE_MARKER")" "live"
+same   "occupied: stash contents untouched" "$(cat "$(stash_path "$box")/OTHER_MARKER")" "older"
+has    "occupied: says which path is in the way" "$out" ".se.mindfulstack.omascape.install already exists"
+
 printf '\n  %d passed, %d failed\n' "$passed" "$failed"
 (( failed == 0 )) || exit 1
