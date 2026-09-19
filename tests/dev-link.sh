@@ -240,5 +240,65 @@ same   "occupied: install contents untouched" "$(cat "$(install_path "$box")/CLO
 same   "occupied: stash contents untouched" "$(cat "$(stash_path "$box")/OTHER_MARKER")" "older"
 has    "occupied: says which path is in the way" "$out" ".se.mindfulstack.omascape.install already exists"
 
+# --- the session's signature beats a stale inherited one AND probe order ----
+# aaa_… sorts first, so a script that probes the runtime dirs picks the nested
+# instance; the inherited env holds a third value. Only reading the session's
+# environment yields zzz_session_sig.
+box=$(setup session-signature-wins)
+mkdir -p "$box/run/hypr/aaa_nested_sig" "$box/run/hypr/zzz_session_sig"
+printf 'aaa_nested_sig\nzzz_session_sig\n' > "$box/state/answering"
+printf 'HYPRLAND_INSTANCE_SIGNATURE=zzz_session_sig\nOMARCHY_PATH=%s\n' "$box/omarchy" \
+  > "$box/state/session-env"
+run "$box"
+same "identity: exits 0" "$status" "0"
+has  "identity: resolved the session's signature, not a decoy" "$out" "session  zzz_session_sig"
+has  "identity: receipt says where it came from" "$out" "show-environment"
+lacks "identity: did not resolve the stale inherited one" "$out" "stale_inherited_sig"
+lacks "identity: did not resolve the nested one" "$out" "aaa_nested_sig"
+
+# --- an unidentifiable compositor refuses before touching anything ----------
+box=$(setup refuses-unidentified)
+mkdir -p "$box/run/hypr/aaa_nested_sig"
+printf 'aaa_nested_sig\n' > "$box/state/answering"
+printf 'OMARCHY_PATH=%s\n' "$box/omarchy" > "$box/state/session-env"   # no signature
+run "$box"
+same   "unidentified: exits 1" "$status" "1"
+absent "unidentified: no symlink was created" "$(install_path "$box")"
+absent "unidentified: nothing was stashed" "$(stash_path "$box")"
+absent "unidentified: no restart was attempted" "$box/state/restart-signature"
+has    "unidentified: says it refuses to guess" "$out" "aaa_nested_sig answers"
+
+# --- no user bus at all (systemctl fails): link, skip the restart, exit 0 ---
+# Reproduces the abort this plan was reviewed for: with pipefail, a failing
+# show-environment kills the script at the assignment unless it is guarded.
+box=$(setup no-user-bus)
+printf 'fail\n' > "$box/state/systemctl"
+: > "$box/state/answering"
+run "$box"
+same    "no-bus: exits 0" "$status" "0"
+is_link "no-bus: the link is in place" "$(install_path "$box")"
+has     "no-bus: says the restart was skipped" "$out" "restart  skipped"
+absent  "no-bus: no restart was attempted" "$box/state/restart-signature"
+
+# --- no user bus, but a compositor answers: refuse, change nothing ----------
+box=$(setup no-user-bus-but-answerer)
+printf 'fail\n' > "$box/state/systemctl"
+mkdir -p "$box/run/hypr/aaa_nested_sig"
+printf 'aaa_nested_sig\n' > "$box/state/answering"
+run "$box"
+same   "no-bus-answerer: exits 1" "$status" "1"
+absent "no-bus-answerer: no symlink was created" "$(install_path "$box")"
+absent "no-bus-answerer: no restart was attempted" "$box/state/restart-signature"
+
+# --- no compositor at all: link, skip the restart, exit 0 -------------------
+box=$(setup no-compositor)
+: > "$box/state/answering"
+printf 'OMARCHY_PATH=%s\n' "$box/omarchy" > "$box/state/session-env"
+run "$box"
+same   "no-session: exits 0" "$status" "0"
+is_link "no-session: the link is in place" "$(install_path "$box")"
+absent "no-session: no restart was attempted" "$box/state/restart-signature"
+has    "no-session: says the restart was skipped" "$out" "restart  skipped"
+
 printf '\n  %d passed, %d failed\n' "$passed" "$failed"
 (( failed == 0 )) || exit 1

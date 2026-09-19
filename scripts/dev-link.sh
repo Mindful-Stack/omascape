@@ -42,6 +42,58 @@ case "${1:-}" in
 *) fail "unknown argument: $1" ;;
 esac
 
+# --- identify the desktop session, before touching anything -----------------
+# UWSM finalizes the session's HYPRLAND_INSTANCE_SIGNATURE into the systemd user
+# environment; omarchy-restart-shell already reads OMARCHY_PATH from there. The
+# inherited environment is not trusted (Claude Code's, and any long-lived
+# shell's, goes stale), and an answering instance is never *chosen* — probing
+# only ever confirms the identity the session already asserted.
+session_var() {
+  # `|| true` is required, not cosmetic: with no user bus, show-environment exits
+  # non-zero, pipefail propagates that, and under set -e the ASSIGNMENT below
+  # aborts the script — taking the promised offline link-and-skip path with it.
+  "$SYSTEMCTL" --user show-environment 2>/dev/null | sed -n "s/^$1=//p" | tail -n 1 || true
+}
+
+answers() {
+  [[ -n ${1:-} ]] || return 1
+  HYPRLAND_INSTANCE_SIGNATURE="$1" "$HYPRCTL" version >/dev/null 2>&1
+}
+
+# Only reached when the session did not identify itself, so walking every stale
+# runtime dir (there can be hundreds, left by the integration suite) is rare.
+other_answerer() {
+  local dir sig
+  for dir in "${XDG_RUNTIME_DIR:-/run/user/$UID}"/hypr/*/; do
+    [[ -d $dir ]] || continue
+    sig=${dir%/}
+    sig=${sig##*/}
+    if answers "$sig"; then
+      echo "$sig"
+      return 0
+    fi
+  done
+  return 1
+}
+
+session_sig=$(session_var HYPRLAND_INSTANCE_SIGNATURE)
+omarchy_path=$(session_var OMARCHY_PATH)
+# show-environment quotes values needing escapes as $'…'; neither of these two
+# ever does, so anything unexpected is treated as no answer rather than parsed.
+[[ $session_sig =~ ^[A-Za-z0-9_]+$ ]] || session_sig=""
+[[ $omarchy_path == /* && -d $omarchy_path ]] || omarchy_path="/usr/share/omarchy"
+config_dir="$omarchy_path/shell"
+
+restart_ready=0
+skip_reason=""
+if answers "$session_sig"; then
+  restart_ready=1
+elif other=$(other_answerer); then
+  fail "the session names no Hyprland instance, but $other answers. Refusing to restart a compositor I cannot identify; nothing was changed"
+else
+  skip_reason="no Hyprland instance answered (session signature: ${session_sig:-unset})"
+fi
+
 # --- take over the install path ---------------------------------------------
 previous=""
 if [[ $MODE == link ]]; then
@@ -78,4 +130,10 @@ if [[ $MODE == link ]]; then
   # The already-live branch printed its own line above.
   [[ -n $install_real && $install_real == "$REPO" ]] || echo "linked   $PLUGIN_ID -> $REPO"
   [[ -z $previous ]] || echo "was      $previous"
+fi
+
+if (( restart_ready )); then
+  echo "session  $session_sig  (systemctl --user show-environment; answers hyprctl)"
+else
+  echo "restart  skipped — $skip_reason"
 fi
