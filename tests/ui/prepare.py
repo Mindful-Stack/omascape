@@ -104,6 +104,20 @@ qml = qml.replace('id: root', '''id: root
     // Compile-time dependency on the `hintKeys2` id in Overview.qml: renaming or removing that
     // id breaks every UI suite at once with "Invalid alias reference", not just Lock's.
     property alias testHintModel2: hintKeys2.model
+    function boxOpacityFor(wsid) {
+        for (var i = 0; i < boxRepeater.count; i++) {
+            var b = boxRepeater.itemAt(i)
+            if (b && b.model && b.model.workspaceId === wsid) return b.opacity
+        }
+        return -1
+    }
+    function tileEntranceFor(addr) {
+        for (var i = 0; i < tileRepeater.count; i++) {
+            var t = tileRepeater.itemAt(i)
+            if (t && t.tileAddress === addr) return t.entranceOpacity
+        }
+        return -1
+    }
     property var testScreens: []
     property QtObject compositor: QtObject {
         property var monitors: ({values: []})

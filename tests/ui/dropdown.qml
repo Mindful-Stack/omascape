@@ -274,4 +274,86 @@ TestCase {
             fuzzyCompare(r, 1920, 0.5, "right edge after mid-entrance flip, sample " + i)
         }
     }
+
+    // The stagger's observable contract, asserted on the delegates rather than on the pure
+    // function (which tst_layout.qml already covers): rows must differ from one another
+    // mid-entrance, and everything must end fully visible.
+    function test_rows_arrive_staggered_and_all_end_visible() {
+        view = createTemporaryObject(overview, tc)
+        verify(view)
+        screenA = createTemporaryObject(screenStub, tc, { name: "A" })
+        view.motion.scale = 10
+        view.testConfig.anchor = "bar"
+        view.testPanel.width = 1920
+        view.testPanel.height = 1080
+        var monA = monitor("A", 0, 26)
+        var wss = []
+        // One window on workspace 6 -- the SECOND row -- so the tile path is covered too.
+        // `at` is monitor-relative and this monitor sits at y=0 (unlike the stacked-monitor
+        // fixtures elsewhere that use large `at` values against a monitor offset to match): it
+        // must land inside the usable rect (reserved top 26, height 1080) or _tileRect's clamp
+        // returns null and no tile is ever created, silently.
+        var win = { address: "0xA", at: [100, 100], size: [400, 400], floating: false,
+                    title: "alpha", "class": "alpha", fullscreen: 0 }
+        for (var k = 1; k <= 10; k++)
+            wss.push({ id: k, monitor: monA,
+                       toplevels: { values: k === 6 ? [{ lastIpcObject: win }] : [] } })
+        view.compositor.monitors = { values: [monA] }
+        view.compositor.focusedMonitor = monA
+        view.compositor.focusedWorkspace = { id: 1 }
+        view.compositor.workspaces = { values: wss }
+        view.testScreens = [screenA]
+        view.open()
+        wait(150)
+        // Ten workspaces at maxCols 5 is two rows. Workspace 1 is in the first, 6 in the second.
+        var first = view.boxOpacityFor(1)
+        var second = view.boxOpacityFor(6)
+        verify(first > second,
+               "row 0 must lead row 1 mid-entrance, got " + first + " and " + second)
+        // The tile path, which is wired through WindowTile's entranceOpacity rather than its
+        // opacity. Without this the tile wiring is never exercised and a tile left at full
+        // opacity while its well fades in would ship unnoticed.
+        fuzzyCompare(view.tileEntranceFor("0xA"), second, 0.01,
+                     "a tile must share its box's phase exactly")
+        wait(3000)
+        fuzzyCompare(view.boxOpacityFor(1), 1, 0.01, "row 0 ends visible")
+        fuzzyCompare(view.boxOpacityFor(6), 1, 0.01, "row 1 ends visible")
+    }
+
+    // A rebuild mid-session must not replay the entrance. boxesModel is reconciled in place, so
+    // a stagger keyed on delegate creation would be invisible here but a stagger re-triggered by
+    // a rebuild would flash the whole grid every time a window moved.
+    function test_a_rebuild_does_not_replay_the_stagger() {
+        seed(26, 10)
+        wait(400)
+        fuzzyCompare(view.boxOpacityFor(1), 1, 0.01, "precondition: the entrance has finished")
+        view.compositor.rawEvent({ name: "openwindow", data: "" })
+        view.rebuild()
+        wait(30)
+        fuzzyCompare(view.boxOpacityFor(1), 1, 0.01, "a rebuild must not restart the entrance")
+        fuzzyCompare(view.boxOpacityFor(6), 1, 0.01, "nor for the later row")
+    }
+
+    // Motion off means arrived, not hidden.
+    function test_motion_off_shows_every_row_immediately() {
+        view = createTemporaryObject(overview, tc)
+        verify(view)
+        screenA = createTemporaryObject(screenStub, tc, { name: "A" })
+        view.motion.scale = 0                 // disables root.motion.enabled
+        view.testConfig.anchor = "bar"
+        view.testPanel.width = 1920
+        view.testPanel.height = 1080
+        var monA = monitor("A", 0, 26)
+        var wss = []
+        for (var k = 1; k <= 10; k++) wss.push({ id: k, monitor: monA, toplevels: { values: [] } })
+        view.compositor.monitors = { values: [monA] }
+        view.compositor.focusedMonitor = monA
+        view.compositor.focusedWorkspace = { id: 1 }
+        view.compositor.workspaces = { values: wss }
+        view.testScreens = [screenA]
+        view.open()
+        wait(30)
+        compare(view.entranceProgress, 1, "progress is set directly, not animated")
+        fuzzyCompare(view.boxOpacityFor(6), 1, 0.01, "the last row is visible at once")
+    }
 }

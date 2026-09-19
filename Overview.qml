@@ -280,6 +280,19 @@ Item {
     // No top bar to hang from (a side, bottom or hidden bar) means no attachment: the picker
     // keeps the centred card rather than squaring itself against nothing.
     readonly property bool barMode: config.anchor === "bar" && reservedTop > 0
+    // One progress for the whole bar-mode entrance; every row derives its own phase from it.
+    // Root-level and not per-delegate: tilesModel and boxesModel are reconciled IN PLACE, so
+    // delegates persist across rebuilds and a per-delegate Component.onCompleted would fire once
+    // at startup and never again. It also means a mid-session rebuild cannot replay the
+    // entrance — progress is already 1 by then.
+    property real entranceProgress: 1
+    property var rowRankMap: ({})
+    property int rowCount: 0
+    NumberAnimation {
+        id: staggerAnim
+        target: root; property: "entranceProgress"
+        from: 0; to: 1; duration: root.motion.enter; easing.type: root.motion.move
+    }
     // Backdrop behind the focused monitor's group: a whisper of accent, so which screen is
     // live reads peripherally without touching the three well shades.
     readonly property color groupBackdropColor: Qt.rgba(accent.r, accent.g, accent.b, 0.08)
@@ -1134,6 +1147,12 @@ Item {
     // box never owns a pointer grab). Roles are prefixed so `model.bx` cannot be confused
     // with the delegate's own x.
     function applyBoxes(boxes) {
+        // Row ordinals for the bar-mode entrance. Recomputed on every rebuild so the map stays
+        // correct as the layout changes; that costs nothing visually, because entranceProgress
+        // is already 1 outside the entrance itself.
+        var rr = Logic.rowRanks(boxes)
+        root.rowRankMap = rr.ranks
+        root.rowCount = rr.rowCount
         var seen = {}
         for (var i = 0; i < boxes.length; i++) {
             var b = boxes[i]
@@ -1292,6 +1311,12 @@ Item {
         if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
         config.probeMotion()                       // async; result lands for this or the next open
         targetScreen = focusedScreen(); hideScratchpad(); selectedIndex = -1; opened = true
+        // The staged entrance is bar-mode only: a top-down stagger under a card that scales from
+        // its centre reads as a bug. With motion off, progress is SET, never animated — an
+        // unplayed animation would leave every row at 0, i.e. an invisible grid.
+        staggerAnim.stop()
+        if (root.barMode && root.motion.enabled) { root.entranceProgress = 0; staggerAnim.start() }
+        else root.entranceProgress = 1
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
@@ -1770,6 +1795,7 @@ Item {
 
                     // boxes layer
                     Repeater {
+                        id: boxRepeater
                         model: boxesModel
                         Rectangle {
                             id: boxItem
@@ -1791,6 +1817,24 @@ Item {
                             color: isDrop ? root.dropWellColor
                                  : model.focused ? root.selBackground
                                  : model.occupied ? root.wellColor : root.emptyWellColor
+
+                            // Arrival phase for this box's row. A Translate, not a `y` change:
+                            // the y binding already carries the layout-motion Behavior, and the
+                            // entrance must never fight a glide still in flight.
+                            // NO `|| 0` on the lookup. Rank 0 is a legitimate value (every
+                            // layout has a top row), so `|| 0` would turn a MISS into a silent
+                            // "first row". A miss cannot happen -- every box gets a rank, and
+                            // logic.js:360 skips any window whose workspace has no box, so no
+                            // tile can reference a rankless workspace -- and if that invariant
+                            // ever breaks it must be visible, not smoothed over. rowPhase's own
+                            // non-finite guard is the single fail-safe.
+                            readonly property real rowPhase: root.barMode
+                                ? Logic.rowPhase(root.entranceProgress,
+                                                 root.rowRankMap[model.workspaceId],
+                                                 root.rowCount)
+                                : 1
+                            opacity: rowPhase
+                            transform: Translate { y: (1 - boxItem.rowPhase) * 10 }
 
                             // big low-contrast numeral, only where nothing would hide it
                             Text {
@@ -1889,6 +1933,16 @@ Item {
                             matched: model.matched
                             selectedMatch: model.selectedMatch
                             cursorTarget: model.cursor
+                            // Tiles take their BOX's rank, looked up by workspace id, so a tile
+                            // can never stagger out of step with the well it sits in.
+                            // Same rule as the box delegate: no `|| 0`. See the comment there.
+                            readonly property real rowPhase: root.barMode
+                                ? Logic.rowPhase(root.entranceProgress,
+                                                 root.rowRankMap[model.wsid],
+                                                 root.rowCount)
+                                : 1
+                            entranceOpacity: rowPhase
+                            entranceOffsetY: (1 - rowPhase) * 10
                             closing: model.closing
                             dimmed: root.query.length > 0 && !model.matched && root.dropTargetAddress !== model.address
                             accent: root.accent
