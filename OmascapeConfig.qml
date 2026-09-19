@@ -11,6 +11,10 @@ QtObject {
     property bool hint: true         // key hints under the workspace grid
     property int workspaces: 10      // always show ids 1..N, even ones Hyprland has not created; 0 = off
     property string motion: "auto"   // "auto" follows Hyprland animations:enabled; "full" | "off"
+    // Activation policy (docs/specs/2026-09-18-activate-select-design.md).
+    // "enter"  — a digit jumps and a click focuses, both leaving the overview.
+    // "select" — both select instead; Enter, the same digit again, or a double-click commits.
+    property string activate: "enter"
     // Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum): the local-only
     // frame omascape draws around a monitor that is SHOWING an armed workspace while a share is
     // running (LockFrame.qml — four layer-shell strips, blanked in every capture). `lockBorder`
@@ -36,6 +40,7 @@ QtObject {
         cfg.scrim = o.scrim
         cfg.hint = o.hint
         cfg.workspaces = o.workspaces
+        cfg.activate = o.activate
         cfg.motion = o.motion
         cfg.lockBorder = o.lockBorder
         cfg.lockBorderSize = o.lockBorderSize
