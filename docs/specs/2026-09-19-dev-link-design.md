@@ -44,7 +44,8 @@ restart, verified by instance replacement; a receipt; a stub-driven test suite i
 rewrite.
 
 **Out:** copying a runtime file set (a `deploy` target for verifying a true install before a
-release — worth having, not now; see finding 11 for a second reason it may earn its place); a nested
+release — worth having, not now; finding 11 names a stronger reason it may earn its place, and the
+experiment that would settle it); a nested
 throwaway Hyprland to preview a build without touching the live shell
 (`tests/integration/lib.sh` stubs the `qs.Commons` theme singletons and runs headless, so it is a
 test rig, not a place to look at the thing); watching files to restart on save; anything that
@@ -103,14 +104,26 @@ changes plugin *runtime* code.
     *successful* restart when the re-lock does not re-secure. Its own readiness poll is 2s
     (20 × 0.1s), which a plugin-heavy shell can exceed, so a non-zero status alone does not mean
     failure either. Status, ping and replacement are three different facts.
-11. **✎ There is an inotify watcher, and its signal is dead-ended.** `localPluginWatcher`
-    (`PluginRegistry.qml:636`) runs `inotifywait -m -r` over the plugins dir and emits
-    `localPluginChanged(id)`; nothing in the shipped shell connects to that signal, so nothing
-    reloads. The shell README's claim that saving a file under `~/.config/omarchy/plugins/`
-    reloads plugin code is stale in this version, and omascape's own restart warning is correct.
-    Recorded because of the direction it points: `inotifywait -r` does not descend symlinks, so if
-    a future Omarchy wires that signal up, a symlinked install is the one shape that cannot
-    benefit — and a copy-based `deploy` target would then be worth having.
+11. **✎✎ There is a live inotify watcher, and a symlinked install is invisible to it.**
+    `localPluginWatcher` (`PluginRegistry.qml:636`) runs `inotifywait -m -r` over the plugins dir
+    and emits `localPluginChanged(id)`; `shell.qml:763` handles it and kicks
+    `localPluginReloadTimer` → `reloadPlugins`. (An earlier revision of this spec claimed the
+    signal had no consumer — that was a case-sensitive `grep` missing `onLocalPluginChanged`.
+    Corrected 2026-09-19 after the journal showed `Local plugin changed, reloading:
+    se.mindfulstack.omascape` during the first live `mise run link`.)
+
+    The consequence for this design is unchanged, and now measured rather than predicted:
+    `inotifywait -r` does not descend symlinks, so **edits inside a linked worktree reach nothing**
+    — `touch Overview.qml` in the worktree produced zero reload events, as did `touch -h` on the
+    symlink itself (an attribute change is not in the watched `close_write,create,delete,move`
+    set). Only changes directly under the plugins directory are seen; creating the symlink itself
+    fired two.
+
+    **Open question, and the real argument for a copy-based `deploy` target:** whether
+    `reloadPlugins` picks up changed QML *source*, or only re-registers manifests the way
+    `rescanPlugins` does. If it does reload source, a copy-based deploy would need no shell restart
+    at all — a materially better loop than this one. Not measured; worth its own experiment before
+    anyone builds `deploy`.
 12. **✎ The plugins directory is hardcoded, so `XDG_CONFIG_HOME` must be ignored.**
     `PluginRegistry.qml:11` is `home + "/.config/omarchy/plugins"` and the CLI catalog hardcodes
     the same path. Honoring `XDG_CONFIG_HOME` would link into a directory nothing scans: the link
