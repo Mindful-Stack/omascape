@@ -31,6 +31,10 @@ def replaced(text, old, new, what, count=1):
 qml = (source / 'Overview.qml').read_text()
 qml = re.sub(r'^import (Quickshell.*|qs\..*)\n', '', qml, flags=re.M)
 qml = re.sub(r'Color\.menu\.\w+', '"#888888"', qml)
+# Bar-mode paints Color.bar.background (Bar.qml:71), a different token from the menu one. Same
+# treatment as Color.menu.*: there is no Color singleton here, and an unresolved reference is a
+# compile error that takes all eight suites down together, not just the one under test.
+qml = re.sub(r'Color\.bar\.\w+', '"#777777"', qml)
 qml = re.sub(r'Style\.\w+FillAlpha', '0.1', qml)
 qml = re.sub(r'Style\.font\.\w*Family', '"sans-serif"', qml)
 qml = re.sub(r'Style\.font\.\w+', '11', qml)
@@ -185,6 +189,7 @@ for edge in ('left', 'right'):
     'import QtQuick\nQtObject { property bool scrim: true; property bool hint: true\n'
     '           property int workspaces: 0\n'
     '           property string motion: "auto"; property string motionEffective: "full"\n'
+    '           property string anchor: "center"\n'
     '           property bool motionResolved: true\n'
     '           property string lockBorder: "rgb(ff4444)"; property int lockBorderSize: 6\n'
     '           function probeMotion() {} }\n')
