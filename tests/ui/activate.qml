@@ -71,24 +71,40 @@ TestCase {
             if (view.boxes[i].workspaceId === wsId) return view.boxes[i]
         fail("no box for workspace " + wsId)
     }
-    // A point inside a box but on no tile: the well. Workspace 3 is empty, so its centre works.
+    // A point inside a box but on NO tile: the well. Only valid for an unoccupied workspace — a
+    // box with even one tiled window leaves a few px of bare well at the inset, so the centre is
+    // the tile, and a "well click" test would silently become a tile-click test. The guard makes
+    // a future wellCentre(1) fail loudly instead.
     function wellCentre(wsId) {
         var b = boxOf(wsId)
+        verify(!b.occupied, "wellCentre(" + wsId + ") needs an EMPTY workspace; this one has windows")
         return view.testCanvas.mapToItem(view, b.x + b.w / 2, b.y + b.h / 2)
     }
 
     // ---- fixture health ------------------------------------------------------------------
+    // Test ordering: QtQuickTest runs these ALPHABETICALLY, not in declaration order. The health
+    // checks below are named `test_a_` so a broken fixture reports before anything that depends
+    // on it; later tasks take `test_b_`, `test_c_`, … in the order they were added.
+    //
     // Distinguishes: a fixture whose stub config has no `activate` property. Then
-    // config.activate is undefined, every `=== "select"` test in this file is silently false,
-    // the overview runs in enter mode, and the whole suite passes while testing nothing.
+    // config.activate is undefined, every `=== "select"` test in this file is silently false and
+    // the overview runs in enter mode while the suite still passes. Note this proves only that
+    // the STUB declares the name — that production reads the same name is proved by the first
+    // test that asserts on behaviour, not here.
     function test_a_the_fixture_carries_the_activate_policy() {
         compare(view.testConfig.activate, "select",
                 "prepare.py's stub OmascapeConfig must declare `activate`")
         verify(view.testKeys.activeFocus, "keyCatcher must hold active focus after open()")
     }
-    // Distinguishes: a seed where workspace 7 accidentally exists, which would make every
-    // missing-box assertion in this file vacuous.
-    function test_a_workspace_seven_has_no_box() {
+    // Distinguishes: a seed that produced no boxes or no tiles at all — a buildInput regression or
+    // a botched wsRow — which every loop-based check in this file would pass vacuously, leaving
+    // later tests to fail with confusing symptoms instead of one loud message here. The ws-7
+    // assertion is the other half: a seed where 7 accidentally exists makes every
+    // "digit with no box" test vacuous in the opposite direction.
+    function test_a_the_seed_is_what_the_later_tests_assume() {
+        compare(view.boxes.length, 3, "workspaces 1, 2 and 3 must all have boxes")
+        compare(view.testModel.count, 3, "three windows: 0xA and 0xB on ws 1, 0xC on ws 2")
+        verify(!boxOf(3).occupied, "workspace 3 must stay empty; the well tests need it")
         for (var i = 0; i < view.boxes.length; i++)
             verify(view.boxes[i].workspaceId !== 7, "workspace 7 must not have a box")
     }
