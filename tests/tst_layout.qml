@@ -1188,4 +1188,45 @@ TestCase {
         compare(Logic.parseConfig('{}').anchor, "center", "missing key")
         compare(Logic.parseConfig('not json').anchor, "center", "unparseable file")
     }
+
+    // Fed the REAL output of layout(), not hand-written boxes. That is the whole point: a
+    // hand-built input would only prove the function sorts, while saying nothing about whether
+    // boxes that share a row actually carry an identical `y`. If layout() ever computed row y
+    // per-box instead of from one accumulator, hand-built inputs would keep passing while the
+    // stagger tore rows in half on screen.
+    function test_row_ranks_come_from_real_layout_rows() {
+        var mons = []
+        var wss = []
+        for (var m = 0; m < 3; m++) {
+            mons.push({ name: "M" + m, x: 0, y: m * 1080, width: 1920, height: 1080, scale: 1,
+                        reserved: [0, 26, 0, 0], transform: 0 })
+            for (var w = 1; w <= 10; w++)
+                wss.push({ id: m * 10 + w, monitorName: "M" + m, focused: false, occupied: false })
+        }
+        // `params` is the TestCase property already defined at the top of this file, and
+        // layout() reads it as input.params -- omit it and the call throws rather than fails.
+        // There is no availH: layout() takes availW only.
+        var out = Logic.layout({ monitors: mons, workspaces: wss, windows: [],
+                                 focusedMonitorName: "M0", availW: 1876, params: params })
+        var r = Logic.rowRanks(out.boxes)
+        // 10 workspaces at maxCols 5 is two sub-rows per monitor, three monitors. Verified by
+        // executing logic.js directly: the distinct y values are 28, 246, 498, 716, 968, 1186.
+        compare(r.rowCount, 6, "six distinct row y values across the three groups")
+        // THE discriminator between global and per-monitor ranking: monitor 1's first sub-row
+        // must rank 2, not 0. Rank per group and the stagger restarts at every monitor.
+        compare(r.ranks[11], 2, "M1's first sub-row follows M0's two")
+        compare(r.ranks[1], 0, "M0's first sub-row is the top one")
+        compare(r.ranks[6], 1, "M0's second sub-row")
+        // Boxes sharing a row must share a rank exactly -- this is the float-equality claim.
+        compare(r.ranks[1], r.ranks[5], "same sub-row, same rank")
+    }
+
+    function test_row_ranks_survive_a_degenerate_layout() {
+        var r = Logic.rowRanks([])
+        compare(r.rowCount, 0, "no boxes")
+        compare(JSON.stringify(r.ranks), "{}", "no ranks")
+        var bad = Logic.rowRanks([{ workspaceId: 1, y: NaN }, { workspaceId: 2, y: 40 }])
+        compare(bad.ranks[1], 0, "a NaN y ranks first rather than propagating")
+        compare(bad.rowCount, 1, "only the finite y counts as a row")
+    }
 }

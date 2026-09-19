@@ -184,6 +184,34 @@ function padWorkspaces(workspaces, count, focusedMonitorName) {
     return out
 }
 
+// Row ordinal for every workspace box, taken from the layout's own y values and shared by the
+// boxes and by the tiles inside them, so one row of the bar-mode entrance moves as a unit.
+//
+// Ranks are GLOBAL, not per monitor group: the stagger sweeps down the whole card, and restarting
+// the count at each monitor would make the second screen's first row appear before the first
+// screen's second.
+//
+// Exact float equality is safe here and is not an accident to be defended with a tolerance:
+// layout() assigns `y: y` from one running accumulator, so every box in a sub-row carries the
+// identical value by construction. A tolerance would only hide it if that ever stopped being true.
+function rowRanks(boxes) {
+    if (!boxes || !boxes.length) return { ranks: {}, rowCount: 0 }
+    var ys = [], i, v
+    for (i = 0; i < boxes.length; i++) {
+        v = Number(boxes[i].y)
+        if (isFinite(v) && ys.indexOf(v) < 0) ys.push(v)
+    }
+    ys.sort(function (a, b) { return a - b })
+    var ranks = {}
+    for (i = 0; i < boxes.length; i++) {
+        v = Number(boxes[i].y)
+        // A non-finite y ranks first rather than yielding undefined: the entrance must never be
+        // handed a rank it cannot turn into a phase, which would leave that box invisible.
+        ranks[boxes[i].workspaceId] = isFinite(v) ? ys.indexOf(v) : 0
+    }
+    return { ranks: ranks, rowCount: ys.length }
+}
+
 // Breathing room between the picker and the screen edge, both axes. A FRACTION, because the two
 // absolute constants this replaces (`availCanvasW`'s `- 16` and the card's `- 16` / `- 64`) were
 // sized for a ~1600-logical card: at 1920 logical — a 4K panel at 2x, and the commonest laptop
