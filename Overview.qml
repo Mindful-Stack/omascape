@@ -546,12 +546,19 @@ Item {
             if (matches[i].address !== addr) continue
             matchIndex = i
             applyMatchRoles()
-            followMatch()            // moves selectedIndex and scrolls; the cursor stays empty,
-            return                   // because setQuery holds find and the cursor as exclusive
+            // followMatch() moves selectedIndex and scrolls. The cursor stays empty, because
+            // setQuery holds find and the cursor as exclusive and this branch keeps the query.
+            // Note it resolves the box through _windowByAddress, NOT displayedWorkspaceOf — so
+            // clicking a MATCHING tile mid-drop selects the source box for the ~1.8 s the
+            // optimistic row and the compositor disagree. Deliberate: followMatch is find's own
+            // path, shared with Tab and the arrows, and making it drop-aware would change find
+            // everywhere for a corner this feature did not introduce.
+            followMatch()
+            return
         }
-        setQuery("")                 // runs restorePreQuerySelection(); the click's own
-        var win = _windowByAddress[addr]   // selection must be applied AFTER it, never before
-        if (!win) return
+        // setQuery("") runs restorePreQuerySelection(), so the click's own selection must be
+        // applied AFTER it, never before.
+        setQuery("")
         // displayedWorkspaceOf, not win.workspaceId: during an optimistic drop the row and the
         // compositor's report disagree, and the click must follow the tile the user clicked.
         selectedIndex = Logic.indexOfWorkspace(boxes, displayedWorkspaceOf(addr))

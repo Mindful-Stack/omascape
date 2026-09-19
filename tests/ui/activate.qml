@@ -427,6 +427,31 @@ TestCase {
         var t = view.resolveTarget()
         compare(t.address, "0xC")
     }
+    // Distinguishes: the query branch resolving the workspace through _windowByAddress instead
+    // of displayedWorkspaceOf. test_d_a_click_on_a_just_dropped_tile_... pins the same rule on
+    // the no-query path, and this branch is a SEPARATE code path that was regressed once and
+    // restored — without this, that exact regression passes the suite.
+    //
+    // "b" matches bravo (0xB) and nothing else: alpha and charlie have no 'b'. One keystroke, so
+    // the click lands well inside the 1.8 s optimistic-drop window opened by the drag above.
+    function test_e_clicking_a_just_dropped_non_match_selects_the_box_it_landed_in() {
+        var from = tileCentre("0xA"), to = wellCentre(3)
+        mousePress(view, from.x, from.y, Qt.LeftButton)
+        mouseMove(view, from.x + 12, from.y + 2, 20)
+        mouseMove(view, to.x, to.y, 20)
+        mouseRelease(view, to.x, to.y, Qt.LeftButton)
+        wait(30)
+
+        type("b")
+        compare(view.selectedMatchAddress, "0xB", "0xA must NOT be a match here")
+
+        var p = tileCentre("0xA")                 // dimmed, and mid-drop
+        mouseClick(view, p.x, p.y)
+        wait(30)
+        compare(view.query, "", "a dimmed tile still ends the query")
+        compare(view.cursorAddress, "0xA")
+        compare(view.selectedId, 3, "the box the tile is drawn in, not the one it came from")
+    }
     // Distinguishes: restorePreQuerySelection running AFTER the click's own selection and
     // stomping it — the ordering trap called out in the spec.
     function test_e_clicking_a_well_clears_the_query_then_selects() {
