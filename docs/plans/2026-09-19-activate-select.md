@@ -527,16 +527,27 @@ Add to `tests/ui/activate.qml`:
 ```qml
     function ctrlW() { keyClick(Qt.Key_W, Qt.ControlModifier) }
 
-    // Distinguishes: resolveTarget still passing pointerLive through in select mode. The hover
-    // is a REAL move (pointerLive goes true) — the point is that liveness no longer reaches the
-    // resolver, not that the pointer stopped moving.
+    // Distinguishes: a resolveTarget that still passes pointerLive through in select mode, AND
+    // one that switched the pointer off for both policies — the SAME hover is resolved under
+    // each, so either mistake fails one half. The hover is a real move (pointerLive goes true):
+    // the point is that liveness no longer reaches the resolver, not that the pointer stopped.
+    //
+    // The selection is the one open() makes, the focused workspace. Deliberately NOT set with a
+    // digit: digits do not select until Task 6, and before that a digit jumps and closes the
+    // overview out from under the test.
     function test_b_hover_does_not_retarget_in_select_mode() {
-        keyClick(Qt.Key_2)                       // select workspace 2
-        hoverTile("0xA")                         // ...while pointing at a window on workspace 1
+        compare(view.selectedId, 1, "open() selects the focused workspace")
+        hoverTile("0xC")                         // a window on a DIFFERENT workspace
         compare(view.pointerLive, true, "the pointer really did move")
+
         var t = view.resolveTarget()
         compare(t.kind, "workspace")
-        compare(t.id, 2, "the selection, not the hovered tile")
+        compare(t.id, 1, "select mode: the selection, not the hovered tile")
+
+        view.testConfig.activate = "enter"
+        var e = view.resolveTarget()
+        compare(e.kind, "window")
+        compare(e.address, "0xC", "enter mode: the same hover still names the tile")
     }
     // Distinguishes: Ctrl+W still acting on hover in select mode — the consequence the spec
     // accepted explicitly. Hovering 0xA while 0xC is selected must close 0xC.
@@ -591,8 +602,11 @@ Not a `TypeError`: `resolveTarget` already exists.
 ```
 
 **Property:** `Logic.target` must still receive `selectMode` explicitly even though the QML already
-skipped the branch. Both guards are deliberate — the pure one is what Task 2's tests assert, the
-QML one only avoids a pointless hit test. Do not drop either.
+skipped the branch. The two are **behaviourally redundant** — mutation testing during Task 5
+confirmed that either one alone passes the UI test and only removing both fails it — so the QML
+short-circuit is an optimisation (it avoids building `tileCandidates()` and running `tileAt()`
+for a result select mode discards), and the rule itself lives in the pure layer where Task 2's
+tests assert it. Say that in the comment rather than implying two lines of defence.
 
 - [ ] **Step 4: Verify**
 
