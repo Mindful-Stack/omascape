@@ -140,7 +140,7 @@ TestCase {
     }
     // Distinguishes: a first press that enters (no select step at all), a second press that
     // re-selects instead of entering, and a latch that survives entering into the next summon.
-    function test_digit_activate_select_then_enter() {
+    function test_digitActivate_select_then_enter() {
         var b = boxesFor([1, 2, 3])
         var first = Logic.digitActivate(0x32, 0, b, false)   // "2"
         compare(first.action, "select"); compare(first.id, 2)
@@ -151,15 +151,16 @@ TestCase {
         compare(second.action, "enter"); compare(second.id, 2); compare(second.index, 1)
         compare(second.latch, 0, "the overview is closing; nothing may survive into the next open")
     }
-    // Distinguishes: a latch keyed on the workspace rather than the key, which would let
-    // 2 then 3 enter 3 on its first press.
-    function test_digit_activate_a_different_digit_only_selects() {
+    // Distinguishes: a latch tested as "armed at all" (`latch !== 0`) rather than as "the same
+    // key" — which would enter 3 on its first press merely because 2 was still latched. That the
+    // latch holds the key code and not the workspace is pinned above, by `first.latch === 0x32`.
+    function test_digitActivate_a_different_digit_only_selects() {
         var b = boxesFor([1, 2, 3])
         var r = Logic.digitActivate(0x33, 0x32, b, false)    // "3" with "2" latched
         compare(r.action, "select"); compare(r.id, 3); compare(r.latch, 0x33)
     }
     // Distinguishes: Key_0 mapped to workspace 0 (no such workspace) or to index 0.
-    function test_digit_activate_zero_is_workspace_ten() {
+    function test_digitActivate_zero_is_workspace_ten() {
         var b = boxesFor([9, 10])
         var r = Logic.digitActivate(0x30, 0, b, false)       // "0"
         compare(r.action, "select"); compare(r.id, 10); compare(r.index, 1)
@@ -167,7 +168,7 @@ TestCase {
     // Distinguishes: THE gap this rule exists for. hasWs() would accept 7 as a valid id and let
     // the latch arm, so a second press would enter a workspace that was never visibly selected.
     // The third case is a box that disappeared BETWEEN the two presses.
-    function test_digit_activate_a_digit_with_no_box_is_inert() {
+    function test_digitActivate_a_digit_with_no_box_is_inert() {
         var b = boxesFor([1, 2])
         var cold = Logic.digitActivate(0x37, 0, b, false)    // "7", nothing latched
         compare(cold.action, "none"); compare(cold.index, -1); compare(cold.latch, 0)
@@ -184,7 +185,7 @@ TestCase {
     // that clears the latch as if it were another key (hold "2", release, press "2" and nothing
     // happens). A repeat must be neither: a true no-op. This lives in Tier 1 because QtTest's QML
     // key API cannot set isAutoRepeat at all — see tests/ui/actions.qml:431.
-    function test_digit_activate_an_auto_repeat_is_a_true_no_op() {
+    function test_digitActivate_an_auto_repeat_is_a_true_no_op() {
         var b = boxesFor([1, 2, 3])
         var held = Logic.digitActivate(0x32, 0x32, b, true)  // "2" latched, a repeat arrives
         compare(held.action, "none", "a repeat must never complete the gesture")
@@ -197,12 +198,17 @@ TestCase {
         compare(noBox.action, "none")
         compare(noBox.latch, 0x32, "a repeat is checked before the box, so it disturbs nothing")
     }
-    // Distinguishes: a key range that swallows neighbouring ASCII. 0x2F is "/", 0x3A is ":".
-    function test_digit_activate_ignores_non_digits() {
+    // Distinguishes: a key range that swallows neighbouring ASCII, or one narrowed off by one at
+    // either end. 0x2F is "/" and 0x3A is ":", the characters either side of the digits; "9" is
+    // asserted as a live digit because a range of `key > 0x38` would otherwise kill that one key
+    // silently and still pass every case below.
+    function test_digitActivate_ignores_non_digits() {
         var b = boxesFor([1, 2])
         compare(Logic.digitActivate(0x2F, 0, b, false), null)
         compare(Logic.digitActivate(0x3A, 0, b, false), null)
         compare(Logic.digitActivate(0x57, 0, b, false), null, "Qt.Key_W")
+        var nine = Logic.digitActivate(0x39, 0, boxesFor([9]), false)
+        compare(nine.action, "select"); compare(nine.id, 9, "the top of the range is still a digit")
     }
 
     function tile(addr, ws, x, y) { return { address: addr, wsid: ws, x: x, y: y } }
