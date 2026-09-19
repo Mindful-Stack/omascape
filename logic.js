@@ -1300,6 +1300,34 @@ function isActionKey(key, chord, ctrlMask) {
     return key === 0x01000004 || key === 0x01000005                // Return, Enter
 }
 
+// The "select" activate policy's digit rule (docs/specs/2026-09-18-activate-select-design.md).
+// Pure: `boxes` is the same plain layout array indexOfWorkspace reads, so the whole gesture is
+// decided here rather than half here and half in the key handler.
+//
+// The box test comes FIRST, and that ordering is the rule, not an optimisation. hasWs() tests an
+// id for validity, not a box for existence, so without this a digit for a workspace with no box
+// would arm the latch and a second press would enter a workspace the user never saw selected.
+// Testing it first also covers, with no extra case, a box that disappears between the two presses.
+//
+// The latch is the PREVIOUS key code, not the previous workspace: "2" then "3" must select 3, not
+// enter it. Returns null for anything that is not a digit; `latch` in the result is always what
+// the caller should store.
+//
+// `autoRepeat` is handled here rather than by an early return in the key handler so that "a
+// repeat is a true no-op" is a Tier 1 assertion: QtTest's QML key API cannot synthesise a real
+// auto-repeat event (tests/ui/actions.qml:431), so the offscreen suite could never cover it.
+// It is checked BEFORE the box lookup, because a repeat must change nothing at all — including
+// the latch of a digit whose box has since gone.
+function digitActivate(key, latch, boxes, autoRepeat) {
+    if (key < 0x30 || key > 0x39) return null            // Qt.Key_0 .. Qt.Key_9 (ASCII)
+    var id = (key === 0x30) ? 10 : key - 0x30            // Qt.Key_0 is workspace 10
+    if (autoRepeat) return { action: "none", id: id, index: -1, latch: latch }
+    var index = indexOfWorkspace(boxes || [], id)
+    if (index < 0) return { action: "none", id: id, index: -1, latch: 0 }
+    if (latch === key) return { action: "enter", id: id, index: index, latch: 0 }
+    return { action: "select", id: id, index: index, latch: key }
+}
+
 // ---- Scratchpad (docs/specs/2026-09-12-scratchpad-design.md) ---------------------------
 // Hyprland allocates special-workspace ids dynamically (the next free id below -99), so the
 // overview never uses the reported id: buildInput() identifies the scratchpad by name and remaps
