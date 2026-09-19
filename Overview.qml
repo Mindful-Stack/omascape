@@ -542,7 +542,13 @@ Item {
     // dimmed. A click INSIDE the filter moves the selected match and keeps the query — the same
     // thing Tab does. A click OUTSIDE it ends the query, then selects normally.
     function selectMatchOrClearQuery(addr) {
-        // MUTANT: match branch removed (the task-7 stub behaviour)
+        for (var i = 0; i < matches.length; i++) {
+            if (matches[i].address !== addr) continue
+            matchIndex = i
+            applyMatchRoles()
+            followMatch()            // moves selectedIndex and scrolls; the cursor stays empty,
+            return                   // because setQuery holds find and the cursor as exclusive
+        }
         setQuery("")                 // runs restorePreQuerySelection(); the click's own
         var win = _windowByAddress[addr]   // selection must be applied AFTER it, never before
         if (!win) return
