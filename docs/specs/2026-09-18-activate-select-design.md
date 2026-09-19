@@ -2,7 +2,9 @@
 
 Date: 2026-09-18 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on actions and the Tab/arrow split (`main` at `5790e24`).
-Status: **approved design, pre-implementation.** Branch `select-then-enter`.
+Status: **approved design, pre-implementation** (revised after a design review, 2026-09-19: the
+find × click conflict and the missing-box digit).
+Branch `select-then-enter`.
 
 ## Goal
 
@@ -15,7 +17,8 @@ becomes somewhere you can look around before deciding, instead of a menu that fi
 **In:** one config key `activate` with the policies `"enter"` (today, the default) and `"select"`;
 under `"select"` — digits select a workspace, tile and well clicks select, a repeated digit and a
 double-click commit, the pointer stops resolving targets, and `Enter`/`Ctrl+W` act on the
-selection; the digit latch and the target precedence as pure functions; an auto-repeat guard; the
+selection; how a click interacts with a live find query; what a digit with no box does; the
+digit latch and the target precedence as pure functions; an auto-repeat guard; the
 hint row reading the active policy; Tier 1 tests and a `tests/ui/activate.qml` scene; a README
 entry.
 
@@ -82,6 +85,40 @@ identical in both policies; a hold-to-preview gesture (that is `peek`, its own s
   platform's double-click time — so the overview does not ship a magic constant that disagrees
   with the rest of the desktop.
 
+- **A click inside a live query moves the match; a click outside it ends the query.** `target()`
+  ranks the find match *above* the cursor and the selected workspace (`logic.js:1140`), and that
+  precedence is terminal by design — so a click that only set `cursorAddress` and `selectedIndex`
+  would ring the clicked tile while `Enter` and `Ctrl+W` went on acting on the match, and the
+  next `rematchAfterRebuild` → `followMatch` (`Overview.qml:802`) would drag the box selection
+  back to the match and `applyTiles` would then clear the orphaned cursor. Two rules, split on
+  something the user can already see (matches ring in the accent, non-matches are dimmed):
+  - **The clicked tile is a current match** → it becomes the *selected match*: `matchIndex` moves
+    to it, the query survives, the cursor is not touched. A click is then simply another way to
+    do what `Tab` does, the filter is kept for further cycling, and the selection survives a
+    rebuild for free, because `rematchAfterRebuild` already preserves `selectedMatchAddress`.
+  - **The clicked tile is not a match, or it is a well** → the query is cleared first, then the
+    normal selection is made. Clicking a dimmed tile is an unambiguous statement that the filter
+    is no longer what the user wants; ignoring it would make a visible tile inert. Ordering
+    matters: `setQuery("")` runs `restorePreQuerySelection()`, so the click's own selection must
+    be applied after it, not before.
+
+  The double-click needs no case of its own: it is still a click plus an enter of whatever that
+  click selected, and it composes with all three branches unchanged.
+
+- **A digit with no box is inert under `"select"`, and does not arm the latch.** `hasWs()` tests
+  an id for validity, not a box for existence (`logic.js:1309`), and `jump()` leans on that
+  deliberately — under `"enter"`, pressing `7` with no workspace 7 dispatches to it and Hyprland
+  creates it. Under `"select"` there is nothing to ring, and the mode's whole contract is that
+  the ring marks what a commit will do; a digit that cannot produce a ring therefore must not
+  arm one either, or a second press would enter a workspace the user never saw selected. So the
+  digit does nothing at all — no selection, no dispatch — **and clears the latch**, like any
+  other key: leaving the latch standing would make `2`, `7`, `2` enter workspace 2 with a
+  keystroke in between that silently did not count. The asymmetry with `"enter"` is the point:
+  that policy fires a dispatcher, this one moves a ring. Nor is a capability lost at the default
+  `workspaces: 10`, where ids 1–10 always have a box and entering an empty one still creates the
+  workspace — `workspaces` exists precisely so "every number key has a visible target", and only
+  a user who has turned that padding off can reach a digit with no box.
+
 - **A tile click sets the selected workspace as well as the cursor.** Not a stylistic choice:
   `applyTiles` clears `cursorAddress` whenever the cursor is not on `selectedId`
   (`Overview.qml:1180`), so a click that set only the cursor would lose its ring at the next
@@ -97,12 +134,17 @@ Policy `"enter"` is today's overview, unchanged in every row. Policy `"select"`:
 | the same digit again, immediately           | enter that workspace (dispatch + close)                       |
 | a digit held down (auto-repeat)             | selects once; the repeats do nothing                          |
 | a different digit                           | selects the new one; the latch moves with it                  |
+| a digit whose workspace has no box          | nothing at all; the latch is cleared, not armed               |
 | any other key after a digit                 | that key's own effect; the latch is cleared                   |
 | a mouse move after a digit                  | nothing; the latch **survives**                               |
 | left-click a tile                           | select it: cursor onto that window, selection onto its workspace |
 | double-click a tile                         | enter it (focus + close)                                      |
 | left-click a well (empty canvas in a box)   | select that workspace; clear the cursor                       |
 | double-click a well                         | enter that workspace                                          |
+| left-click a tile **that is a match**, query live | it becomes the selected match; the query survives; no cursor |
+| left-click a **non-matching** tile, query live | the query is cleared, then the tile is selected normally   |
+| left-click a well, query live               | the query is cleared, then the workspace is selected          |
+| double-click any of the three, query live   | the same, then enter what was just selected                   |
 | hover a tile                                | the tile lifts and shows its title; **no** target change      |
 | `Enter`                                     | enters the selection — the workspace, or the cursor's window  |
 | `Ctrl+W`                                    | closes the selected window; nothing when a workspace is selected |
@@ -111,9 +153,11 @@ Policy `"enter"` is today's overview, unchanged in every row. Policy `"select"`:
 | drag a tile onto another box                | moves it silently (unchanged); a moved drag is not a click    |
 | `Tab` / `Shift+Tab`, arrows, `Esc`, typing  | unchanged                                                     |
 
-Find is unchanged under both policies and needs no rule of its own: it is already select-then-enter
-(a query selects the best match, `Tab` cycles, `Enter` focuses), and while a query is live digits
-are query characters, never selection (`logic.js:1075`) — so the latch cannot exist on that branch.
+Find's *keyboard* behaviour is unchanged under both policies and needs no rule of its own: it is
+already select-then-enter (a query selects the best match, `Tab` cycles, `Enter` focuses), and
+while a query is live digits are query characters, never selection (`logic.js:1075`) — so the
+latch cannot exist on that branch, and the missing-box rule cannot either. Only clicking needed a
+rule, because only clicking can name a window the query did not.
 
 The scratchpad row follows the same rules as any other box, because it *is* one: its tiles select
 and enter, and `Enter` on the row shows the scratchpad.
@@ -132,15 +176,24 @@ and a later refactor that tidies the QML cannot reopen hover-targeting without a
 `resolveTarget()` (`Overview.qml:443`) passes `selectMode: config.activate === "select"` and may
 skip the hit test entirely when it is set, since nothing consumes the result.
 
-**`Logic.digitActivate(key, latch)`** — new. Maps a bare digit key to an action and the next latch
-value:
+**`Logic.digitActivate(key, latch, boxes)`** — new. Maps a bare digit key to an action, the box to
+act on, and the next latch value:
 
-    { action: "select" | "enter", id: <1..10>, latch: <key or 0> }
+    { action: "select" | "enter" | "none", id: <1..10>, index: <box index or -1>, latch: <key or 0> }
 
 `id` is `Qt.Key_1`–`Qt.Key_9` → 1–9 and `Qt.Key_0` → 10, the mapping the digit branch already
-uses. `select` when `latch !== key`, returning `latch: key`; `enter` when `latch === key`,
-returning `latch: 0` (the overview is closing; the latch must not survive into the next open).
-Returns `null` for a non-digit. The overview holds one int, `digitLatch`, cleared to `0` by every other
+uses. It takes `boxes` — plain layout data, so the function stays pure — and resolves the box
+itself through the existing `indexOfWorkspace` (`logic.js:935`), returning that index so the
+caller can assign `selectedIndex` without repeating the lookup. Then:
+
+- no box for `id` (`index < 0`) → `{ action: "none", latch: 0 }`, whatever the latch held;
+- `latch !== key` → `{ action: "select", latch: key }`;
+- `latch === key` → `{ action: "enter", latch: 0 }` (the overview is closing; the latch must not
+  survive into the next open).
+
+Returns `null` for a non-digit. The box test comes first, so a box that *disappears between the
+two presses* degrades to `"none"` with no special case: the second press cannot enter a workspace
+that is no longer on screen. The overview holds one int, `digitLatch`, cleared to `0` by every other
 key at the top of the key handler and by every click, and reset by `open()`.
 
 **`Logic.parseConfig`** (`logic.js:994`) gains `activate: (o.activate === "select") ? "select" :
@@ -157,10 +210,27 @@ malformed config never changes behaviour.
 - Latch clearing: one assignment at the top of the handler, before the branches, for every key
   the digit branch does not consume.
 - `dragArea.onReleased` (`Overview.qml:1875`): under `"select"` a non-moved left release calls a
-  new `selectTile(addr)` — `setCursor(addr)` plus the selection onto that window's workspace —
-  instead of `focusWindow(addr)`. `onDoubleClicked` calls `focusWindow(addr)`.
-- The well `MouseArea` (`Overview.qml:1693`): left click selects the box under `"select"`;
-  `onDoubleClicked` jumps.
+  new `selectTile(addr)` instead of `focusWindow(addr)`. `onDoubleClicked` calls
+  `focusWindow(addr)`.
+- **`selectTile(addr)`** — new, and the one place the find split lives, so neither mouse area has
+  to know about it:
+
+      if a query is live and `addr` is in `matches`:
+          matchIndex = its index; applyMatchRoles(); followMatch()
+      else:
+          if a query is live: setQuery("")      // runs restorePreQuerySelection()
+          selectedIndex = Logic.indexOfWorkspace(boxes, window's workspaceId)
+          setCursor(addr)                       // after setQuery, never before
+
+  `setCursor` is deliberately not called on the match branch: `setQuery` holds the invariant that
+  find and the cursor are never both live (`Overview.qml:732`), and the match branch keeps the
+  query.
+- **`selectWorkspaceBox(id)`** — new, for wells: clears a live query first, then sets
+  `selectedIndex` from `indexOfWorkspace` and `setCursor("")`.
+- The well `MouseArea` (`Overview.qml:1693`): left click calls `selectWorkspaceBox` under
+  `"select"`; `onDoubleClicked` jumps.
+- The digit branch assigns `selectedIndex` from the returned `index` rather than calling
+  `jump`/`hasWs`, and does nothing on `"none"`.
 - Hints: `1–0` reads `jump` under `"enter"` and `select` under `"select"`; `↵` reads `select`
   under `"enter"` and `enter` under `"select"`. Both tiers are already model-driven
   (`Overview.qml:1995`), so this is a binding, not a new widget.
@@ -169,8 +239,16 @@ malformed config never changes behaviour.
 
 - **The latch and a closing overview.** `enter` returns `latch: 0` and `open()` resets it, so a
   digit pressed as the last act of one session cannot arm a repeat in the next.
-- **A digit for a workspace that does not exist.** Unchanged: `jump`/selection go through the
-  existing `hasWs` guard, and `workspaces: 10` means ids 1–10 always have a box to select.
+- **A digit for a workspace with no box** (`workspaces: 0`, or a digit above a smaller count).
+  Inert under `"select"`, and the latch is cleared rather than armed — see the decision above.
+  Unchanged under `"enter"`, where it still dispatches and Hyprland creates the workspace.
+- **A box that disappears between the two digit presses.** Falls out of `digitActivate`'s
+  ordering: the second press sees `index < 0` and returns `"none"`, so it neither enters nor
+  leaves a latch behind.
+- **A click on a match that stops matching before the second click of a double-click.** The
+  second step enters `selectedMatchAddress`, which `rematchAfterRebuild` preserves while the
+  window still exists; if the window itself is gone, `activateTarget` finds no target and does
+  nothing, exactly as `Enter` on a vanished match does today.
 - **The selection is a workspace when `Ctrl+W` is pressed.** Nothing happens — the same terminal
   "no window target" the current rule already produces (`closeTarget`, `Overview.qml:544`).
 - **A drag that moved is not a click**, so it neither selects nor enters; the existing `moved`
@@ -192,17 +270,44 @@ malformed config never changes behaviour.
 - `parseConfig`: absent, `"enter"`, `"select"`, an unknown string, a non-string — only `"select"`
   yields `"select"`.
 - `digitActivate`: first press selects; the same key again enters; a different key selects and
-  moves the latch; `enter` returns `latch: 0`; a non-digit returns `null`.
+  moves the latch; `enter` returns `latch: 0`; a non-digit returns `null`; `Qt.Key_0` resolves to
+  id 10 and to that box's index.
+- `digitActivate` with a `boxes` array that has no box for the id → `{ action: "none", index: -1,
+  latch: 0 }`, **including when the latch already held that key** (the disappeared-box case) and
+  when it held a different one (an inert digit must still clear a pending repeat).
 - `target` with `selectMode: true`: a live pointer over a tile is ignored and the cursor wins; a
   live pointer over a tile with no cursor and no query falls to the selected workspace; with
   `selectMode: false` the existing pointer precedence still holds (the current assertions, kept).
 
-**Tier 2 (`tests/ui/activate.qml`, added to `tests/ui/run.sh`):** a digit selects without closing
-and rings the box; the repeat closes; a held digit does not close; a tile click rings the tile and
-sets the selected workspace, and the ring survives a rebuild; a double-click closes; a mouse move
-between two digit presses does not break the repeat; `Ctrl+W` with the pointer over a *different*
-tile closes the selected one; and the whole existing suite re-run under the default `"enter"`
-policy, which must be unchanged.
+**Tier 2 (`tests/ui/activate.qml`, added to `tests/ui/run.sh`):**
+
+- a digit selects without closing and rings the box; the repeat closes; a held digit does not
+  close; a mouse move between two digit presses does not break the repeat;
+- a tile click rings the tile and sets the selected workspace, and the ring survives a rebuild
+  (the `applyTiles` trap); a double-click closes;
+- `Ctrl+W` with the pointer over a *different* tile closes the selected one.
+
+**Tier 2, find × click** — the scenario that motivated the rule, run in `tests/ui/activate.qml`
+against a fixture where the query matches some windows and not others:
+
+- search, then click a **matching** tile on another workspace: the query is still live, the
+  clicked tile is the selected match, `Tab` still cycles the same match set, and both `Enter` and
+  `Ctrl+W` act on the clicked window — asserted *after a rebuild*, which is where the naive
+  wiring loses the selection to `followMatch`;
+- search, then click a **dimmed non-matching** tile: the query is cleared, the match ring is gone
+  from every tile, the clicked tile is ringed as the cursor, and it survives a rebuild;
+- search, then click a **well**: the query is cleared and that workspace is selected, with no
+  cursor;
+- a double-click in each of the three cases enters the window or workspace the single click
+  would have selected.
+
+**Tier 2, padding off** — a second scene (or the same one re-run with `workspaces: 0` and no
+workspace 7 created): pressing `7` selects nothing and leaves the overview open; pressing `7`
+again still does nothing; and `2`, `7`, `2` leaves the overview open, proving the inert digit
+cleared the latch rather than letting it stand.
+
+Finally, the whole existing suite is re-run under the default `"enter"` policy, which must be
+unchanged.
 
 ## Documentation
 
