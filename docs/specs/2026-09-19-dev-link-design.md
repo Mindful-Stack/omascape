@@ -93,8 +93,10 @@ changes plugin *runtime* code.
 9. **✎ `quickshell list` identifies instances.**
    `quickshell list -p "$OMARCHY_PATH/shell" --json` →
    `[{"id":"mtsb1k5jllt","pid":2230186,"launch_time":"2026-09-19T07:27:20",…}]`. A restart can
-   therefore be verified by *replacement* — a different pid with a later launch time — rather than
-   by something answering ping.
+   therefore be verified by *replacement* — a pid absent from the outgoing set — rather than by
+   something answering ping. ✎ Without `--show-dead` the listing holds only live instances, so the
+   pid alone settles it; `launch_time` is reported in the receipt but never gated on, which keeps a
+   clock or DST dependency out of the decision.
 10. **✎ A successful ping proves nothing about the restart.** `omarchy-restart-shell` refuses
     outright while the session is locked ("Refusing to restart Omarchy shell while the session is
     locked.", exit 1) and leaves the old shell running and answering. It can also exit 1 after a
@@ -167,8 +169,8 @@ about to run it, `set -euo pipefail`, a `fail()` helper, refuse rather than clob
    `if ! err=$(… 2>&1); then …` so a non-zero status neither aborts the script under `set -e` nor
    is mistaken for failure, and its stderr is kept for the receipt.
 6. **Verify replacement, not liveness** (finding 10). Poll `quickshell list -p "$CONFIG_DIR" --json`
-   for up to 10s for an instance whose `pid` differs from the outgoing one and whose `launch_time`
-   is not earlier, then confirm `omarchy-shell shell ping`. Three outcomes:
+   for up to 10s for a `pid` that was not in the outgoing set, then confirm `omarchy-shell shell
+   ping`. Three outcomes:
    - replaced and answering → **ok**, whatever the restart's exit status was; if that status was
      non-zero its stderr is printed as a warning (the re-lock case).
    - **not replaced** and the outgoing instance still answers → the restart **refused**. Print its
@@ -197,12 +199,14 @@ unchanged.
 ## Tests
 
 `tests/dev-link.sh`, wired into `tests/run.sh` so `mise run test` covers it, and green on CI with no
-compositor and no Omarchy: the script takes `HYPRCTL`, `OMARCHY`, `OMARCHY_SHELL`, `QUICKSHELL` and
-`SYSTEMCTL` from the environment, defaulting to the real binaries, and the suite points them at
-stubs with `HOME` in a temp dir.
+compositor and no Omarchy: the script takes `HYPRCTL`, `OMARCHY`, `OMARCHY_SHELL_BIN`,
+`QUICKSHELL`, `SYSTEMCTL` and `DEV_LINK_POLL_SECONDS` from the environment, defaulting to the real
+binaries (✎ `OMARCHY_SHELL_BIN`, not `OMARCHY_SHELL`, so it cannot collide with anything
+`omarchy-shell` itself reads), and the suite points them at stubs with `HOME` in a temp dir.
 
 Cases:
 
+- ✎ a manifest that fails `omarchy plugin validate` refuses with exit 1 before anything is touched;
 - a real install directory is stashed, its contents intact, and the symlink created;
 - an existing symlink is re-pointed, and no second stash is made;
 - an occupied stash path refuses with exit 1 and leaves the install path exactly as it was;
