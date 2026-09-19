@@ -2,7 +2,7 @@
 
 Date: 2026-09-18 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on actions and the Tab/arrow split (`main` at `5790e24`).
-Status: **approved design, pre-implementation** (revised after a design review, 2026-09-19: the
+Status: **implemented** (revised after a design review, 2026-09-19: the
 find × click conflict and the missing-box digit).
 Branch `select-then-enter`.
 

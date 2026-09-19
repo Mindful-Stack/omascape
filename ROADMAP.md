@@ -81,6 +81,11 @@ dev machine cannot do:
       scratchpad row depends on — unprobed; if it's rejected, that row closes nothing and reports
       "workspace not found" instead of silently doing the wrong thing.
 
+### 11. ~~Activate: select first, enter second~~ ✅ done (2026-09-19)
+`activate` config key: `"enter"` (default, unchanged) jumps/focuses immediately; `"select"`
+makes a digit or a click select instead, committed with `Enter`, the same digit again, or a
+double-click; see `docs/specs/2026-09-18-activate-select-design.md`.
+
 ## Maintenance gotchas (verified in-session)
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell
   rescanPlugins` reloads the registry but NOT the live QML component.

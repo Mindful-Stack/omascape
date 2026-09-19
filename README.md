@@ -51,6 +51,8 @@ you, are under [Install](#install).
   goes there. Click a window to focus it, middle-click to close it. `Esc` or a click outside closes.
   The overview opens on the focused monitor, and a click anywhere on any *other* monitor closes it
   too — that click only dismisses the overview, it does not reach the window underneath.
+  Set `activate` to `"select"` if you would rather a number or a click *selected* a target and
+  left committing to `Enter`, a second press of the same digit, or a double-click.
 - **Type to find:** any letter starts a fuzzy filter over window class and title; matches ring
   in the accent colour, the best one is selected. The arrows move between matching workspaces
   the way they normally move between workspaces, `Tab`/`Shift+Tab` cycle matches by rank,
@@ -191,6 +193,12 @@ hyprctl reload
 
 Press **SUPER+A**. The overlay opens on your focused monitor.
 
+The table below describes the default `activate: "enter"` policy, where a digit or a click acts
+at once. Under `activate: "select"` a digit, a click on a window and a click on an empty box all
+*select* instead, leaving the overview open — `Enter`, the same digit again, or a double-click is
+what commits, and `Ctrl+W` follows the selection rather than the pointer. See
+[activate](#configuration) below.
+
 | Key / action             | Effect                                                    |
 | ------------------------ | --------------------------------------------------------- |
 | **SUPER+A**              | Toggle the overlay (open and close)                       |
@@ -305,6 +313,7 @@ Optional user settings live in `~/.config/omarchy/omascape.json` (watched; edits
   "scrim": true,
   "hint": true,
   "workspaces": 10,
+  "activate": "enter",
   "motion": "auto",
   "lockBorder": "rgb(ff4444)",
   "lockBorderSize": 6
@@ -319,6 +328,13 @@ Optional user settings live in `~/.config/omarchy/omascape.json` (watched; edits
   monitor of the nearest lower existing workspace), so the layout never depends on which screen
   has focus; Hyprland decides the real monitor when you jump or drop there, and the picker then
   follows. `0` shows only what Hyprland reports.
+- `activate` — what a digit or a click does. `"enter"` (default) is the behaviour above: a digit
+  jumps to that workspace and a click focuses that window, both leaving the overview. `"select"`
+  makes both *select* instead — the ring moves, the overview stays — and you commit with `Enter`,
+  with the same digit a second time, or with a double-click. Under `"select"` the pointer stops
+  targeting entirely: hovering a tile lifts it but changes nothing, so `Ctrl+W` closes the
+  selected window rather than the hovered one. With `workspaces: 0`, a digit whose workspace has
+  no box does nothing at all.
 - `motion` — `"auto"` (default) animates only when Hyprland's `animations:enabled` is on;
   `"full"` always animates; `"off"` never does (every duration is 0).
 - `lockBorder` — colour of the share-time reminder frame drawn around a monitor showing an armed
