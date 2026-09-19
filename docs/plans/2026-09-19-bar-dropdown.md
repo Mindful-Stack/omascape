@@ -1137,9 +1137,16 @@ the `color:` binding:
                             // Arrival phase for this box's row. A Translate, not a `y` change:
                             // the y binding already carries the layout-motion Behavior, and the
                             // entrance must never fight a glide still in flight.
+                            // NO `|| 0` on the lookup. Rank 0 is a legitimate value (every
+                            // layout has a top row), so `|| 0` would turn a MISS into a silent
+                            // "first row". A miss cannot happen -- every box gets a rank, and
+                            // logic.js:360 skips any window whose workspace has no box, so no
+                            // tile can reference a rankless workspace -- and if that invariant
+                            // ever breaks it must be visible, not smoothed over. rowPhase's own
+                            // non-finite guard is the single fail-safe.
                             readonly property real rowPhase: root.barMode
                                 ? Logic.rowPhase(root.entranceProgress,
-                                                 root.rowRankMap[model.workspaceId] || 0,
+                                                 root.rowRankMap[model.workspaceId],
                                                  root.rowCount)
                                 : 1
                             opacity: rowPhase
@@ -1195,9 +1202,10 @@ Then wire the delegate in `Overview.qml` (under `tileRepeater`, after `cursorTar
 ```qml
                             // Tiles take their BOX's rank, looked up by workspace id, so a tile
                             // can never stagger out of step with the well it sits in.
+                            // Same rule as the box delegate: no `|| 0`. See the comment there.
                             readonly property real rowPhase: root.barMode
                                 ? Logic.rowPhase(root.entranceProgress,
-                                                 root.rowRankMap[model.wsid] || 0,
+                                                 root.rowRankMap[model.wsid],
                                                  root.rowCount)
                                 : 1
                             entranceOpacity: rowPhase
