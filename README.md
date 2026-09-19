@@ -203,7 +203,7 @@ Press **SUPER+A**. The overlay opens on your focused monitor.
 | **Click an empty box**   | Jump to that workspace                                    |
 | **Click the ⛶ badge**    | Turn fullscreen off for that window (overview stays open) |
 | **← → ↑ ↓** (query empty) | Move a keyboard cursor between the windows on the selected workspace |
-| **Ctrl+W**               | Close the targeted window (hovered, cursored, or the selected find match) |
+| **Ctrl+W**               | Close the targeted window (hovered, cursored, or the selected find match) — or, on a workspace holding exactly one window, that window, without first stepping into it |
 | **Right-click** a window, workspace, or its number badge | Open the actions menu — close, float/tile, fullscreen, lock, move/swap monitors, close all |
 | **?**                    | Show / hide a second row of key hints                      |
 | **Type a letter**        | Start a fuzzy find over window class and title             |
