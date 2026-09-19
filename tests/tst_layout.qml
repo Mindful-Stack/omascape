@@ -1229,4 +1229,36 @@ TestCase {
         compare(bad.ranks[1], 0, "a NaN y ranks first rather than propagating")
         compare(bad.rowCount, 1, "only the finite y counts as a row")
     }
+
+    // The stagger's whole observable behaviour. Note what is NOT asserted: any particular
+    // duration. The animation's length lives in Overview.qml; this function only decides how a
+    // shared 0..1 progress is divided between rows.
+    function test_row_phase_staggers_rows_without_lengthening_the_entrance() {
+        // THE discriminator. Get the rank wiring backwards, or drop the stride entirely, and
+        // every row returns the same phase -- which still animates, and still looks plausible,
+        // and is not a stagger at all.
+        verify(Logic.rowPhase(0.3, 1, 3) < Logic.rowPhase(0.3, 0, 3), "row 1 lags row 0")
+        verify(Logic.rowPhase(0.3, 2, 3) < Logic.rowPhase(0.3, 1, 3), "row 2 lags row 1")
+        // Every row completes exactly at the end -- the property that keeps the total fixed
+        // however many rows there are.
+        for (var k = 0; k < 3; k++) compare(Logic.rowPhase(1, k, 3), 1, "row " + k + " done at 1")
+        for (var j = 0; j < 8; j++) compare(Logic.rowPhase(1, j, 8), 1, "8 rows also done at 1")
+        // ...and the last row is genuinely still moving just before the end, so "done at 1" is
+        // not merely the p >= 1 guard firing early for everyone.
+        verify(Logic.rowPhase(0.99, 2, 3) < 1, "the last row is still arriving at 0.99")
+        verify(Logic.rowPhase(0.99, 7, 8) < 1, "still true with more rows")
+    }
+
+    function test_row_phase_is_total_at_the_ends_and_safe_in_between() {
+        compare(Logic.rowPhase(0, 0, 3), 0, "nothing has started")
+        compare(Logic.rowPhase(0, 2, 3), 0, "including the last row")
+        compare(Logic.rowPhase(0.5, 0, 1), 0.5, "a single row just follows progress")
+        // A NaN must leave the grid VISIBLE, not invisible. The opposite default would produce
+        // a card that holds keyboard focus while painting nothing -- the same failure mode
+        // screenMargin's guard exists to prevent.
+        compare(Logic.rowPhase(NaN, 0, 3), 1, "NaN progress")
+        compare(Logic.rowPhase(0.5, NaN, 3), Logic.rowPhase(0.5, 0, 3), "NaN rank ranks first")
+        compare(Logic.rowPhase(0.5, 0, NaN), 0.5, "NaN rowCount degrades to no stagger")
+        compare(Logic.rowPhase(0.5, 99, 3), Logic.rowPhase(0.5, 2, 3), "rank clamps to the last row")
+    }
 }

@@ -220,6 +220,30 @@ function rowRanks(boxes) {
     return { ranks: ranks, rowCount: ys.length }
 }
 
+// How far into its own arrival row `rank` is, given one 0..1 progress shared by every row.
+//
+// Each row's ramp occupies ROW_SPAN of the timeline and the starts are spread across what is
+// left, so the LAST row finishes exactly at 1 by construction. Adding rows therefore tightens
+// the stagger rather than lengthening the entrance -- a three-monitor layout must not take
+// noticeably longer to appear than a one-monitor layout.
+var ROW_SPAN = 0.6
+function rowPhase(progress, rank, rowCount) {
+    var p = Number(progress)
+    // Non-finite means fully arrived, never fully hidden: a NaN reaching a delegate's opacity
+    // must leave the grid visible. An invisible card that still holds keyboard focus is the
+    // worst outcome available here, so every guard below fails toward 1.
+    if (!isFinite(p)) return 1
+    if (p <= 0) return 0
+    if (p >= 1) return 1
+    var n = Math.round(Number(rowCount))
+    if (!isFinite(n) || n < 2) return p          // one row (or nonsense) means no stagger
+    var k = Math.round(Number(rank))
+    if (!isFinite(k)) k = 0
+    k = Math.max(0, Math.min(n - 1, k))
+    var t = (p - k * ((1 - ROW_SPAN) / (n - 1))) / ROW_SPAN
+    return t <= 0 ? 0 : (t >= 1 ? 1 : t)
+}
+
 // Breathing room between the picker and the screen edge, both axes. A FRACTION, because the two
 // absolute constants this replaces (`availCanvasW`'s `- 16` and the card's `- 16` / `- 64`) were
 // sized for a ~1600-logical card: at 1920 logical — a 4K panel at 2x, and the commonest laptop
