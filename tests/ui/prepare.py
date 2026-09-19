@@ -32,9 +32,20 @@ qml = (source / 'Overview.qml').read_text()
 qml = re.sub(r'^import (Quickshell.*|qs\..*)\n', '', qml, flags=re.M)
 qml = re.sub(r'Color\.menu\.\w+', '"#888888"', qml)
 # Bar-mode paints Color.bar.background (Bar.qml:71), a different token from the menu one. Same
-# treatment as Color.menu.*: there is no Color singleton here, and an unresolved reference is a
-# compile error that takes all eight suites down together, not just the one under test.
+# treatment as Color.menu.*: there is no Color singleton here, and an unresolved reference does
+# NOT fail to compile — it degrades SILENTLY, a QWARN ReferenceError at runtime with the suite
+# still passing. Any future use of another Color.* namespace needs its own rewrite here, or
+# nothing will catch it short of the guard below.
 qml = re.sub(r'Color\.bar\.\w+', '"#777777"', qml)
+# Loud-failure guard: an unresolved Color.* reference is a QWARN, not a compile error, so a
+# missing rewrite above would otherwise let every suite pass green against a binding that is
+# silently broken at runtime. Make that failure impossible to miss instead of merely documented.
+leftover = re.findall(r'Color\.\w+(?:\.\w+)?', qml)
+if leftover:
+    raise SystemExit('prepare.py: unresolved Color reference(s) in the fixture: '
+                     + ', '.join(sorted(set(leftover)))
+                     + ' -- add a rewrite above, or the suites will pass while the '
+                       'binding silently fails at runtime.')
 qml = re.sub(r'Style\.\w+FillAlpha', '0.1', qml)
 qml = re.sub(r'Style\.font\.\w*Family', '"sans-serif"', qml)
 qml = re.sub(r'Style\.font\.\w+', '11', qml)
