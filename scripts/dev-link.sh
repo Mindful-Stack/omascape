@@ -38,7 +38,7 @@ MODE=link
 case "${1:-}" in
 "") ;;
 --unlink) MODE=unlink ;;
--h | --help) sed -n '2,12p' "${BASH_SOURCE[0]}"; exit 0 ;;
+-h | --help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
 *) fail "unknown argument: $1" ;;
 esac
 
