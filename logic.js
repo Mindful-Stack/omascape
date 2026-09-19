@@ -1014,6 +1014,10 @@ function parseConfig(raw) {
         workspaces: (typeof o.workspaces === "number" && isFinite(o.workspaces))
             ? Math.max(0, Math.floor(o.workspaces)) : 10,
         motion: (o.motion === "full" || o.motion === "off") ? o.motion : "auto",
+        // Which presentation the picker uses. "bar" hangs it off the top bar full-width;
+        // anything else keeps the centred card. Validated like `motion` — an unknown value is
+        // a typo in a hand-edited file, and a typo must not change how the picker is anchored.
+        anchor: (o.anchor === "bar" || o.anchor === "center") ? o.anchor : "center",
         lockBorder: (typeof o.lockBorder === "string" && LOCK_BORDER_RE.test(o.lockBorder))
             ? o.lockBorder : "rgb(ff4444)",
         lockBorderSize: (typeof o.lockBorderSize === "number" && isFinite(o.lockBorderSize))

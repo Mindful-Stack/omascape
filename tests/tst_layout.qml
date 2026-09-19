@@ -1176,4 +1176,16 @@ TestCase {
         compare(Logic.screenMargin(NaN), 16, "NaN must not propagate")
         compare(Logic.screenMargin(undefined), 16, "missing argument")
     }
+
+    // Config keys are validated, never trusted: an unknown value must fall back rather than
+    // reach a binding. The "left" case is the one that discriminates real validation from
+    // `o.anchor || "center"`, which would happily return "left" and anchor the card nowhere.
+    function test_anchor_accepts_only_the_two_known_modes() {
+        compare(Logic.parseConfig('{"anchor":"bar"}').anchor, "bar", "the opt-in value")
+        compare(Logic.parseConfig('{"anchor":"center"}').anchor, "center", "the default, stated")
+        compare(Logic.parseConfig('{"anchor":"left"}').anchor, "center", "unknown value")
+        compare(Logic.parseConfig('{"anchor":7}').anchor, "center", "wrong type")
+        compare(Logic.parseConfig('{}').anchor, "center", "missing key")
+        compare(Logic.parseConfig('not json').anchor, "center", "unparseable file")
+    }
 }
