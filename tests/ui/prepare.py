@@ -254,6 +254,7 @@ for edge in ('left', 'right'):
 (dest / 'FindBar.qml').write_text((source / 'FindBar.qml').read_text())   # no shell imports: verbatim
 (dest / 'HintCap.qml').write_text((source / 'HintCap.qml').read_text())   # no shell imports: verbatim
 (dest / 'ContextMenu.qml').write_text((source / 'ContextMenu.qml').read_text())  # no shell imports: verbatim
+(dest / 'SettingsPanel.qml').write_text((source / 'SettingsPanel.qml').read_text())  # no shell imports: verbatim
 # No shell imports, so almost verbatim — except the window-peek's own WindowTile carries no id in
 # production (nothing there needs one either), and the icon-flash grace suite (tests/ui/peek.qml)
 # needs a way to reach it. Same test-only-plumbing pattern as the WindowTile.qml block above: give
