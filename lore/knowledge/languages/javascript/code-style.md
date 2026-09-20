@@ -102,3 +102,5 @@ sign the logic belongs somewhere else, or that the function is doing QML's job.
 - [[adrs/0004-qt-compatibility-floor]] — why the dialect is pinned this far back.
 - [[languages/lua/chunk-authoring]] — the chunk builders that live in this file.
 - [[adrs/0003-test-tiers]] — where the logic suites run.
+- [[domain/targeting-and-pointer-liveness]] — the doctrine `Logic.target` implements, and why its
+  `return null`s must not be simplified into fall-throughs.

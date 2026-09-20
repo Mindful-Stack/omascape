@@ -26,4 +26,6 @@ present.
 
 - [[adrs/0005-lock-state-persistence]] — workspace selectors are stored as strings, so a
   numbered and a special workspace share one representation.
+- [[domain/ubiquitous-language]] — what a synthetic well is, and how it differs from the
+  placeholder monitor a padded workspace can produce.
 - `README.md` § Always 1–0 for the user-facing description.

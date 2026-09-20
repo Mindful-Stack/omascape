@@ -89,3 +89,5 @@ spec it cites are newer.
 - [[adrs/0004-qt-compatibility-floor]] — the QML dialect the whole tree must stay inside.
 - [[frameworks/hyprland/compositor-state]] — what the root does with the compositor access it
   keeps to itself, and why the models need refreshing by hand.
+- [[domain/targeting-and-pointer-liveness]] — the largest decision the pure module holds.
+- [[domain/ubiquitous-language]] — what a well, a box, a tile and a group are.
