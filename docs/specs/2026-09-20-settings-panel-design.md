@@ -11,10 +11,14 @@ hand-editing `~/.config/omarchy/omascape.json`.
 ## The problem
 
 There are eight settings. To change one today you must know the file exists, know its path, know
-the key names, and know the valid values — none of which the picker tells you. Until very
-recently a typo also reverted *every* setting to its default in silence; that is now reported
-(`Logic.configParseError`), but knowing a file is broken is not the same as knowing what belongs
-in it.
+the key names, and know the valid values — none of which the picker tells you.
+
+A typo used to revert *every* setting to its default in silence. `Logic.configParseError` now
+reports that — but ✎ *(corrected after review, 2026-09-20)* it catches **syntax and root shape
+only**. An invalid *value* still defaults silently: `{"anchor":"barr"}` parses cleanly,
+`configParseError` returns `""`, and `parseConfig` hands back `"center"` with nothing said
+(verified). So half the original problem is still live, and it is the half a panel actually
+fixes — **you cannot typo a value you pick from a list.**
 
 ## What Omarchy does not offer
 
@@ -47,10 +51,32 @@ persistence; the pure functions behind all of it.
 
 - **`ctrl+,` opens it.** `ctrl+S`, `ctrl+L` and `ctrl+W` are taken (`Overview.qml:2145-2147`),
   and a bare `,` would be swallowed by find-as-you-type, which accepts printable characters.
+  ✎ *(verified after review: the chord branch at `:2143` `return`s unconditionally, so `ctrl+,`
+  is currently consumed and does nothing — free, and it never reaches the query.)*
 
-- **It owns every key while open**, the way `menuOpen` already does. **Esc closes the panel, not
-  the picker** — the single interaction detail most likely to be got wrong, and the one a test
-  must pin.
+- **It owns every key while open**, the way `menuOpen` already does — but ✎ *(expanded after
+  review: "owns every key" does not specify the transitions, and four of them already have
+  established handling elsewhere in this file)*:
+
+  - **Opening it aborts a peek.** A modal and a peek are mutually exclusive; the menu already
+    calls `peekAbort()` for this (`Overview.qml:967`).
+  - **The menu and the confirmation dialog stay ahead of it** in the key routing
+    (`Overview.qml:2092`). Inside the menu, `ctrl+,` dismisses the menu and is consumed — it does
+    not also open settings.
+  - **Space pressed while the panel is open must not start a peek on release.** The confirmation
+    branch already tracks exactly this (`Overview.qml:2093`), and Space-release cleanup
+    (`:2210`) must keep running even while the panel owns key *presses*.
+  - **An explicit `!finding` guard.** Find-as-you-type does not own the ctrl chords — the
+    existing `ctrl+S`/`ctrl+L`/`ctrl+W` all fire during a query (`:2143-2147`) — so the panel
+    must decide deliberately whether it opens mid-search rather than inheriting an accident.
+
+- **Esc is a sequence here, not a single action.** ✎ *(corrected after review.)* Today Esc clears
+  the window cursor, then the query, and only then closes the picker (`Overview.qml:2150-2153`),
+  and menus and the confirmation dialog intercept it earlier still. Panel-local Esc routes
+  *before* that branch, and the companion test must therefore establish no cursor, no query, no
+  menu and no confirmation dialog — otherwise it is asserting against a branch that never ran.
+  The closing Esc also swallows its own auto-repeats until release, the way `menuDismissKey`
+  does (`:996`), so holding Esc cannot dismiss the panel and the picker in one press.
 
 - **Seven editable, one not.**
 
@@ -70,17 +96,50 @@ persistence; the pure functions behind all of it.
   `workspaces` steps to 20 in the panel; `parseConfig` still accepts any non-negative number, so
   a larger value remains a file edit. The panel's range is a UI convenience, not a schema change.
 
-- **The write preserves what it did not write.** `configWithKey(rawText, key, value)` parses the
-  file's *existing text*, sets one key, and re-stringifies. JavaScript preserves insertion order
-  for string keys, so hand-written ordering survives — and, more importantly, **any key the panel
-  does not know about survives too**: an older panel must not silently delete a newer version's
-  setting. Only the keys already present, plus the changed one, are written, so defaults are
-  never pinned into the file.
+- **The write requires an OBJECT root, not merely parseable text.** ✎ *(rewritten after review.)*
+  An earlier draft rejected only text that fails to parse. That is not enough, and the failure is
+  silent: `JSON.parse("[1,2]")` succeeds, setting a property on the array is dropped by
+  `JSON.stringify`, and the user would press a key, see nothing change, and have their file
+  rewritten without the setting. `null` is worse — assigning to it **throws**. Scalars drop the
+  key the same way as arrays. All verified.
 
-- **The file is the single source of truth.** The write goes through `OmascapeConfig` with
-  `FileView { atomicWrites: true }`, as `OmascapeLocks.qml` already does, and the existing
-  watcher re-reads and applies it. No in-memory copy that can drift from the file. A failed
-  write notifies, mirroring `onWriteFailed`.
+  `configWithKey` therefore returns `""` unless the parsed root is a non-null, non-array object.
+  Whitespace-only text counts as `{}`, since that is a legitimate empty config.
+
+- **What the write preserves, stated honestly.** ✎ *(narrowed after review.)* An earlier draft
+  promised unknown keys survive "verbatim". Parse/stringify does not give that:
+
+  | input | after a round trip |
+  |---|---|
+  | `{"future":9007199254740993}` | `9007199254740992` — precision lost |
+  | `{"future":1e400}` | `null` — beyond double range |
+  | `{"a":1,"a":2}` | `{"a":2}` — duplicates collapse |
+  | `{"future":1.0}` | `1` — cosmetic |
+
+  The real guarantee is narrower and still worth having: **unknown keys survive semantically**,
+  and insertion order survives, so an older panel does not delete a newer version's setting. It
+  is not a lossless editor, and this file realistically holds small numbers, short strings and
+  booleans. A lossless JSON editor is not worth building for eight known keys; the limitation is
+  documented instead of hidden.
+
+  Only the keys already present, plus the changed one, are written, so defaults are never pinned
+  into the file.
+
+- **Optimistic in memory, then persisted.** ✎ *(rewritten after review — the earlier
+  "watcher is the single source of truth" was wrong.)* If the displayed value only changed once
+  the watcher had re-read the file, two quick presses would both compute their next value from
+  the *stale* one: `workspaces` 10 → two Rights → both request 11, and one increment vanishes.
+  `FileView.text()` is cached, so a read-modify-write can also clobber an external edit made
+  between the cached read and the replacement. Atomic replacement prevents a torn file; it does
+  nothing about a stale read.
+
+  So the panel updates its own value immediately and then writes — which is what
+  `OmascapeLocks.qml:52` already does, updating memory *before* persisting. The watcher's later
+  reload reconciles. On a failed write the panel reverts to what the file still says and
+  notifies.
+
+  There is no feedback loop: `OmascapeConfig.qml`'s load path applies properties and never
+  writes.
 
 ## Changes
 
@@ -96,7 +155,7 @@ persistence; the pure functions behind all of it.
 
 **`SettingsPanel.qml`** — rows, selection, and a `changeRequested(key, value)` signal.
 
-**`OmascapeConfig.qml`** — `save(key, value)`, and a `writeFailed(why)` signal.
+**`OmascapeConfig.qml`** — `save(key, value)`, and a `writeFailed(why)` signal raised from `FileView`'s `onSaveFailed`. The save path must also distinguish *missing* from *failed to read*: the current loader collapses every load failure into defaults, which is fine for display but is not authorisation to replace a file with `{ changedKey: value }`. `OmascapeLocks.qml:72` already makes that distinction.
 
 **`Overview.qml`** — `ctrl+,` opens, key routing while open, and the panel instance.
 
@@ -123,11 +182,24 @@ persistence; the pure functions behind all of it.
 - `configWithKey`: a key is set; **an unknown key survives**; key order survives; a file that
   does not parse yields `""`; an empty file yields a file with just that key.
 
+**What the offscreen fixture CANNOT prove.** ✎ *(added after review.)* `tests/ui/prepare.py`
+replaces `OmascapeConfig.qml` wholesale, so a stubbed `save()` can only show that `Overview`
+*requested* the right change. It cannot show that production persistence preserves keys, handles
+a failed write, or behaves under rapid edits — the locks fixture disclaims exactly this for the
+same reason. Serialization is covered by the Tier 1 tests above; **the production write path is a
+live check**, not something a green UI suite attests to. The new component must also be copied
+into the fixture alongside the others, or the suite silently tests nothing.
+
 **UI suite (`tests/ui/settings.qml`, registered by hand in `tests/ui/run.sh`):**
 
 - `ctrl+,` opens the panel; Esc closes the panel **and leaves the picker open** — with a
-  companion asserting Esc still closes the picker when the panel is *not* open, so the fix
-  cannot be "Esc never closes the picker".
+  companion asserting Esc still closes the picker when the panel is *not* open, so the fix cannot
+  be "Esc never closes the picker". That companion must first establish no cursor, no query, no
+  menu and no confirmation dialog, or it asserts against a branch that never ran.
+- Esc's existing sequence is intact: with a cursor set it clears the cursor; with a query and no
+  cursor it clears the query; only then does it close.
+- Opening the panel aborts an in-flight peek, and Space pressed while the panel is open does not
+  start one on release.
 - Arrows move the selection; left/right cycles the focused row's value.
 - Changing a setting produces the expected write payload, recorded by a stub as the locks tests
   already do (`tests/ui/prepare.py`'s `writes: []`).
