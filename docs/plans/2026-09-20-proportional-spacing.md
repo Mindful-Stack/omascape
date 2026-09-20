@@ -475,20 +475,22 @@ Append after Task 3's tests:
 ```qml
     // Distinguishes: a missing fit step (some width in 162..4384 overflows — the first draft
     // did at 2024 and 1820) and an over-eager one (a canvas more than 2*cols px short of
-    // the width it was given, which is the most a single step can leave behind). Stated once as
-    // the property, for every integer width up to the point maxCellW starts binding (4384 =
-    // 5*800 + 6*64), rather than for the widths the table happens to name.
+    // the width it was given, the most a single strict-condition step can leave behind; widths
+    // that take no step leave less). Stated once as the property, for every integer width up to
+    // 4384, the last width before maxCellW binds (from 4385 the cell pins at 800 and the canvas
+    // freezes at 5*800 + 6*64 = 4384), rather than for the widths the table happens to name.
     function test_ratio_mode_never_overflows_and_never_over_shrinks() {
-        var worstSlack = 0, steps = 0
+        var worstSlack = 0
         for (var w = 162; w <= 4384; w++) {
             var r = fiveOn(w), cols = firstRowCount(r), canvas = r.canvasSize.w
+            if (!isFinite(canvas)) fail("availW " + w + ": canvas is not finite")
             if (canvas > w)
                 fail("availW " + w + ": canvas " + canvas + " overflows")
             if (canvas < w - 2 * cols)
                 fail("availW " + w + ": canvas " + canvas + " is " + (w - canvas) + " short with " + cols + " columns")
             if (w - canvas > worstSlack) worstSlack = w - canvas
         }
-        compare(worstSlack, 10, "five columns leave at most 10 px, at availW 791")
+        compare(worstSlack, 10, "five columns leave at most 10 px, at availW 791 (cols 5, cw 143, gap 11, canvas 781)")
     }
 ```
 

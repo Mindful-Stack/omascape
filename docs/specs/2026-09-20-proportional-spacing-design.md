@@ -72,7 +72,13 @@ the middle of it, which reads as cramped precisely because the room is there and
      then it overflows exactly as the pixel model already does.
 
   The canvas is therefore **never wider than `availW`** (bar the `minCellW` case) and at most
-  `2·cols` px narrower when the cap does not bind: the fit condition is strict, so a step only runs on an overshoot of at least 1 px, and it removes at most `cols + (cols+1)` px — the overshoot it removed plus
+  The canvas is therefore **never wider than `availW`** (bar the `minCellW` case) and at most
+  `2·cols` px narrower when the cap does not bind. The fit condition is strict, so a step only
+  runs on an overshoot of at least 1 px, and it removes at most `cols + (cols+1)` px — the
+  overshoot it removed plus what it over-removed, less the pixel that triggered it. Widths that
+  take no step leave less: at most `cols + (cols+1)·(r + ½)`, which ties `2·cols` only at one
+  column. Measured: exactly 2, 4, 6, 8, 10 for one to five columns. That remainder is centred
+  by the Flickable, as slack is today.
   what the step over-removed. That remainder is centred by the Flickable, as slack is today.
 
   | screen (bar mode, `availW`) | today `cw` / gap | **new `cw` / gap** | canvas | row height (16:10) |
@@ -132,7 +138,8 @@ the middle of it, which reads as cramped precisely because the room is there and
 - **`minCellW` binds.** A very narrow screen: `cw` = 140, `gap` = 11, and the row may overflow
   `availW`, exactly as the pixel model already can — the Flickable scrolls it. `cols` drops to 1
   before that, so it takes an `availW` under 162 to reach it.
-- **Rounding.** Covered by the fit step above: never wider, at most `2·cols` narrower (measured: exactly 2, 4, 6, 8, 10 for one to five columns).
+- **Rounding.** Covered by the fit step above: never wider, at most `2·cols` narrower
+  (measured: exactly 2, 4, 6, 8, 10 for one to five columns).
 
 ## Tests
 
