@@ -412,6 +412,31 @@ TestCase {
 
     function type(s) { for (var i = 0; i < s.length; i++) keyClick(s.charAt(i)) }
 
+    // Distinguishes: a select-mode Ctrl+W that diverges from enter mode's. main's lone-window
+    // carve-out (closeTarget, ✎ 2026-09-18) closes a workspace's only window rather than making
+    // you step into the tile first, and that reasoning does not weaken when the workspace was
+    // reached by selecting rather than by hovering — it strengthens, since selecting a workspace
+    // IS the primary gesture here. All three cases below are the carve-out's own boundary, read
+    // through the select-mode target rule: one window closes, two stay inert rather than
+    // escalating to close-all, none has nothing to name.
+    function test_d_ctrl_w_on_a_selected_workspace_follows_the_lone_window_carve_out() {
+        keyClick(Qt.Key_2)                       // workspace 2 holds exactly 0xC
+        compare(view.selectedId, 2)
+        compare(view.cursorAddress, "", "a digit clears the cursor, so the target is the workspace")
+        ctrlW()
+        compare(view.compositor.commands.length, 1, "the lone window closes")
+        verify(view.compositor.commands[0].indexOf("0xC") >= 0,
+               "closed " + view.compositor.commands[0])
+
+        view.compositor.commands = []
+        keyClick(Qt.Key_1)                       // workspace 1 holds 0xA and 0xB
+        ctrlW()
+        compare(view.compositor.commands.length, 0, "two windows: inert, never close-all")
+
+        keyClick(Qt.Key_3)                       // workspace 3 is empty
+        ctrlW()
+        compare(view.compositor.commands.length, 0, "no window to name")
+    }
     // Distinguishes: a click on a MATCH that sets the cursor instead of moving the match — the
     // ring would then say one thing and Enter another, and followMatch would undo it on the next
     // rebuild. "a" matches alpha and charlie; the click picks the one find did not select.

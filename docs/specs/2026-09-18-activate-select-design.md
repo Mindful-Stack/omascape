@@ -147,7 +147,7 @@ Policy `"enter"` is today's overview, unchanged in every row. Policy `"select"`:
 | double-click any of the three, query live   | the same, then enter what was just selected                   |
 | hover a tile                                | the tile lifts and shows its title; **no** target change      |
 | `Enter`                                     | enters the selection — the workspace, or the cursor's window  |
-| `Ctrl+W`                                    | closes the selected window; nothing when a workspace is selected |
+| `Ctrl+W`                                    | closes the selected window; with a workspace selected, whatever `closeTarget` does with a workspace target — see Edge cases |
 | middle-click a tile                         | closes that window (unchanged)                                |
 | right-click anywhere                        | opens the menu on what was clicked (unchanged)                |
 | drag a tile onto another box                | moves it silently (unchanged); a moved drag is not a click    |
@@ -274,8 +274,22 @@ malformed config never changes behaviour.
   second step enters `selectedMatchAddress`, which `rematchAfterRebuild` preserves while the
   window still exists; if the window itself is gone, `activateTarget` finds no target and does
   nothing, exactly as `Enter` on a vanished match does today.
-- **The selection is a workspace when `Ctrl+W` is pressed.** Nothing happens — the same terminal
-  "no window target" the current rule already produces (`closeTarget`, `Overview.qml:544`).
+- **The selection is a workspace when `Ctrl+W` is pressed.** Whatever `closeTarget` does with a
+  workspace target, unchanged by the policy. ✎ 2026-09-20: this bullet originally said "nothing
+  happens", which was true of `main` at `5790e24` and stopped being true at `8f9effd` — a
+  workspace naming **exactly one** window now closes that window rather than making the user step
+  into the tile first, and above one window `Ctrl+W` stays inert instead of escalating to
+  Close all.
+
+  That carve-out applies here too, and deliberately so. Suppressing it under `"select"` was
+  considered and rejected: it would make `Ctrl+W` mean two different things for the same resolved
+  target, which contradicts this spec's own invariant that **an action acts on the target, and
+  the target is what the resolve rule names — only the rule changes**. It would also be worse to
+  use. The carve-out exists so you need not step into a lone tile before closing it, and
+  selecting a workspace is the *primary* gesture in this policy, so the case it was written for
+  is more common here, not less. Pinned by
+  `test_d_ctrl_w_on_a_selected_workspace_follows_the_lone_window_carve_out`, which covers all
+  three of the carve-out's own boundaries through the select-mode target rule.
 - **A drag that moved is not a click**, so it neither selects nor enters; the existing `moved`
   flag already distinguishes them.
 - **Clicking outside every box** still closes the overview (the scrim, `Overview.qml:1459`): it is
