@@ -49,8 +49,14 @@ setup() {
 }
 
 # run <box> <stdin>: the script, with its prompts answered. Sets $out and $status.
+# The identity is exported rather than configured in the box: the script `git init`s a
+# SECOND repo (the sibling) and commits into it, and a fresh repo has no local identity. On
+# a CI runner there is no global one either, so without these four the sibling commit dies
+# with "empty ident name" and five cases fail for a reason that has nothing to do with the
+# script.
 run() {
-    out=$(cd "$1" && printf '%s' "$2" | bash scripts/split-lore.sh 2>&1)
+    out=$(cd "$1" && printf '%s' "$2" | GIT_AUTHOR_NAME=T GIT_AUTHOR_EMAIL=t@t \
+        GIT_COMMITTER_NAME=T GIT_COMMITTER_EMAIL=t@t bash scripts/split-lore.sh 2>&1)
     status=$?
 }
 
