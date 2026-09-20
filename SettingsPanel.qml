@@ -21,6 +21,10 @@ Rectangle {
     // way to reach the keys this panel cannot edit (lockBorder) and the only way to see the file
     // it has been rewriting. Overview owns the launch, as it owns every other side effect.
     signal openRequested()
+    // Enter means "I am done here". The panel cannot close itself -- Overview owns `settingsOpen`
+    // and the dismiss-key swallow that stops a HELD key closing the panel and then reaching the
+    // picker behind it -- so it asks.
+    signal closeRequested()
 
     // The action row sits one past the last setting, so navigation is a single 0..actionIndex
     // range and nothing has to special-case "the bottom".
@@ -148,17 +152,26 @@ Rectangle {
         // actionIndex, not rows.length - 1, is the bottom: Down must be able to reach it.
         if (e.key === Qt.Key_Up)   { panel.index = panel.index <= 0 ? panel.actionIndex : panel.index - 1; return true }
         if (e.key === Qt.Key_Down) { panel.index = panel.index >= panel.actionIndex ? 0 : panel.index + 1; return true }
+        var enter = e.key === Qt.Key_Return || e.key === Qt.Key_Enter
         if (panel.index >= panel.actionIndex) {
-            // The action row has no value to step through, so Left/Right are consumed and do
-            // nothing rather than editing whatever row happens to be above it.
-            if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) panel.openRequested()
+            // The action row has no value to step through, so Left/Right/Space are consumed and
+            // do nothing rather than editing whatever row happens to be above it. Enter here
+            // performs the row instead of closing the panel -- which still ends the session, as
+            // opening the editor closes the whole picker.
+            //
+            // Autorepeat is refused: a held Enter would otherwise launch an editor per repeat.
+            if (enter && !e.isAutoRepeat) panel.openRequested()
             return true
         }
         var row = panel.rows[panel.index]
+        // Enter is checked BEFORE the row's editability: "done" must work from the one row that
+        // cannot be edited here (lockBorder) as much as from any other.
+        if (enter) { panel.closeRequested(); return true }
         if (!row || !row.editable) return true          // consumed: the panel is modal
         if (e.key === Qt.Key_Left)  { panel.changeRequested(row.key, -1); return true }
-        if (e.key === Qt.Key_Right) { panel.changeRequested(row.key, 1); return true }
-        if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { panel.changeRequested(row.key, 1); return true }
+        // Space steps forward like Right. Not a peek: the picker's own Space is suppressed for
+        // as long as a modal is up (Overview.qml's settings branch), so this takes nothing away.
+        if (e.key === Qt.Key_Right || e.key === Qt.Key_Space) { panel.changeRequested(row.key, 1); return true }
         return true
     }
 }

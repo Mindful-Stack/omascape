@@ -935,6 +935,10 @@ Item {
     // Swallows the auto-repeats of the key that closed the panel, so holding Esc cannot dismiss
     // the panel and then the picker in one press. Same device as menuDismissKey above.
     property int settingsDismissKey: 0
+    // The key currently being routed into the panel, live only for the duration of one
+    // handleKey() call. It exists so closeRequested can reuse the dismiss-key swallow without
+    // the panel needing to know that mechanism exists.
+    property int settingsKeyInFlight: 0
     // A deliberate READ-BACK MIRROR, not a control: the panel owns its own `index` (see the
     // SettingsPanel instance below), and nothing here ever assigns TO it except the seed in
     // openSettings() and the panel's own onIndexChanged. It exists purely so tests -- which have
@@ -2233,7 +2237,14 @@ Item {
                             root.settingsOpen = false
                             return
                         }
+                        // The panel may ask to be closed (Enter). It is handed the key in
+                        // flight so that close can swallow its own repeats exactly as Esc does
+                        // -- and it MUST: the picker's own Enter activates the selection, so a
+                        // held Enter would otherwise close the panel and then jump somewhere.
+                        // Cleared straight after, so the property is never read stale.
+                        root.settingsKeyInFlight = e.key
                         settingsPanel.handleKey(e)
+                        root.settingsKeyInFlight = 0
                         return
                     }
                     // ...and the key that dismissed it keeps swallowing its own repeats. The clear
@@ -2917,6 +2928,10 @@ Item {
                 filePath: config.path
                 onChangeRequested: function (key, dir) { root.applySettingChange(key, dir) }
                 onOpenRequested: root.openConfigFile()
+                onCloseRequested: {
+                    root.settingsDismissKey = root.settingsKeyInFlight
+                    root.settingsOpen = false
+                }
             }
         }
 

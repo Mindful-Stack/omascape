@@ -365,6 +365,92 @@ TestCase {
         compare(found, "ctrl+,/settings", "the ? tier must name the settings key")
     }
 
+    // Enter means done: it leaves the panel and leaves the picker up, like Esc.
+    function test_enter_closes_the_panel_and_leaves_the_picker() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        verify(view.settingsOpen, "precondition: the panel is open")
+        var before = view.testConfig.writes.length
+        keyClick(Qt.Key_Return)
+        verify(!view.settingsOpen, "Enter closes the panel")
+        verify(view.opened, "and leaves the picker up")
+        compare(view.testConfig.writes.length, before,
+                "and changes nothing on the way out")
+    }
+
+    // ...and it must work from the row that cannot be edited here, which is the row an
+    // editability check placed ahead of Enter would swallow it on.
+    function test_enter_closes_the_panel_from_the_non_editable_row() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        // lockBorder is last by SETTING_ORDER, one above the action row.
+        for (var d = 0; d < view.settingsRows.length - 1; d++) keyClick(Qt.Key_Down)
+        keyClick(Qt.Key_Return)
+        verify(!view.settingsOpen, "Enter closes from the non-editable row too")
+        verify(view.opened, "and still leaves the picker up")
+    }
+
+    // THE hazard in making Enter close: the picker's own Enter ACTIVATES the selection. A held
+    // Enter must not close the panel and then jump to a workspace on the repeat.
+    function test_a_held_enter_does_not_activate_behind_the_closing_panel() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        var before = view.compositor.commands.length
+        keyPress(Qt.Key_Return)
+        verify(!view.settingsOpen, "the press closes the panel")
+        // The repeats that a held key produces, which the dismiss-key swallow must absorb.
+        keyPress(Qt.Key_Return)
+        keyPress(Qt.Key_Return)
+        compare(view.compositor.commands.length, before,
+                "no repeat may reach the picker and activate anything")
+        verify(view.opened, "and the picker is still up")
+        keyRelease(Qt.Key_Return)
+        // ...and the swallow must end with the key, or the next real Enter would be eaten too.
+        compare(view.settingsDismissKey, 0, "the swallow clears on release")
+    }
+
+    // Space steps the value forward, like Right.
+    function test_space_steps_the_value() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        var before = view.testConfig.writes.length
+        keyClick(Qt.Key_Space)
+        compare(view.testConfig.writes.length, before + 1, "space requests a change")
+        // The first row is `anchor`, whose cycle is center -> bar: asserted by value, so a
+        // space wired to the wrong direction or the wrong row cannot pass.
+        compare(String(view.testConfig.writes[before]), "anchor=bar", "forward, like Right")
+        verify(view.settingsOpen, "and the panel is still up")
+        verify(!view.peeking, "and no peek started behind it")
+    }
+
+    // ...and space on the action row edits nothing, since it has no value.
+    function test_space_on_the_open_row_does_nothing() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        for (var d = 0; d < view.testSettingsPanel.actionIndex; d++) keyClick(Qt.Key_Down)
+        var before = view.testConfig.writes.length
+        keyClick(Qt.Key_Space)
+        compare(view.testConfig.writes.length, before, "no setting is stepped")
+        compare(view.testExec.length, 0, "and nothing is launched")
+        verify(view.settingsOpen, "and the panel stays open")
+    }
+
+    // A HELD Enter on the action row must launch one editor, not one per repeat.
+    //
+    // Driven through handleKey() rather than keyClick(): QtTest cannot synthesise an autorepeat
+    // -- keyPress() always produces a fresh press with isAutoRepeat false -- so a test written
+    // with real key events passes whether or not the guard exists. Verified: it did.
+    function test_an_autorepeat_on_the_open_row_launches_nothing() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        var panel = view.testSettingsPanel
+        for (var d = 0; d < panel.actionIndex; d++) keyClick(Qt.Key_Down)
+        panel.handleKey({ key: Qt.Key_Return, isAutoRepeat: true, modifiers: 0 })
+        compare(view.testExec.length, 0, "a repeat launches nothing")
+        panel.handleKey({ key: Qt.Key_Return, isAutoRepeat: false, modifiers: 0 })
+        compare(view.testExec.length, 1, "and the genuine press launches exactly one")
+    }
+
     // Closing the picker must not leave the panel armed. Otherwise the next summon opens with
     // settings still intercepting every navigation key, with nothing on screen explaining why.
     function test_the_panel_does_not_survive_a_picker_session() {
