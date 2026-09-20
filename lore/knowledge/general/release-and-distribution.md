@@ -1,16 +1,23 @@
 ---
-title: Release and distribution — main is the release channel
-description: Omarchy installs the plugin by cloning the default branch and updates it with a fast-forward merge, so every merge to main ships to every user; the manifest version and git tags are labels, and rewriting main's history breaks updates for existing installs.
+title: Release and distribution — two channels, one of which needs main to sit still
+description: Direct installs track main's tip, so every merge ships; the marketplace listing instead publishes a maintainer-verified snapshot SHA, which means main must be frozen from filing the verification request until it is approved — moving main invalidates the request.
 tags: [release, ci, tooling, omarchy, dev-workflow]
 ---
 
-# Release and distribution — `main` is the release channel
+# Release and distribution — two channels, one of which needs `main` to sit still
 
-There is no release pipeline, no changelog and no publishing step. That is not an oversight: the
-plugin is distributed as a git checkout, so Omarchy does the shipping. Verified 2026-09-20 against
-the installed Omarchy at `~/.local/share/omarchy/bin`.
+There is no build step and no publishing automation: the plugin is distributed as a git checkout,
+so Omarchy does the shipping. But it ships through **two channels with opposite requirements**, and
+that is the whole difficulty.
 
-## How the plugin actually reaches a user
+| Channel | What it installs | What it demands of `main` |
+| --- | --- | --- |
+| Direct git install | `main`'s tip, always | that it never rewrites history |
+| Marketplace listing | a maintainer-verified snapshot SHA | that it **stops moving** while a request is pending |
+
+Verified 2026-09-20 against the installed Omarchy at `~/.local/share/omarchy/bin`.
+
+## Channel 1 — a direct git install tracks `main`
 
 **Install** — `omarchy plugin add <url>` runs `git clone -- "$url" "$stage"`
 (`omarchy-plugin-add:120`). No `--branch`, no `--depth`: the user gets **the default branch**,
@@ -26,7 +33,8 @@ which is `main`.
 Four rules fall straight out of that, and all four are invisible from inside this repository:
 
 - **Every merge to `main` is a release.** There is no staging branch and no tag gate. Whatever is
-  on the tip of `main` is what the next `omarchy plugin update` installs.
+  on the tip of `main` is what the next `omarchy plugin update` installs — which is also why a
+  merge during a marketplace freeze is not a neutral act.
 - **Never rewrite `main`'s history.** The update is `--ff-only`. A force-push, an amended commit
   or a rebase of published history makes every existing install un-updatable: it fails with
   "cannot fast-forward … you have local changes", which is not what happened and gives the user
@@ -37,6 +45,36 @@ Four rules fall straight out of that, and all four are invisible from inside thi
   before the commit, not after.
 - **The user reads the diff.** `git diff HEAD FETCH_HEAD` is shown before the confirm, so commit
   messages and diff noise are part of the product.
+
+## Channel 2 — the marketplace publishes a frozen snapshot
+
+The listing does not track `main`. A maintainer verifies **one specific commit** and publishes
+that, so the unit of release is a SHA somebody looked at, not a branch tip. Getting a newer commit
+listed means running a **release train**:
+
+1. **Develop on branches.** Merge only finished work — the same flow as today.
+2. **Batch the PRs, merge them together**, bump `manifest.json`'s `version`, and tag (`v0.5.0`).
+3. **File "Verify and publish a newer upstream commit"** on the verification form, with the plugin
+   id, the repo URL, and the **full 40-character SHA**. Not the short form, not the tag name.
+4. **Freeze `main`** until the maintainer applies `approved-and-verified`.
+
+**Step 4 is the mechanism, not politeness.** The reviewer validates the commit you named against
+what they fetch. If `main` has moved on by the time they look, the request is about a snapshot
+that is no longer the branch tip and it stalls.
+
+That is exactly what happened to the omascape submission (marketplace#7262): validation passed at
+`64ec97b`, `main` had moved to `5790e24` before the reviewer looked, and it has kept going —
+`a72ecda`, then four more merges to `7200771`. Twelve merges past the commit that was verified.
+The old Omyview listing stayed live throughout.
+
+> **`main` is not frozen today, and a pending request would already be stale.** On 2026-09-20
+> alone, PR #32 merged as `4e2dfb8` and PR #34 as `7200771`. `64ec97b` is now 154 commits behind
+> the tip. Before filing the next request, agree the freeze window and hold it — a merge during
+> review costs another round trip, and this has now cost three.
+
+The two channels pull in opposite directions during a freeze: direct-install users get nothing new
+while the train is held, and the fix is to keep freezes short and batched rather than to merge
+through them.
 
 ## What `omarchy plugin validate` enforces
 
@@ -55,16 +93,22 @@ Two of those bite in ordinary work:
   local (see [[adrs/0001-dev-install-path]]), and is why `README.md` says to validate `.` rather
   than the install directory.
 
-## Versions and tags are labels, not a mechanism
+## Versions and tags name the snapshot
 
-`manifest.json` `version` is `0.4.0` and is the only place a version string appears in tracked
-code — nothing reads it at runtime. Tags exist for `v0.3.0` and `v0.4.0`, both on PR merge
-commits, and nothing consumes them either.
+Neither is an install mechanism — no installer resolves a tag, and nothing reads `manifest.json`'s
+`version` at runtime. The tag still earns its place: it **names the verified snapshot**, so the
+request in step 3 can point at something human-readable and a user can read a real version off the
+listing. The 40-character SHA is what the request carries; the tag is how everyone else refers to
+it.
 
-Bumps ride inside the feature PR that earns them rather than a dedicated release commit — `0.3.0`
-→ `0.4.0` landed in the Omyview→Omascape rename (PR #17). There is no `CHANGELOG.md` and no
-release workflow. Keep it that way unless the distribution model changes; a version that nothing
-enforces is cheap, and a release process that nothing runs is not.
+Which means the bump and the tag belong to **step 2 of the train**, not to whichever feature PR
+happens to feel significant. Historically they rode along inside a feature PR — `0.3.0` → `0.4.0`
+landed in the Omyview→Omascape rename (PR #17) — and the result is visible: `v0.4.0` is **160
+commits behind `main`**, so every direct-install user is running something the version string does
+not describe.
+
+There is no `CHANGELOG.md` and no release workflow. A changelog would be worth its keep at the
+point where trains become regular, since step 2 already defines the batch it would describe.
 
 ## Branching and CI
 
@@ -81,8 +125,10 @@ instead of skipping, and runs `bash tests/run.sh` — Tier 1 only. Two conventio
 to a full commit SHA rather than a tag, with the reason in a comment.
 
 `main` is protected: `logic-tests` is a required check and force-pushes are blocked. Both follow
-from the section above — a red commit on `main` is a shipped regression, and a rewritten history
-is an un-updatable install.
+from the two channels above — a red commit on `main` is a shipped regression, and a rewritten
+history is an un-updatable install. Protection is also the only practical way to hold a freeze:
+"do not merge for a few days" is a message in a thread, while an enforced rule is not something a
+green PR can talk you past.
 
 > **Not yet enabled.** As of 2026-09-20 the GitHub API reports "Branch not protected" for `main`,
 > so neither rule is enforced and the convention rests on habit. It is a repository settings
