@@ -54,6 +54,28 @@ TestCase {
         }
     }
 
+    // Boxes sharing the first row's y ARE the first row; with five workspaces that is `cols`
+    // whenever cols <= 5.
+    function firstRowCount(r) {
+        var y0 = r.boxes[0].y, n = 0
+        for (var i = 0; i < r.boxes.length; i++) if (r.boxes[i].y === y0) n++
+        return n
+    }
+
+    // Two monitors (so the group inset and header band are on), six workspaces on the first
+    // so it wraps into a second sub-row, and the scratchpad shown: every vertical seam the
+    // layout has. availW 2024 less the 2*6 inset is 2012 — cw 367, gap 29, no fit step.
+    function multiWithScratchpad(p) {
+        var wss = []
+        for (var i = 1; i <= 6; i++) wss.push({ id: i, monitorName: "eDP-1", focused: i === 1, occupied: false })
+        for (var j = 7; j <= 8; j++) wss.push({ id: j, monitorName: "HDMI-A-1", focused: false, occupied: false })
+        wss.push({ id: Logic.SCRATCHPAD_ID, monitorName: "eDP-1", special: "scratchpad",
+                   focused: false, occupied: true })
+        return Logic.layout({ monitors: [edp(), hdmi()], workspaces: wss, windows: [],
+                              focusedMonitorName: "eDP-1", availW: 2024,
+                              params: p === undefined ? ratioParams : p })
+    }
+
     // eDP-1: 2560x1600 @1.25 => 2048x1280 logical; 26px top bar reserved.
     function edp() {
         return { name: "eDP-1", x: 0, y: 0, width: 2560, height: 1600,
@@ -1742,13 +1764,19 @@ TestCase {
     // Distinguishes: an implementation that reads `gapRatio` unguarded — Number(undefined) is
     // NaN and would poison every width — or one that lets 0, a negative, Infinity, a numeric
     // STRING or `true` switch the ratio model on. Green before the feature exists, on purpose:
-    // it is the regression guard for the pixel model every other fixture in this file pins.
+    // it is the regression guard for the pixel model every other fixture in this file pins. The
+    // second fixture wraps a sub-row, has two monitor groups and shows the scratchpad, so every
+    // seam and the scratchpad row are on the guarded path — the single-monitor fixture reaches
+    // none of them.
     function test_an_invalid_ratio_leaves_the_pixel_model_untouched() {
         var base = JSON.stringify(fiveOn(1632, params))
+        var baseMulti = JSON.stringify(multiWithScratchpad(params))
         var invalid = [undefined, null, 0, -0.1, NaN, Infinity, -Infinity, "0.08", true, {}]
         for (var i = 0; i < invalid.length; i++) {
             var out = JSON.stringify(fiveOn(1632, withRatio(params, invalid[i])))
             compare(out, base, "invalid[" + i + "] = " + String(invalid[i]) + " must not change the layout")
+            compare(JSON.stringify(multiWithScratchpad(withRatio(params, invalid[i]))), baseMulti,
+                    "invalid[" + i + "] = " + String(invalid[i]) + " must not change a wrapped, two-monitor, scratchpad layout either")
         }
     }
 
@@ -1772,14 +1800,6 @@ TestCase {
             verify(r.canvasSize.w <= e.availW, at + "the canvas must never be wider than availW")
             assertFinite(r, at)
         }
-    }
-
-    // Boxes sharing the first row's y ARE the first row; with five workspaces that is `cols`
-    // whenever cols <= 5.
-    function firstRowCount(r) {
-        var y0 = r.boxes[0].y, n = 0
-        for (var i = 0; i < r.boxes.length; i++) if (r.boxes[i].y === y0) n++
-        return n
     }
 
     // Distinguishes: a column test that forgets the outer gaps — `(availW + gapMin) /
@@ -1847,23 +1867,11 @@ TestCase {
         compare(worstSlack, 10, "five columns leave at most 10 px, at availW 791 (cols 5, cw 143, gap 11, canvas 781)")
     }
 
-    // Two monitors (so the group inset and header band are on), six workspaces on the first
-    // so it wraps into a second sub-row, and the scratchpad shown: every vertical seam the
-    // layout has. availW 2024 less the 2*6 inset is 2012 — cw 367, gap 29, no fit step.
-    function multiWithScratchpad() {
-        var wss = []
-        for (var i = 1; i <= 6; i++) wss.push({ id: i, monitorName: "eDP-1", focused: i === 1, occupied: false })
-        for (var j = 7; j <= 8; j++) wss.push({ id: j, monitorName: "HDMI-A-1", focused: false, occupied: false })
-        wss.push({ id: Logic.SCRATCHPAD_ID, monitorName: "eDP-1", special: "scratchpad",
-                   focused: false, occupied: true })
-        return Logic.layout({ monitors: [edp(), hdmi()], workspaces: wss, windows: [],
-                              focusedMonitorName: "eDP-1", availW: 2024, params: ratioParams })
-    }
-
-    // Distinguishes: an implementation that widened the columns and left every row seam on
-    // the 8 px `rowSpacing` — a 5x2 grid 29 px apart sideways and 8 px apart downwards — at any
-    // of the three seams: between sub-rows, between monitor groups, and above the scratchpad.
-    // The wrong values are 265, 529 and 798; each is 21 short of the right one.
+    // Distinguishes: an implementation that widened the columns and left a row seam
+    // on the 8 px `rowSpacing` — a 5x2 grid 29 px apart sideways and 8 px apart downwards — at
+    // any of the three seams: between sub-rows, between monitor groups, and above the
+    // scratchpad. With one seam regressed the wrong value is 265, 529 or 798 respectively, each
+    // 21 short; with all three it is 265, 508, 756.
     function test_every_row_seam_is_the_ratio_gap() {
         var r = multiWithScratchpad()
         compare(boxById(r, 1).w, 367, "precondition: 2012 / 5.48 floors to 367")
@@ -1900,5 +1908,19 @@ TestCase {
         var s = boxById(r, Logic.SCRATCHPAD_ID)
         compare(s.x + s.w / 2, r.canvasSize.w / 2, "the scratchpad cell is centred on the canvas")
         compare(r.groups[2].w, widest, "the scratchpad row spans the widest group")
+        compare(r.canvasSize.h, r.groups[2].y + r.groups[2].h, "the canvas ends with the scratchpad row, 1082")
+    }
+
+    // Distinguishes: a cap applied before the fit (fit would then "repair" the slack and shrink
+    // the cell below 800 for no reason) or a cap that stopped binding altogether when the
+    // formula changed. At 6000 the cell stops at 800, the gap at 64, and the 1616 px left over
+    // is slack for the Flickable to centre — the one path that still produces real slack.
+    function test_max_cell_width_caps_the_cell_and_leaves_the_rest_as_slack() {
+        var r = fiveOn(6000)
+        compare(boxById(r, 1).w, 800, "capped")
+        compare(boxById(r, 1).x, 64, "gap is 8% of the CAPPED width")
+        compare(r.canvasSize.w, 5 * 800 + 6 * 64, "4384: the canvas does not stretch to fill")
+        verify(r.canvasSize.w < 6000, "so the width it was given is not consumed")
+        assertFinite(r, "6000")
     }
 }
