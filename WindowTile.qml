@@ -14,6 +14,12 @@ Item {
     property color fg: "#ddd"
     property string title: ""
     property bool dragging: false        // set by Overview during a drag to suppress hover-zoom
+    // The visible LIFT — the shrink, the translucency, the dropped shadow — as distinct from
+    // `dragging`, which arms the drag machinery on press. A press is not yet a carry: Overview
+    // only sets this once the pointer has crossed Qt's drag threshold, so a plain click never
+    // shows a lift it is about to undo. `dragging` still gates hover suppression and stacking
+    // from the press, because those must not wait for movement.
+    property bool lifted: false
     property bool floating: false        // floating windows get a soft shadow, like on the desktop
     property string fontFamily: ""
     property int titleSize: 10
@@ -182,7 +188,7 @@ Item {
     transformOrigin: Item.Center
     // Hover raises a tile within its own layer only; dragging is the single global exception.
     z: dragging ? 99999 : tileLayer * 10 + (hh.hovered ? 1 : 0)
-    opacity: (dragging ? dragOpacity : ((dimmed || closing) ? 0.35 : 1)) * appearOpacity
+    opacity: (lifted ? dragOpacity : ((dimmed || closing) ? 0.35 : 1)) * appearOpacity
     Behavior on scale { enabled: tile.motion.enabled && !appearAnim.running && !priming
         NumberAnimation { duration: tile.motion.fast; easing.type: tile.motion.hover } }
     Behavior on opacity { enabled: tile.motion.enabled && !appearAnim.running && !priming
@@ -190,7 +196,7 @@ Item {
     transform: Scale {
         id: ghost
         origin.x: tile.grabX; origin.y: tile.grabY
-        xScale: tile.dragging ? tile.dragScale : 1
+        xScale: tile.lifted ? tile.dragScale : 1
         yScale: xScale
         Behavior on xScale { enabled: tile.motion.enabled
             NumberAnimation { duration: tile.motion.fast; easing.type: tile.motion.hover } }
@@ -201,7 +207,7 @@ Item {
     SoftShadow {
         objectName: "floatShadow"
         target: tile
-        visible: tile.floating && !tile.dragging
+        visible: tile.floating && !tile.lifted
         radius: 5
         blur: 12
         offset: Qt.vector2d(0, 3)

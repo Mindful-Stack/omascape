@@ -11,6 +11,14 @@ QtObject {
     property bool hint: true         // key hints under the workspace grid
     property int workspaces: 10      // always show ids 1..N, even ones Hyprland has not created; 0 = off
     property string motion: "auto"   // "auto" follows Hyprland animations:enabled; "full" | "off"
+    // "center" (default) keeps the centred card; "bar" hangs the picker off the top bar,
+    // full-width. Bar mode needs an actual top bar to hang from — a side, bottom or hidden bar
+    // reserves nothing at the top and falls back to centred on its own (Overview.qml barMode).
+    property string anchor: "center"
+    // Activation policy (docs/specs/2026-09-18-activate-select-design.md).
+    // "enter"  — a digit jumps and a click focuses, both leaving the overview.
+    // "select" — both select instead; Enter, the same digit again, or a double-click commits.
+    property string activate: "enter"
     // Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum): the local-only
     // frame omascape draws around a monitor that is SHOWING an armed workspace while a share is
     // running (LockFrame.qml — four layer-shell strips, blanked in every capture). `lockBorder`
@@ -29,14 +37,26 @@ QtObject {
     readonly property string motionEffective: Logic.motionPolicy(motion, hyprAnimations)
     function probeMotion() { hyprProc.running = true; probeFallback.restart() }
 
+    // The wallpaper the shell is currently showing, as a file URL. Re-probed on every open so
+    // a theme switch between summons is picked up; the picker is transient, so polling would
+    // be waste. Empty until the first probe answers, which the view treats as "no wallpaper".
+    property string wallpaperUrl: ""
+    function probeWallpaper() { wallpaperProc.running = true }
+
     readonly property string path: Quickshell.env("HOME") + "/.config/omarchy/omascape.json"
+    // The shell's own config, watched read-only for one key: whether the bar is transparent.
+    // Not ours to write, and nothing here ever does.
+    property bool barTransparent: false
+    readonly property string shellPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
 
     function apply(raw) {
         var o = Logic.parseConfig(raw)
         cfg.scrim = o.scrim
         cfg.hint = o.hint
         cfg.workspaces = o.workspaces
+        cfg.activate = o.activate
         cfg.motion = o.motion
+        cfg.anchor = o.anchor
         cfg.lockBorder = o.lockBorder
         cfg.lockBorderSize = o.lockBorderSize
     }
@@ -48,6 +68,23 @@ QtObject {
         onLoaded: cfg.apply(text())
         onFileChanged: reload()
         onLoadFailed: cfg.apply("")
+    }
+
+    property FileView shellFile: FileView {
+        path: cfg.shellPath
+        watchChanges: true
+        printErrors: false
+        onLoaded: cfg.barTransparent = Logic.shellBarTransparent(text())
+        onFileChanged: reload()
+        onLoadFailed: cfg.barTransparent = false
+    }
+
+    property Process wallpaperProc: Process {
+        command: ["readlink", "-f", Quickshell.env("HOME") + "/.local/state/omarchy/current/background"]
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: cfg.wallpaperUrl = Logic.wallpaperUrl(text)
+        }
     }
 
     property Process hyprProc: Process {
@@ -68,5 +105,5 @@ QtObject {
     property Timer probeFallback: Timer { interval: 500; onTriggered: cfg.motionResolved = true }
 
     // Warm the cache so the very first open already follows the compositor.
-    Component.onCompleted: probeMotion()
+    Component.onCompleted: { probeMotion(); probeWallpaper() }
 }

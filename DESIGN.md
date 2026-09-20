@@ -363,9 +363,10 @@ context menu on tiles/wells/badges (Close, Float/Tile, Fullscreen/Exit, Lock/Unl
 ‹monitor›, Swap with ‹monitor›, Close all windows), and a two-tier hint row toggled by `?`.
 Design: `docs/specs/2026-09-15-actions-design.md`.
 
-- **Pointer liveness lives in scene coordinates, not canvas ones.** `Logic.target(input)` prefers
-  a live pointer (the tile or well under it) over the keyboard target (a find match, else the window
-  cursor, else the selected workspace). Liveness itself is tracked by a `HoverHandler` on the
+- **Pointer liveness lives in scene coordinates, not canvas ones.** Under the default `activate:
+  "enter"` policy, `Logic.target(input)` prefers a live pointer (the tile or well under it) over
+  the keyboard target (a find match, else the window cursor, else the selected workspace); under
+  `"select"` the pointer does not target at all — see *Activate* below. Liveness itself is tracked by a `HoverHandler` on the
   Flickable viewport recording `point.scenePosition`, because the canvas moves under a stationary
   pointer during edge/wheel scrolling, a card resize and the entrance animation — canvas
   coordinates would read that motion as "the user moved the mouse" and hijack the keyboard target
@@ -455,3 +456,35 @@ Windows sharing a centre are visited in reading order (address breaks position t
 Right/Down advance, Left/Up go back. At either end, spatial navigation resumes without
 wrapping, so overlapping floating windows are reachable and the cursor can still leave the
 group. With a query, Tab and the arrows keep their find meaning.
+
+## Activate: select first, enter second (2026-09-19)
+
+An opt-in `activate` config key. `"enter"` (default) is the behaviour above: a digit jumps and a
+click focuses, both leaving the overview. `"select"` makes both *select* instead — the ring moves,
+the overview stays — and you commit with `Enter`, with the same digit pressed again, or with a
+double-click. Design: `docs/specs/2026-09-18-activate-select-design.md`.
+
+The whole rule sits in three pure functions so the Tier 1 suite owns it: `parseConfig` reads the
+key, `Logic.target` takes a `selectMode` flag that skips its pointer branch, and
+`Logic.digitActivate(key, latch, boxes, autoRepeat)` maps one digit press to select / enter /
+none. `Overview.qml` holds a single int, `digitLatch`, and routes to those.
+
+- **Under `"select"` the pointer stops being a targeting device at all.** Pointing highlights,
+  clicking selects. This replaced a weaker idea — a click that *pins* the target — which would
+  have left the mode with two notions of "the target". It also makes the display honest: hover was
+  always decorative, and the cursor ring is the only target indicator drawn, so previously the
+  thing `Enter` would act on carried no ring while the pointer was live. The consequence is that
+  `Ctrl+W` follows the selection rather than the hovered tile; middle-click and right-click are
+  direct manipulation and unchanged in both policies.
+- **The digit repeat has no timer.** The latch is the previous key code, taken into a local and
+  zeroed at the top of the key handler, so "every key clears it" is structural and only the digit
+  branch re-arms. Pointer movement never reaches the handler, which is exactly why a mouse move
+  cannot break a pending repeat. Auto-repeat is handled inside `digitActivate` rather than by a
+  guard in QML, because QtTest's QML key API cannot synthesise one and a guard there would be
+  permanently untestable.
+- **A digit with no box on screen is inert**, and does not arm the latch: `hasWs()` tests an id
+  for validity, not a box for existence, so without that a second press would enter a workspace
+  the user never saw selected. Only reachable with `workspaces: 0` or a count below the digit.
+- **A click inside a live find query moves the match and keeps the query**; a click on a dimmed
+  non-match, or on a well, ends the query and then selects. `Logic.target` ranks a match above
+  the cursor, so a click that merely set the cursor would ring one window and act on another.

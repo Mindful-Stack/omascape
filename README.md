@@ -1,7 +1,7 @@
 # Omascape
 
 A workspace overview overlay for [Omarchy](https://omarchy.org)'s Quickshell shell.
-Press **SUPER+A** to get a visual, spatial overview of every workspace — grouped by
+Press **SUPER+TAB** to get a visual, spatial overview of every workspace — grouped by
 monitor, with a **live thumbnail** of each window in its real position — then jump to a
 workspace, or **drag a window onto another workspace** to move it there.
 
@@ -16,7 +16,8 @@ Then bind a key, because Omascape only appears when you toggle it. Add this to
 `~/.config/hypr/bindings.lua` and run `hyprctl reload`:
 
 ```lua
-o.bind("SUPER + A", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
+hl.unbind("SUPER + TAB")   -- it is "Next workspace" by default
+o.bind("SUPER + TAB", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
 ```
 
 Full instructions, including the classic `.conf` syntax and a script that adds the bind for
@@ -51,6 +52,8 @@ you, are under [Install](#install).
   goes there. Click a window to focus it, middle-click to close it. `Esc` or a click outside closes.
   The overview opens on the focused monitor, and a click anywhere on any *other* monitor closes it
   too — that click only dismisses the overview, it does not reach the window underneath.
+  Set `activate` to `"select"` if you would rather a number or a click *selected* a target and
+  left committing to `Enter`, a second press of the same digit, or a double-click.
 - **Type to find:** any letter starts a fuzzy filter over window class and title; matches ring
   in the accent colour, the best one is selected. The arrows move between matching workspaces
   the way they normally move between workspaces, `Tab`/`Shift+Tab` cycle matches by rank,
@@ -155,8 +158,11 @@ omarchy plugin list | grep omascape
 
 ### 2. Bind a key to toggle it
 
-Omascape only appears when you toggle it, so bind a key. **SUPER+A** is the intended bind, and
-it is unbound in a stock Omarchy Quattro.
+Omascape only appears when you toggle it, so bind a key. **SUPER+TAB** is the intended bind.
+Unlike most suggestions it is *not* free in a stock Omarchy Quattro — it is "Next workspace", and
+SUPER+SHIFT+TAB is "Previous workspace". Taking it is deliberate: inside Omascape, Tab already
+steps between workspaces, so Tab comes to mean "workspaces" everywhere. The script below unbinds
+the old meaning before binding the new one; if you would rather keep it, pass any other key.
 
 Omarchy plugins cannot register keybinds themselves, and Omascape will not edit your Hyprland
 config behind your back, so this step is yours. Either add the line below by hand, or run the
@@ -172,7 +178,8 @@ and refuses to add a second copy:
 If your Omarchy uses the Lua binding config (`~/.config/hypr/bindings.lua`):
 
 ```lua
-o.bind("SUPER + A", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
+hl.unbind("SUPER + TAB")   -- it is "Next workspace" by default
+o.bind("SUPER + TAB", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
 ```
 
 If you use plain Hyprland config (`~/.config/hypr/bindings.conf` or `hyprland.conf`):
@@ -189,11 +196,17 @@ hyprctl reload
 
 ### 3. Use it
 
-Press **SUPER+A**. The overlay opens on your focused monitor.
+Press **SUPER+TAB**. The overlay opens on your focused monitor.
+
+The table below describes the default `activate: "enter"` policy, where a digit or a click acts
+at once. Under `activate: "select"` a digit, a click on a window and a click on an empty box all
+*select* instead, leaving the overview open — `Enter`, the same digit again, or a double-click is
+what commits, and `Ctrl+W` follows the selection rather than the pointer. See
+[activate](#configuration) below.
 
 | Key / action             | Effect                                                    |
 | ------------------------ | --------------------------------------------------------- |
-| **SUPER+A**              | Toggle the overlay (open and close)                       |
+| **SUPER+TAB**              | Toggle the overlay (open and close)                       |
 | **1–9, 0**               | Jump to that workspace (`0` = 10)                         |
 | **Tab / Shift+Tab**      | Next / previous workspace (by number, wrapping; the first Tab goes to the one after yours) |
 | **Enter**                | Jump to the highlighted workspace                         |
@@ -232,7 +245,7 @@ omarchy plugin update se.mindfulstack.omascape
 omarchy plugin remove se.mindfulstack.omascape
 ```
 
-…then delete the SUPER+A bind you added and `hyprctl reload`.
+…then delete the SUPER+TAB bind you added and `hyprctl reload`.
 
 ### What it touches on your system
 
@@ -265,7 +278,7 @@ to create the runtime directory). No packages are installed and nothing is downl
 
 ### Troubleshooting
 
-- **Nothing happens on SUPER+A.** Check the plugin is `enabled` (`omarchy plugin list |
+- **Nothing happens on SUPER+TAB.** Check the plugin is `enabled` (`omarchy plugin list |
   grep omascape`) and that your bind targets the exact id `se.mindfulstack.omascape`. Re-run
   `hyprctl reload` after editing the bind.
 - **`summon: plugin not enabled` in the shell log.** Run `omarchy plugin enable
@@ -287,7 +300,9 @@ Optional user settings live in `~/.config/omarchy/omascape.json` (watched; edits
   "scrim": true,
   "hint": true,
   "workspaces": 10,
+  "activate": "enter",
   "motion": "auto",
+  "anchor": "center",
   "lockBorder": "rgb(ff4444)",
   "lockBorderSize": 6
 }
@@ -301,8 +316,21 @@ Optional user settings live in `~/.config/omarchy/omascape.json` (watched; edits
   monitor of the nearest lower existing workspace), so the layout never depends on which screen
   has focus; Hyprland decides the real monitor when you jump or drop there, and the picker then
   follows. `0` shows only what Hyprland reports.
+- `activate` — what a digit or a click does. `"enter"` (default) is the behaviour above: a digit
+  jumps to that workspace and a click focuses that window, both leaving the overview. `"select"`
+  makes both *select* instead — the ring moves, the overview stays — and you commit with `Enter`,
+  with the same digit a second time, or with a double-click. Under `"select"` the pointer stops
+  targeting entirely: hovering a tile lifts it but changes nothing, so `Ctrl+W` closes the
+  selected window rather than the hovered one. With `workspaces: 0`, a digit whose workspace has
+  no box does nothing at all.
 - `motion` — `"auto"` (default) animates only when Hyprland's `animations:enabled` is on;
   `"full"` always animates; `"off"` never does (every duration is 0).
+- `anchor` — where the picker sits. `"center"` (default) floats it in the middle of the screen.
+  `"bar"` hangs it off the top bar instead: full width, square corners, the bar's own background
+  colour, and an accent hairline along its bottom edge. It unfurls downward from the bar rather
+  than fading in. Bar mode needs a *top* bar to hang from — with the bar on another edge, hidden,
+  or absent, there is nothing reserved at the top and the picker quietly stays centred. Any value
+  other than these two is treated as `"center"`.
 - `lockBorder` — colour of the share-time reminder frame drawn around a monitor showing an armed
   workspace (default `"rgb(ff4444)"`); only the `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are
   accepted (Hyprland's own colour syntax), anything else falls back to the default. The alpha of
@@ -382,7 +410,7 @@ Contributions are welcome — bug reports, fixes, and the roadmap items in `ROAD
 | `SoftShadow.qml`    | Shadow under floating tiles.                                            |
 | `logic.js`          | Pure logic: geometry, reconcile, Lua chunk generation. Unit-tested.     |
 | `tests/`            | Tier 1 logic + UI tests (`mise run test`), Lua chunk suite, integration. |
-| `scripts/`          | `add-keybind.sh` (appends the toggle bind); `dev-link.sh` (`mise run link`). |
+| `scripts/`          | `add-keybind.sh` (appends the toggle bind); `dev-link.sh` (`mise run dev:link`). |
 | `DESIGN.md`         | What it does and why.                                                   |
 | `docs/specs/`       | One design doc per feature (find, scratchpad, lock, …).                 |
 | `ROADMAP.md`        | What's next.                                                            |
@@ -406,7 +434,7 @@ APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inli
 2. **Make this checkout the live one:**
 
    ```bash
-   mise run link
+   mise run dev:link
    ```
 
    It points `~/.config/omarchy/plugins/se.mindfulstack.omascape` at the worktree you ran it
@@ -422,21 +450,35 @@ APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inli
    restart  ok — new instance pid 2230186
    ```
 
-   `mise run unlink` puts the clone back. Running it from the installed clone itself is fine: it
-   is already the live checkout, so only the restart happens.
+   `mise run dev:unlink` puts the clone back. Running it from the installed clone itself is fine:
+   it is already the live checkout, so only the restart happens.
+
+   The names mirror Omarchy's own `omarchy dev link` / `dev unlink` / `dev status`, which do the
+   same three things for Omarchy itself.
 
    The plugin id is global, so **whichever worktree linked last is the one running.** To see
    which:
 
    ```bash
-   readlink ~/.config/omarchy/plugins/se.mindfulstack.omascape
+   mise run dev:status
    ```
 
-3. **Edit, then `mise run link` again** to pick the change up.
+   ```
+   linked   se.mindfulstack.omascape -> /home/you/Source/omascape
+   branch   my-feature @ 40abb73 (dirty)
+   shell    pid 2484468, started 2026-09-19T17:32:48
+   verdict  live — the running shell started after this link was written
+   ```
+
+   `STALE` there means the running shell predates the current link and is still serving the
+   previous checkout — the QML engine caches compiled source per path, so re-pointing the link
+   does not reach a shell that is already up. Run `mise run dev:link` to restart onto it.
+
+3. **Edit, then `mise run dev:link` again** to pick the change up.
 
    > ⚠️ **Editing QML requires a full shell restart, not just a rescan.**
    > `omarchy-shell shell rescanPlugins` reloads the manifest/registry but **not** the live
-   > QML component, so your code change won't show until the shell restarts. `mise run link`
+   > QML component, so your code change won't show until the shell restarts. `mise run dev:link`
    > does that for you — and it restarts only the compositor your session identifies, rather
    > than whichever one happens to answer.
 
@@ -458,7 +500,7 @@ checking behavior by hand. Before opening a PR, confirm:
 
 - [ ] `mise run test` passes.
 - [ ] `omarchy plugin validate .` passes.
-- [ ] SUPER+A opens and closes the overlay; `Esc` and click-outside close it.
+- [ ] SUPER+TAB opens and closes the overlay; `Esc` and click-outside close it.
 - [ ] Number keys `1`–`0` jump to the right workspace; Tab + `Enter` work; arrows step windows; click works.
 - [ ] The window mini-map roughly matches your real window layout.
 - [ ] It re-themes correctly after `omarchy theme next` (or any theme switch).

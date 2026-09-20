@@ -476,5 +476,63 @@ is_dir "unlink-invalid: the clone is back" "$(install_path "$box")"
 same   "unlink-invalid: its contents survived" "$(cat "$(install_path "$box")/CLONE_MARKER" 2>/dev/null)" "marker"
 absent "unlink-invalid: the stash is gone" "$(stash_path "$box")"
 
+# --- --status reports a live link and changes nothing ----------------------
+# The stub's newer instance starts at 07:27:20, so the link is backdated behind
+# it; without that a link created "now" is always newer and the verdict is STALE.
+box=$(setup status-live)
+mkdir -p "$box/elsewhere"
+ln -s "$box/elsewhere" "$(install_path "$box")"
+touch -h -d "2026-09-19T06:00:00" "$(install_path "$box")"
+printf 'never\n' > "$box/state/replace-after"     # the "old" instance, 07:00:00
+run "$box" --status
+same   "status-live: exits 0" "$status" "0"
+has    "status-live: names the target" "$out" "linked   se.mindfulstack.omascape -> $box/elsewhere"
+has    "status-live: reports the running shell" "$out" "pid 2229103"
+has    "status-live: verdict is live" "$out" "verdict  live"
+absent "status-live: attempted no restart" "$box/state/restart-signature"
+is_link "status-live: left the install path alone" "$(install_path "$box")"
+
+# --- --status catches a link written after the shell started ---------------
+box=$(setup status-stale)
+mkdir -p "$box/elsewhere"
+ln -s "$box/elsewhere" "$(install_path "$box")"   # mtime is now, the instance is from 07:00
+printf 'never\n' > "$box/state/replace-after"
+run "$box" --status
+same "status-stale: exits 0" "$status" "0"
+has  "status-stale: verdict is STALE" "$out" "verdict  STALE"
+has  "status-stale: says what to do" "$out" "mise run dev:link"
+
+# --- --status on an ordinary install, and on nothing ----------------------
+box=$(setup status-plain)
+mkdir -p "$(install_path "$box")"
+run "$box" --status
+same "status-plain: exits 0" "$status" "0"
+has  "status-plain: says it is not linked" "$out" "ordinary directory"
+
+box=$(setup status-absent)
+run "$box" --status
+same "status-absent: exits 0" "$status" "0"
+has  "status-absent: says nothing is installed" "$out" "is not installed"
+
+# --- --status works when the session cannot be identified ------------------
+# Read-only commands must never refuse: the identity resolution can `fail`, so
+# status has to run before it. This is the regression test for that ordering.
+box=$(setup status-no-identity)
+printf 'fail\n' > "$box/state/systemctl"
+mkdir -p "$box/run/hypr/aaa_nested_sig"
+printf 'aaa_nested_sig\n' > "$box/state/answering"
+ln -s "$box/elsewhere" "$(install_path "$box")"
+run "$box" --status
+same  "status-no-identity: exits 0" "$status" "0"
+has   "status-no-identity: still reports the link" "$out" "linked   se.mindfulstack.omascape"
+lacks "status-no-identity: did not refuse" "$out" "Refusing"
+
+# --- --status reports a stashed install ------------------------------------
+box=$(setup status-stash)
+mkdir -p "$(stash_path "$box")"
+ln -s "$box/elsewhere" "$(install_path "$box")"
+run "$box" --status
+has "status-stash: mentions the stash" "$out" "stashed  .se.mindfulstack.omascape.install"
+
 printf '\n  %d passed, %d failed\n' "$passed" "$failed"
 (( failed == 0 )) || exit 1

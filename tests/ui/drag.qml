@@ -319,6 +319,21 @@ TestCase {
         view.close()
         mouseRelease(tc,goal.x,goal.y,Qt.LeftButton)
     }
+    // Distinguishes: a lift taken on press rather than on first movement. A press that never moves
+    // has picked nothing up, so the tile must not shrink to 60% and spring back. Invisible under
+    // the "enter" activate policy, where a click focuses and closes before the return leg is
+    // drawn — under "select" the overview stays open and the whole blip is on screen.
+    // A timing test, so it drives real durations rather than the fixture's instant default.
+    function test_a_press_without_movement_never_lifts_the_tile() {
+        view.motion.scale = 1
+        var t = tile(), p = t.mapToItem(tc, t.width / 2, t.height / 2)
+        mousePress(tc, p.x, p.y, Qt.LeftButton)
+        wait(150)                                  // well past the 90 ms the lift would take
+        compare(t.ghostScale, 1, "a press alone must not shrink the tile")
+        mouseRelease(tc, p.x, p.y, Qt.LeftButton)
+        wait(150)
+        compare(t.ghostScale, 1, "and there is nothing to spring back from")
+    }
     // Re-grabbing while the release animation (motion.fast, 90 ms) is still running must not shift the tile:
     // the Scale origin moves to the new grab point while the scale is still on its way back
     // to 1, which would displace the rendered tile by (grab − oldOrigin)·(1 − scale).
@@ -328,6 +343,13 @@ TestCase {
         mousePress(tc,g.x,g.y,Qt.LeftButton)
         mouseMove(tc,g.x+12,g.y+2,20)
         mouseMove(tc,g.x+30,g.y+10,20)
+        // Let the shrink COMPLETE before releasing. The lift starts on first movement, not on
+        // press (see WindowTile.lifted), so without this the tile is only a few ms into its
+        // shrink at release and is back at full size well before the 30 ms check below — the
+        // precondition would fail for lack of anything to animate back FROM, not because the
+        // release animation is broken. Waiting also makes the precondition independent of how
+        // much shrink the mouseMove delays happen to accumulate.
+        wait(120)
         mouseRelease(tc,g.x+30,g.y+10,Qt.LeftButton)
         wait(30)                                        // release animation in flight
         verify(t.ghostScale < 0.98, "precondition: still animating back to full size")
