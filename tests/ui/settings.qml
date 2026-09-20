@@ -237,4 +237,35 @@ TestCase {
         compare(anchorRow.value, "center", "the row falls back to what the file still says")
         compare(view.compositor.commands.length, before + 1, "and the user is told")
     }
+
+    // The panel is modal for the POINTER too. The workspace boxes and tiles underneath keep
+    // their own MouseAreas, so without a barrier a click on the panel's centre activates the
+    // workspace behind it and closes the picker.
+    function test_a_click_on_the_panel_does_not_reach_the_grid() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        verify(view.settingsOpen, "precondition: the panel is open")
+        var before = view.compositor.commands.length
+        var p = view.testSettingsPanel
+        mouseClick(p, p.width / 2, p.height / 2)
+        compare(view.compositor.commands.length, before,
+                "a click on the panel must dispatch nothing to the compositor")
+        verify(view.opened, "and must not close the picker")
+        verify(view.settingsOpen, "and the panel stays open")
+    }
+
+    // Closing the picker must not leave the panel armed. Otherwise the next summon opens with
+    // settings still intercepting every navigation key, with nothing on screen explaining why.
+    function test_the_panel_does_not_survive_a_picker_session() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        verify(view.settingsOpen, "precondition: the panel is open")
+        view.close()
+        view.open()
+        wait(120)
+        verify(!view.settingsOpen, "a fresh summon must start with the panel closed")
+        // ...and the keyboard must genuinely be back with the picker, not merely the flag cleared.
+        keyClick(Qt.Key_Down)
+        verify(!view.settingsOpen, "Down must not be intercepted by a stale panel")
+    }
 }

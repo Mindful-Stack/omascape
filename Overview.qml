@@ -1710,6 +1710,10 @@ Item {
         lockUnresolvedNotified = false; lockInvalidNotified = false; configInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
+        // Belt-and-braces, same as menuDismissKey just above: close() already clears this, but a
+        // fresh summon must never inherit a held-key swallow from whatever the previous session's
+        // panel dismissal left behind.
+        settingsDismissKey = 0
         digitLatch = 0
         peekReset()                                 // nothing carries over from the previous summon
         // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
@@ -1734,6 +1738,12 @@ Item {
         if (!opened) return                        // a click on the scrim mid-fade is not a second close
         endDrag(); menuDismiss(); cancelCloseAllConfirm()
         peekAbort()                                 // the release will never arrive at an unfocused surface
+        // Neither open() nor close() reset these anywhere else. Left set, the panel would survive
+        // a dismiss-and-resummon and keep intercepting every navigation key with nothing on screen
+        // explaining why -- and leaving it set here also means the panel stays visible through the
+        // exit fade, since its own visibility binds straight to settingsOpen.
+        settingsOpen = false
+        settingsDismissKey = 0
         // settleTimer is open-only; reconcileTimer keeps running (bounded by the 1.8 s
         // deadlines): it clears optimistic display state (pendingMoves / fsPending / pendingCloses)
         // so a re-summon inside that window shows authoritative state, and with keepLoaded the

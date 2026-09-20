@@ -112,6 +112,10 @@ qml = qml.replace('id: root', '''id: root
     // Compile-time dependency on the `peekLayer` id in Overview.qml: renaming or removing that
     // instance breaks every UI suite at once with "Invalid alias reference", not just Peek's.
     property alias testPeek: peekLayer
+    // Compile-time dependency on the `settingsPanel` id in Overview.qml: renaming or removing
+    // that instance breaks every UI suite at once with "Invalid alias reference", not just
+    // Settings's.
+    property alias testSettingsPanel: settingsPanel
     property var testScreens: []
     property QtObject compositor: QtObject {
         property var monitors: ({values: []})

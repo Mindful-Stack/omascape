@@ -66,6 +66,23 @@ Rectangle {
         font.family: panel.fontFamily; font.pixelSize: panel.fontSize - 1
     }
 
+    // The panel is modal for the pointer as well as the keyboard. Without this the workspace
+    // boxes and window tiles UNDERNEATH it keep their own MouseAreas, so a click on the panel's
+    // centre activates whatever workspace happens to be behind it and closes the picker. The
+    // wheel matters too: otherwise scrolling over the panel scrolls the grid behind it.
+    //
+    // Placed last so it sits on top of everything else declared here -- correct today because the
+    // panel has no interactive children (it is keyboard-driven, via handleKey below), not because
+    // this MouseArea was placed carefully around them. A future row-level control (a click target
+    // inside a row, say) would need to sit BELOW this in stacking order, or above it in z, to
+    // still receive events.
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        onClicked: {}          // swallow
+        onWheel: {}            // swallow
+    }
+
     // Key handling lives here so Overview routes ONE call rather than reimplementing the rows'
     // semantics. Returns true when the key was consumed.
     function handleKey(e) {
