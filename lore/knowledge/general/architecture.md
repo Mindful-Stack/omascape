@@ -91,3 +91,6 @@ spec it cites are newer.
   keeps to itself, and why the models need refreshing by hand.
 - [[domain/targeting-and-pointer-liveness]] — the largest decision the pure module holds.
 - [[domain/ubiquitous-language]] — what a well, a box, a tile and a group are.
+- [[adrs/0008-keep-loaded-overlay]] — why the composition root outlives the summon, and what
+  that makes `open()` responsible for.
+- [[adrs/0009-live-window-previews]] — the second protocol surface the root joins to Hyprland's.

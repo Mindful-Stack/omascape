@@ -127,6 +127,8 @@ changes nothing at all — including the latch.
 ## See Also
 
 - [[domain/ubiquitous-language]] — what a target, a well, a cursor and a latch are.
+- [[adrs/0007-scratchpad-first-class-box]] — why `hasWs()` and not `id >= 0` gates both
+  workspace branches.
 - [[languages/javascript/code-style]] — why the decision is in `logic.js` and not a QML binding.
 - [[general/architecture]] — the layering that puts every decision in the pure module.
 - [[general/testing]] — the tier this is asserted in, and how a test states what it falsifies.

@@ -48,6 +48,11 @@ These are the constraints that have cost the most time. Each links the record th
   needs the `(root.monitorEpoch, …)` comma-operator prefix that both existing sites use. Omitting
   it produces no error, no warning and no test failure; the binding simply never re-evaluates.
   Guard every `refresh*()` call with `typeof … === "function"`, as all six existing calls do.
+- **"Has a workspace" is `Logic.hasWs(id)`, never `id >= 0`**
+  (`lore/knowledge/adrs/0007-scratchpad-first-class-box.md`). The scratchpad's box id is `-2`;
+  `-1` is the only "none" sentinel. Writing `>= 0` again compiles, passes, and silently excludes
+  the scratchpad from whatever that code does. Excluding specials on purpose needs an explicit
+  specials test, not a sign test.
 - **A `SKIP:` is not a pass** (`lore/knowledge/adrs/0003-test-tiers.md`). It is only enforced for
   `tests/lua-check.sh` (via `CI: "1"`); `tests/integration/` still exits 0 on every skip path, so
   read its output rather than its exit code.

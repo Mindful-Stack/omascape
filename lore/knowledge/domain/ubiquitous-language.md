@@ -55,7 +55,7 @@ These three are distinct and the specs never use one for another:
 | **slot** | A dwindle slot — the partition of a workspace's usable rect that a window occupies. It matters because fullscreen hides the other windows *without moving them*, so the hole a fullscreen window leaves is the slot it returns to (`logic.js:89-90`). |
 | **latch** | A one-press memory that makes the next press mean something different. Two exist: the `select` policy's digit latch, which stores the **previous key code** (`Logic.digitActivate`), and the peek's cancel latch, which holds a cancelled hold dead until `Space` is physically released. |
 | **armed** | A workspace marked for the share-time reminder frame. `armed` is lock state, persisted by `OmascapeLocks.qml` — see [[adrs/0005-lock-state-persistence]]. Not a UI mode. |
-| **scratchpad** | Hyprland's special workspace, remapped onto the constant `SCRATCHPAD_ID = -2` because Hyprland allocates special ids dynamically. `hasWs()` treats it as a real workspace; only `-1` means "none". |
+| **scratchpad** | Hyprland's special workspace, remapped onto the constant `SCRATCHPAD_ID = -2` because Hyprland allocates special ids dynamically. `hasWs()` treats it as a real workspace; only `-1` means "none" — see [[adrs/0007-scratchpad-first-class-box]]. |
 | **peek** | Holding `Space` to preview the target: a window preview, or a **mini-map** of a whole workspace. The mini-map is the peek's workspace rendering, reconciled by identity like the main grid. |
 | **motion** | The single root-owned animation object every `duration:` and `easing.type:` dereferences — see [[frameworks/quickshell/theming-and-motion]]. |
 
