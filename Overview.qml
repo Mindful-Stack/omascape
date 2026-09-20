@@ -2140,11 +2140,12 @@ Item {
                         settingsPanel.handleKey(e)
                         return
                     }
-                    // ...and the key that dismissed it keeps swallowing its own repeats.
-                    if (root.settingsDismissKey !== 0 && e.key === root.settingsDismissKey) {
-                        if (!e.isAutoRepeat) root.settingsDismissKey = 0
-                        return
-                    }
+                    // ...and the key that dismissed it keeps swallowing its own repeats. The clear
+                    // belongs in Keys.onReleased, not here: a key RELEASE never fires onPressed,
+                    // so clearing here would leave the flag set through the key-up and swallow
+                    // the next genuinely fresh press instead of just the repeats it is meant to
+                    // absorb.
+                    if (root.settingsDismissKey !== 0 && e.key === root.settingsDismissKey) return
 
                     var chord = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
                     var finding = root.query.length > 0
@@ -2249,6 +2250,8 @@ Item {
                     e.accepted = true
                     if (root.menuDismissKey !== 0 && e.key === root.menuDismissKey && !e.isAutoRepeat)
                         root.menuDismissKey = 0
+                    if (root.settingsDismissKey !== 0 && e.key === root.settingsDismissKey && !e.isAutoRepeat)
+                        root.settingsDismissKey = 0
                     // The release is the ONLY thing that clears the cancel: every other exit path
                     // (a modal, focus loss, the target vanishing) leaves it set, which is what
                     // stops the layer re-opening under a key that is merely still held. It is also

@@ -77,7 +77,7 @@ TestCase {
 
     // ...and the companion, which stops the fix being "Esc never closes the picker". It must
     // first establish that no EARLIER branch owns Esc: today Esc clears the window cursor, then
-    // the query, and only then closes (Overview.qml:2150-2153).
+    // the query, and only then closes (Overview.qml:2198-2202).
     function test_escape_still_closes_the_picker_with_no_panel() {
         seed()
         compare(view.cursorAddress, "", "precondition: no window cursor")
@@ -96,5 +96,19 @@ TestCase {
         keyClick(Qt.Key_Escape)
         compare(view.query, "", "the query clears first")
         verify(view.opened, "without closing the picker")
+    }
+
+    // Esc-Esc must fully close: the panel, then the picker. The dismiss-key swallow exists to
+    // stop a HELD Esc doing both at once, and it is easy to build so that it also eats the next
+    // independent press — which needs a third press to close and feels broken.
+    function test_two_separate_escapes_close_the_panel_then_the_picker() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        verify(view.settingsOpen, "precondition: the panel is open")
+        keyClick(Qt.Key_Escape)
+        verify(!view.settingsOpen, "the first Esc closes the panel")
+        verify(view.opened, "and leaves the picker up")
+        keyClick(Qt.Key_Escape)
+        verify(!view.opened, "a second, independent Esc closes the picker")
     }
 }
