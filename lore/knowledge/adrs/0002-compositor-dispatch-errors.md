@@ -71,8 +71,12 @@ The rules that follow:
 - The operation's control flow lives in generated Lua, not in JavaScript, so it cannot be
   stepped through in a debugger and is harder to read than the equivalent QML.
 - The chunk builders are string concatenation, which makes escaping a real hazard: text
-  interpolated into a chunk must be escaped before it is truncated, or a budget cut can leave a
-  trailing backslash that escapes the chunk's own closing quote.
+  interpolated into a chunk must be **truncated first, on the raw input, and only then escaped**.
+  Escaping first and truncating the result can slice a just-introduced `\\` pair in half, leaving
+  a lone trailing backslash that escapes the chunk's own closing quote and makes the whole thing
+  unparseable — which the compositor drops in silence. `notifyLua` is the worked example: it cuts
+  to its 200-character budget before it escapes anything, and says so in a comment.
+  [[languages/lua/chunk-authoring]] carries the rule for authors.
 - Every new chunk must be added to the dump fixture *and* the count floor raised, or the guard
   silently stops covering it while still passing.
 - The count floor is a magic number that has to be maintained by hand. It catches an empty dump,
