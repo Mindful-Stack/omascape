@@ -161,7 +161,7 @@ TestCase {
         for (var j = 0; j < cands.length; j++) if (cands[j].address === "0xA") { c = cands[j]; break }
         verify(c !== null, "no candidate for 0xA")
         verify(c.x < row.wx, "a hovered tile's candidate must be expanded left of its model geometry")
-        verify(row.wx - c.x >= 1, "precondition: the halo must clear a device pixel, got " + (row.wx - c.x))
+        verify(row.wx - c.x >= 2, "precondition: the halo must be at least 2 px so its midpoint rounds inside it, got " + (row.wx - c.x))
         var px = (c.x + row.wx) / 2, py = row.wy + row.wh / 2   // strictly in the halo, left of the base edge
         var p = view.testCanvas.mapToItem(view, px, py)
         mouseMove(view, p.x, p.y)
