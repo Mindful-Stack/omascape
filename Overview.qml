@@ -945,6 +945,62 @@ Item {
         settingsOpen = true
     }
 
+    // Reads through settingValue(), so a change shows immediately and the NEXT press computes
+    // from it rather than from the not-yet-reloaded file.
+    readonly property var settingsRows: Logic.settingsRows({
+        scrim: settingValue("scrim"), hint: settingValue("hint"),
+        workspaces: settingValue("workspaces"), motion: settingValue("motion"),
+        anchor: settingValue("anchor"), activate: settingValue("activate"),
+        lockBorder: settingValue("lockBorder"), lockBorderSize: settingValue("lockBorderSize")
+    })
+    // Pending values, applied optimistically. WITHOUT this the panel would compute each change
+    // from `config.*`, which only updates once the watcher has re-read the file -- so two quick
+    // Right presses on `workspaces` would both read 10 and both request 11, and one increment
+    // would vanish. This is the defect the spec review caught in the design; reading the row's
+    // value straight off `config` reintroduces it.
+    //
+    // Cleared per key when the watcher's reload confirms that key, so the panel stops guessing
+    // as soon as the file agrees with it.
+    property var settingsPending: ({})
+    function settingValue(key) {
+        return (key in root.settingsPending) ? root.settingsPending[key] : config[key]
+    }
+    function applySettingChange(key, dir) {
+        var row = null
+        for (var i = 0; i < root.settingsRows.length; i++)
+            if (root.settingsRows[i].key === key) row = root.settingsRows[i]
+        if (!row || !row.editable) return
+        var current = root.settingValue(key)
+        var next = Logic.nextSettingValue(key, current, dir)
+        if (next === current) return                 // clamped: nothing to write
+        var pending = {}                             // a NEW object: mutating in place would
+        for (var k in root.settingsPending) pending[k] = root.settingsPending[k]
+        pending[key] = next                          // not re-evaluate the binding below
+        root.settingsPending = pending
+        // The WHOLE pending set, not just `key`: FileView.text() is a cache that does not
+        // update until a write completes, and a second save cancels the first while having
+        // built its payload from the pre-first-write text. Sending every unconfirmed change
+        // each time makes each payload a superset of the last, so a cancelled write loses
+        // nothing. Verified against fileview.cpp:321-338.
+        if (!config.saveAll(root.settingsPending)) {
+            // Refused (an unparseable file). Drop the optimistic value so the panel shows what
+            // the file still says rather than a change that never happened.
+            var revert = {}
+            for (var j in root.settingsPending) if (j !== key) revert[j] = root.settingsPending[j]
+            root.settingsPending = revert
+        }
+    }
+    Connections {
+        target: config
+        // The file agreed with us: stop guessing for the keys it now confirms.
+        function onConfigChanged() {
+            var still = {}
+            for (var k in root.settingsPending)
+                if (root.settingsPending[k] !== config[k]) still[k] = root.settingsPending[k]
+            root.settingsPending = still
+        }
+    }
+
     function monitorList() {
         var out = [], ms = Hyprland.monitors ? Hyprland.monitors.values : []
         for (var i = 0; i < ms.length; i++) if (ms[i] && ms[i].name) out.push({ name: ms[i].name })
@@ -2797,13 +2853,26 @@ Item {
                 fontFamily: root.fontFamily; fontSize: root.captionSize
             }
 
-            // Routing only, this task: rows, theming and onChangeRequested are wired in the
-            // follow-up that connects the panel to config (Task 7). This instance exists so
-            // openSettings() and the key handler above have something to address.
             SettingsPanel {
                 id: settingsPanel
                 visible: root.settingsOpen
                 anchors.centerIn: parent
+                rows: root.settingsRows
+                // NO `index: root.settingsIndex` binding. handleKey assigns panel.index
+                // imperatively on Up/Down, and an imperative write to a property that carries a
+                // binding DESTROYS that binding permanently -- the same mechanism that cost this
+                // branch a Critical with the anchor ternaries. Verified on the engine: after one
+                // such write the caller can no longer drive the child at all. So the panel OWNS
+                // its index; Overview seeds it on open and mirrors it back for read-only use.
+                onIndexChanged: root.settingsIndex = index
+                background: root.background
+                foreground: root.foreground
+                accent: root.accent
+                rowFill: root.wellColor
+                fontFamily: root.fontFamily
+                fontSize: root.labelSize
+                filePath: "~/.config/omarchy/omascape.json"
+                onChangeRequested: function (key, dir) { root.applySettingChange(key, dir) }
             }
         }
 

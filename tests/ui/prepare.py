@@ -295,12 +295,27 @@ peeklayer = replaced(peeklayer, '    id: peek\n',
     '           function probeMotion() {}\n'
     '           property var writes: []\n'
     '           signal writeFailed(string why)\n'
-    # Records that a change was REQUESTED, and nothing more: the real save() reads the file's
-    # current text, validates it through Logic.configWithKey and writes atomically, none of
+    # configChanged is emitted by the real apply() on every reload; Overview's settingsPending
+    # watcher listens for it. This stub never reloads a file, so it is declared (Connections
+    # would otherwise warn against a target with no such signal) but never emitted.
+    '           signal configChanged()\n'
+    # Records that a change was REQUESTED, and nothing more: the real saveAll() reads the file's
+    # current text, applies every key through Logic.configWithKey and writes atomically, none of
     # which this wholesale-replaced stub can exercise. Preservation, atomicity and failure
     # handling are covered elsewhere (Task 3's Tier 1 tests for configWithKey; the write path
     # itself is a live check) -- same disclaimer as the OmascapeLocks stub above, same reason.
-    '           function save(key, value) { writes = writes.concat([key + "=" + value]); return true }\n'
+    #
+    # Records the WHOLE map on each call, not one key=value pair: applySettingChange sends every
+    # unconfirmed change on every save (a real second write cancels the first and would otherwise
+    # lose it -- see Overview.qml's applySettingChange), so a test asserting on a single write's
+    # content must see every key that call carried, not just the newest one.
+    '           function saveAll(values) {\n'
+    '               var parts = []\n'
+    '               for (var k in values) parts.push(k + "=" + values[k])\n'
+    '               writes = writes.concat([parts.join(",")])\n'
+    '               return true\n'
+    '           }\n'
+    '           function save(key, value) { var o = {}; o[key] = value; return saveAll(o) }\n'
     '           }\n')
 # Lock state stub: the real OmascapeLocks.qml watches two files through Quickshell.Io. The stub
 # keeps the one property later tests depend on — `armed` is null until a load resolves — and

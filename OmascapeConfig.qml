@@ -57,6 +57,11 @@ QtObject {
     // `onSaveFailed`, and this is the component's own signal on top of it.
     signal writeFailed(string why)
 
+    // Emitted at the end of apply(), i.e. every reload (initial load, watcher-triggered
+    // re-read, or a load failure). The settings panel's optimistic layer (Overview.qml's
+    // settingsPending) listens for this to stop guessing a key once the file agrees with it.
+    signal configChanged()
+
     // True once `file.text()` is something save() can trust: either a successful load, or a
     // load failure confirmed to be "no such file" (empty text is then the right starting point
     // -- Logic.configWithKey treats "" as {} and creates the file). Any other load failure
@@ -78,6 +83,7 @@ QtObject {
         cfg.anchor = o.anchor
         cfg.lockBorder = o.lockBorder
         cfg.lockBorderSize = o.lockBorderSize
+        cfg.configChanged()
     }
 
     // Persist one setting. Reads the file's CURRENT text rather than rebuilding from the parsed
@@ -95,6 +101,29 @@ QtObject {
         if (next.length === 0) {
             cfg.writeFailed("the file could not be parsed; fix it before changing settings here")
             return false
+        }
+        file.setText(next)
+        return true
+    }
+
+    // Applies several settings in ONE write. See the caller's comment (Overview.qml
+    // applySettingChange): a second write cancels the first and builds its payload from stale
+    // cached text (FileView.text() only updates on operationFinished, and saveAsync captures its
+    // payload before cancelling an in-flight write -- verified in Quickshell 0.3.1's
+    // src/io/fileview.cpp:321-338). So each payload must carry every unconfirmed change rather
+    // than only the newest, making a cancelled write's payload a subset of the next one's.
+    function saveAll(values) {
+        if (!readableForSave) {
+            cfg.writeFailed("the file could not be read; fix that before changing settings here")
+            return false
+        }
+        var next = file.text()
+        for (var k in values) {
+            next = Logic.configWithKey(next, k, values[k])
+            if (next.length === 0) {
+                cfg.writeFailed("the file could not be parsed; fix it before changing settings here")
+                return false
+            }
         }
         file.setText(next)
         return true

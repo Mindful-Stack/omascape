@@ -111,4 +111,87 @@ TestCase {
         keyClick(Qt.Key_Escape)
         verify(!view.opened, "a second, independent Esc closes the picker")
     }
+
+    function test_arrows_move_and_cycle() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        compare(view.settingsIndex, 0, "starts at the top")
+        keyClick(Qt.Key_Down)
+        compare(view.settingsIndex, 1, "down moves")
+        keyClick(Qt.Key_Up)
+        compare(view.settingsIndex, 0, "up moves back")
+        var before = view.testConfig.writes.length
+        keyClick(Qt.Key_Right)
+        compare(view.testConfig.writes.length, before + 1, "right requests a change")
+        // The panel's first row is `anchor`, whose cycle is center -> bar.
+        compare(String(view.testConfig.writes[before]), "anchor=bar",
+                "and asks for the NEXT value, not an arbitrary one")
+    }
+
+    // A non-editable row consumes its keys rather than falling through to the picker beneath.
+    function test_a_non_editable_row_changes_nothing() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        // lockBorder is last by SETTING_ORDER; step to it with real presses.
+        for (var d = 0; d < view.settingsRows.length - 1; d++) keyClick(Qt.Key_Down)
+        var before = view.testConfig.writes.length
+        keyClick(Qt.Key_Right)
+        compare(view.testConfig.writes.length, before, "no write is requested")
+        verify(view.settingsOpen, "and the key did not escape to the picker")
+    }
+
+    // The panel does not open mid-search. Deliberate: a query has its own Esc semantics, and a
+    // modal on top would give Esc three meanings. Fails against a ctrl+, that simply inherits
+    // the chord branch's behaviour, which fires during a query like every other ctrl shortcut.
+    function test_the_panel_does_not_open_during_a_search() {
+        seed()
+        view.setQuery("fire")
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        verify(!view.settingsOpen, "a query owns the screen; clear it first")
+        compare(view.query, "fire", "and the chord did not disturb the query")
+    }
+
+    // A clamped stepper must not rewrite the file on every press.
+    function test_a_clamped_stepper_writes_nothing() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        // Navigate with real presses: `settingsIndex` is a read-back mirror now, not a
+        // control, so writing it would move nothing. SETTING_ORDER puts workspaces at index 5.
+        for (var d = 0; d < 5; d++) keyClick(Qt.Key_Down)
+        for (var i = 0; i < 25; i++) keyClick(Qt.Key_Right)   // drive it to the 20 ceiling
+        var atCeiling = view.testConfig.writes.length
+        keyClick(Qt.Key_Right)
+        compare(view.testConfig.writes.length, atCeiling,
+                "at the ceiling a further press must write nothing")
+    }
+
+    // Two quick presses must produce two DIFFERENT values. This is the lost-update case: read
+    // each next value off `config` -- which only updates when the watcher reloads -- and both
+    // presses compute from the same stale number and request the same one twice.
+    function test_two_quick_presses_do_not_collapse_into_one_value() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        for (var d = 0; d < 5; d++) keyClick(Qt.Key_Down)   // workspaces, default 10
+        var before = view.testConfig.writes.length
+        keyClick(Qt.Key_Right)
+        keyClick(Qt.Key_Right)                        // no reload in between: the stub never writes a file
+        compare(view.testConfig.writes.length, before + 2, "both presses request a change")
+        verify(String(view.testConfig.writes[before]) !== String(view.testConfig.writes[before + 1]),
+               "and they must differ: got " + view.testConfig.writes[before]
+               + " then " + view.testConfig.writes[before + 1])
+        // The second write must carry the first change too, or a cancelled write loses it.
+        verify(String(view.testConfig.writes[before + 1]).indexOf("workspaces") >= 0,
+               "the second save still carries workspaces")
+    }
+
+    // Opening the panel aborts an in-flight peek: a modal and a peek are never both up.
+    function test_opening_the_panel_aborts_a_peek() {
+        seed()
+        keyPress(Qt.Key_Space)
+        wait(60)
+        verify(view.peeking, "precondition: a peek is up")
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        verify(!view.peeking, "opening settings aborts it")
+        keyRelease(Qt.Key_Space)
+    }
 }
