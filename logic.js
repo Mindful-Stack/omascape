@@ -184,6 +184,71 @@ function padWorkspaces(workspaces, count, focusedMonitorName) {
     return out
 }
 
+// Row ordinal for every workspace box, taken from the layout's own y values and shared by the
+// boxes and by the tiles inside them, so one row of the bar-mode entrance moves as a unit.
+//
+// Ranks are GLOBAL, not per monitor group: the stagger sweeps down the whole card, and restarting
+// the count at each monitor would make the second screen's first row appear before the first
+// screen's second.
+//
+// Exact float equality is safe here and is not an accident to be defended with a tolerance:
+// layout() assigns `y: y` from one running accumulator, so every box in a sub-row carries the
+// identical value by construction. A tolerance would only hide it if that ever stopped being true.
+//
+// Contract: Every box in the input gets an entry, so ranks[id] returning undefined means the
+// caller passed a workspace id that was not in the input layout. Rank 0 is a legitimate value
+// (every layout has a top row), so consumers must NOT write `ranks[id] || 0` — that idiom would
+// turn a miss into a silent "animate as the top row", hiding a broken invariant. The single
+// fail-safe for a non-finite rank lives in rowPhase, not at each call site. Every tile's
+// workspace id is in ranks by construction: layout() paths at 301/339 produce boxes, and
+// tiles are born only from boxes (line 397: `if (!wbox) continue`).
+function rowRanks(boxes) {
+    if (!boxes || !boxes.length) return { ranks: {}, rowCount: 0 }
+    var ys = [], i, v
+    for (i = 0; i < boxes.length; i++) {
+        v = Number(boxes[i].y)
+        if (isFinite(v) && ys.indexOf(v) < 0) ys.push(v)
+    }
+    ys.sort(function (a, b) { return a - b })
+    var ranks = {}
+    for (i = 0; i < boxes.length; i++) {
+        v = Number(boxes[i].y)
+        // A non-finite y ranks first rather than yielding undefined: the entrance must never be
+        // handed a rank it cannot turn into a phase, which would leave that box invisible.
+        ranks[boxes[i].workspaceId] = isFinite(v) ? ys.indexOf(v) : 0
+    }
+    return { ranks: ranks, rowCount: ys.length }
+}
+
+// How far into its own arrival row `rank` is, given one 0..1 progress shared by every row.
+//
+// Each row's ramp occupies ROW_SPAN of the timeline and the starts are spread across what is
+// left, so the LAST row finishes exactly at 1 by construction. Adding rows therefore tightens
+// the stagger rather than lengthening the entrance -- a three-monitor layout must not take
+// noticeably longer to appear than a one-monitor layout.
+// ROW_SPAN = 0.6: Each row's own motion occupies 60% of the timeline, leaving 40% for row starts.
+// Higher values overlap rows and soften the stagger until it stops reading as a stagger; lower
+// values make each row snap in and exaggerate it. 0.6 keeps the stagger legible while preserving
+// smooth per-row motion. This is a tuned value and open to adjustment as needed.
+var ROW_SPAN = 0.6
+function rowPhase(progress, rank, rowCount) {
+    var p = Number(progress)
+    // Non-finite inputs must never return 0, or a NaN reaching a delegate's opacity would leave
+    // the grid invisible while the card still holds keyboard focus — the worst outcome available.
+    // Non-finite progress returns full opacity (1); non-finite rank degrades to rank 0; non-finite
+    // rowCount returns progress unchanged (no stagger). Each path yields something visible.
+    if (!isFinite(p)) return 1
+    if (p <= 0) return 0
+    if (p >= 1) return 1
+    var n = Math.round(Number(rowCount))
+    if (!isFinite(n) || n < 2) return p          // one row (or nonsense) means no stagger
+    var k = Math.round(Number(rank))
+    if (!isFinite(k)) k = 0
+    k = Math.max(0, Math.min(n - 1, k))
+    var t = (p - k * ((1 - ROW_SPAN) / (n - 1))) / ROW_SPAN
+    return t <= 0 ? 0 : (t >= 1 ? 1 : t)
+}
+
 // The grid's per-window placement for ONE workspace, factored out of `layout` so the peek's
 // mini-map (peekTiles) runs the identical code at a different box size. `wins` are that
 // workspace's windows, `mon` its monitor, `box` the rect to place them in — a grid cell for the
@@ -1062,6 +1127,66 @@ var LOCK_BORDER_RE = /^rgba?\([0-9a-fA-F]{6}([0-9a-fA-F]{2})?\)$/
 
 // ~/.config/omarchy/omascape.json → a fully-defaulted settings object. Every key has a default;
 // a missing file, a parse error, a wrong type or an unknown key never changes behaviour.
+// Whether the Omarchy bar is drawing itself transparent. This lives in the SHELL's config,
+// not ours: double-clicking the bar calls mutateShellConfig and writes `bar.transparent`
+// there. It matters because an attached card paints the bar's colour TOKEN, which does not
+// change when the bar switches to painting nothing -- so without this the card keeps the
+// bar's configured background while the bar shows the desktop through itself.
+//
+// Fails to `false` on anything unexpected: a missing file, a malformed one, or a bar subtree
+// that is not an object. False means "paint the bar's colour", which is the behaviour that
+// was correct before this existed.
+// The current wallpaper as a file URL, from `readlink -f` output.
+//
+// Resolved, not the symlink itself: Qt caches Image sources by URL, so pointing an Image at
+// ~/.local/state/omarchy/current/background would keep serving the first wallpaper of the
+// session after a theme switch. Omarchy's own background plugin resolves it the same way.
+//
+// Encoded per PATH SEGMENT, not with encodeURI over the whole path. encodeURI deliberately
+// preserves the URI-reserved characters, "#" among them -- so a wallpaper living at
+// /home/u/wall#2.jpg would produce a URL whose path ends at "wall", with "#2.jpg" read as a
+// fragment, and Qt would quietly fail to load it. encodeURIComponent encodes those, and
+// rejoining with a literal "/" keeps the path structure it would otherwise have escaped.
+//
+// Anything that is not an absolute path yields "" -- the caller treats that as "no wallpaper"
+// and falls back to a painted colour, which is the behaviour from before this existed.
+// The tinted-glass mix used behind the wells and the bottom bar when the picker is showing the
+// wallpaper. Takes and returns components in 0..1; the view wraps the result with an alpha.
+//
+// 12% accent, 88% background -- deliberately NOT accent-dominant, though accent is what the
+// colour is FOR. Most themes' accents are light: rose-pine's #ebbcba is luminance 0.78 against
+// a background of 0.10. A light-dominant mix laid over a photograph washes it out instead of
+// darkening it, and the workspace numerals -- foreground at 0.10 alpha -- come out less
+// readable rather than more. 12% reads as a deliberate tint while the background still does
+// the darkening.
+var GLASS_ACCENT = 0.12
+function glassMix(bg, accent) {
+    if (!bg) return { r: 0, g: 0, b: 0 }
+    var tint = accent || bg
+    function ch(b, a) {
+        var bn = Number(b), an = Number(a)
+        if (!isFinite(bn)) bn = 0
+        if (!isFinite(an)) an = bn            // a broken accent degrades to plain background
+        return bn * (1 - GLASS_ACCENT) + an * GLASS_ACCENT
+    }
+    return { r: ch(bg.r, tint.r), g: ch(bg.g, tint.g), b: ch(bg.b, tint.b) }
+}
+
+function wallpaperUrl(raw) {
+    var path = String(raw || "").replace(/^\s+|\s+$/g, "")
+    if (path.length === 0 || path.charAt(0) !== "/") return ""
+    var parts = path.split("/")
+    for (var i = 0; i < parts.length; i++) parts[i] = encodeURIComponent(parts[i])
+    return "file://" + parts.join("/")
+}
+
+function shellBarTransparent(raw) {
+    var o
+    try { o = JSON.parse(String(raw || "")) } catch (e) { return false }
+    if (!o || typeof o !== "object") return false
+    return !!(o.bar && typeof o.bar === "object" && o.bar.transparent === true)
+}
+
 function parseConfig(raw) {
     var o = {}
     try { o = JSON.parse(String(raw || "")) || {} } catch (e) { o = {} }
@@ -1072,6 +1197,10 @@ function parseConfig(raw) {
         workspaces: (typeof o.workspaces === "number" && isFinite(o.workspaces))
             ? Math.max(0, Math.floor(o.workspaces)) : 10,
         motion: (o.motion === "full" || o.motion === "off") ? o.motion : "auto",
+        // Which presentation the picker uses. "bar" hangs it off the top bar full-width;
+        // anything else keeps the centred card. Validated like `motion` — an unknown value is
+        // a typo in a hand-edited file, and a typo must not change how the picker is anchored.
+        anchor: (o.anchor === "bar" || o.anchor === "center") ? o.anchor : "center",
         activate: (o.activate === "select") ? "select" : "enter",
         lockBorder: (typeof o.lockBorder === "string" && LOCK_BORDER_RE.test(o.lockBorder))
             ? o.lockBorder : "rgb(ff4444)",

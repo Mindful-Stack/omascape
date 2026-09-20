@@ -1361,4 +1361,162 @@ TestCase {
         compare(Logic.screenMargin(NaN), 16, "NaN must not propagate")
         compare(Logic.screenMargin(undefined), 16, "missing argument")
     }
+
+    // The glass mix behind the wells, checked with REAL theme colours -- which is why it lives
+    // here and not in the UI suite: that fixture rewrites every theme token to a flat grey, so
+    // "darkens rather than washes" cannot even be expressed there.
+    function test_glass_darkens_rather_than_washes() {
+        function rgb(h) { return { r: parseInt(h.substr(0,2),16)/255,
+                                   g: parseInt(h.substr(2,2),16)/255,
+                                   b: parseInt(h.substr(4,2),16)/255 } }
+        function lum(c) { return 0.2126*c.r + 0.7152*c.g + 0.0722*c.b }
+        var bg = rgb("191724"), accent = rgb("ebbcba")          // rose-pine dark
+        verify(lum(accent) > 0.7, "premise: this theme's accent is LIGHT, " + lum(accent))
+        verify(lum(bg) < 0.2, "premise: and its background is dark, " + lum(bg))
+
+        var g = Logic.glassMix(bg, accent)
+        // THE property. An accent-dominant mix would land near the accent's 0.78 and wash the
+        // photograph; this has to stay near the background so it darkens and the numerals read.
+        verify(lum(g) < 0.30, "the glass must stay dark, luminance is " + lum(g))
+        verify(lum(g) > lum(bg), "but carry a visible tint, not be the plain background")
+        verify(Math.abs(lum(g) - lum(bg)) < Math.abs(lum(g) - lum(accent)),
+               "and sit far closer to the background than to the accent")
+
+        // A light theme must not invert the logic: the mix follows whatever background it is
+        // given, so it darkens or lightens with the theme rather than assuming dark.
+        var lightBg = rgb("faf4ed")
+        var lg = Logic.glassMix(lightBg, accent)
+        verify(lum(lg) > 0.7, "on a light theme the glass stays light, " + lum(lg))
+    }
+
+    function test_glass_mix_survives_a_broken_palette() {
+        var bg = { r: 0.1, g: 0.1, b: 0.2 }
+        var same = Logic.glassMix(bg, null)
+        compare(same.r, bg.r, "a missing accent degrades to the plain background")
+        var nan = Logic.glassMix(bg, { r: NaN, g: NaN, b: NaN })
+        compare(nan.r, bg.r, "and so does a non-finite one, rather than propagating NaN")
+        var none = Logic.glassMix(null, null)
+        compare(none.r, 0, "no background at all yields black, never undefined")
+    }
+
+    // The wallpaper path comes from `readlink -f`, so it arrives with a trailing newline and
+    // may contain spaces. Everything that is not an absolute path must yield "" -- the view
+    // reads that as "no wallpaper" and falls back to a painted colour, which is what it did
+    // before wallpaper backing existed.
+    function test_wallpaper_url_is_built_defensively() {
+        compare(Logic.wallpaperUrl("/home/d/bg.jpg\n"), "file:///home/d/bg.jpg", "readlink's newline")
+        compare(Logic.wallpaperUrl("  /home/d/bg.jpg  "), "file:///home/d/bg.jpg", "surrounding space")
+        // THE discriminator against a bare "file://" + path: a space in the path would make a
+        // URL Qt silently fails to open, and the card would fall back to painting nothing.
+        compare(Logic.wallpaperUrl("/home/d/my wall.jpg"), "file:///home/d/my%20wall.jpg", "space encoded")
+        compare(Logic.wallpaperUrl("/home/d/a#b.jpg"), "file:///home/d/a%23b.jpg", "fragment char encoded")
+        // ...but the path structure must survive: encoding the slashes would break it entirely.
+        compare(Logic.wallpaperUrl("/a/b/c.jpg"), "file:///a/b/c.jpg", "slashes are left alone")
+        compare(Logic.wallpaperUrl("relative.jpg"), "", "not absolute")
+        compare(Logic.wallpaperUrl(""), "", "readlink found nothing")
+        compare(Logic.wallpaperUrl("\n"), "", "whitespace only")
+        compare(Logic.wallpaperUrl(undefined), "", "never probed")
+    }
+
+    // The bar's transparency lives in the SHELL's config, not ours, and the card falls back
+    // to the menu ground when it is on. Every failure mode must yield false -- "paint the
+    // bar's colour" -- because that is what the code did before this key was consulted.
+    function test_shell_bar_transparency_is_read_defensively() {
+        compare(Logic.shellBarTransparent('{"bar":{"transparent":true}}'), true, "the real case")
+        compare(Logic.shellBarTransparent('{"bar":{"transparent":false}}'), false, "explicitly off")
+        compare(Logic.shellBarTransparent('{"bar":{}}'), false, "bar subtree, no key")
+        compare(Logic.shellBarTransparent('{}'), false, "no bar subtree")
+        compare(Logic.shellBarTransparent('{"bar":"yes"}'), false, "bar is not an object")
+        // THE discriminator against a truthy test: only the boolean true counts, so a config
+        // written by hand with a string does not silently flip the card's background.
+        compare(Logic.shellBarTransparent('{"bar":{"transparent":"true"}}'), false, "string, not bool")
+        compare(Logic.shellBarTransparent('{"bar":{"transparent":1}}'), false, "number, not bool")
+        compare(Logic.shellBarTransparent('not json'), false, "unparseable")
+        compare(Logic.shellBarTransparent(''), false, "missing file")
+    }
+
+    // Config keys are validated, never trusted: an unknown value must fall back rather than
+    // reach a binding. The "left" case is the one that discriminates real validation from
+    // `o.anchor || "center"`, which would happily return "left" and anchor the card nowhere.
+    function test_anchor_accepts_only_the_two_known_modes() {
+        compare(Logic.parseConfig('{"anchor":"bar"}').anchor, "bar", "the opt-in value")
+        compare(Logic.parseConfig('{"anchor":"center"}').anchor, "center", "the default, stated")
+        compare(Logic.parseConfig('{"anchor":"left"}').anchor, "center", "unknown value")
+        compare(Logic.parseConfig('{"anchor":7}').anchor, "center", "wrong type")
+        compare(Logic.parseConfig('{}').anchor, "center", "missing key")
+        compare(Logic.parseConfig('not json').anchor, "center", "unparseable file")
+    }
+
+    // Fed the REAL output of layout(), not hand-written boxes. That is the whole point: a
+    // hand-built input would only prove the function sorts, while saying nothing about whether
+    // boxes that share a row actually carry an identical `y`. If layout() ever computed row y
+    // per-box instead of from one accumulator, hand-built inputs would keep passing while the
+    // stagger tore rows in half on screen.
+    function test_row_ranks_come_from_real_layout_rows() {
+        var mons = []
+        var wss = []
+        for (var m = 0; m < 3; m++) {
+            mons.push({ name: "M" + m, x: 0, y: m * 1080, width: 1920, height: 1080, scale: 1,
+                        reserved: [0, 26, 0, 0], transform: 0 })
+            for (var w = 1; w <= 10; w++)
+                wss.push({ id: m * 10 + w, monitorName: "M" + m, focused: false, occupied: false })
+        }
+        // `params` is the TestCase property already defined at the top of this file, and
+        // layout() reads it as input.params -- omit it and the call throws rather than fails.
+        // There is no availH: layout() takes availW only.
+        var out = Logic.layout({ monitors: mons, workspaces: wss, windows: [],
+                                 focusedMonitorName: "M0", availW: 1876, params: params })
+        var r = Logic.rowRanks(out.boxes)
+        // 10 workspaces at maxCols 5 is two sub-rows per monitor, three monitors. Verified by
+        // executing logic.js directly: the distinct y values are 28, 246, 498, 716, 968, 1186.
+        compare(r.rowCount, 6, "six distinct row y values across the three groups")
+        // THE discriminator between global and per-monitor ranking: monitor 1's first sub-row
+        // must rank 2, not 0. Rank per group and the stagger restarts at every monitor.
+        compare(r.ranks[11], 2, "M1's first sub-row follows M0's two")
+        compare(r.ranks[1], 0, "M0's first sub-row is the top one")
+        compare(r.ranks[6], 1, "M0's second sub-row")
+        // Boxes sharing a row must share a rank exactly -- this is the float-equality claim.
+        compare(r.ranks[1], r.ranks[5], "same sub-row, same rank")
+    }
+
+    function test_row_ranks_survive_a_degenerate_layout() {
+        var r = Logic.rowRanks([])
+        compare(r.rowCount, 0, "no boxes")
+        compare(JSON.stringify(r.ranks), "{}", "no ranks")
+        var bad = Logic.rowRanks([{ workspaceId: 1, y: NaN }, { workspaceId: 2, y: 40 }])
+        compare(bad.ranks[1], 0, "a NaN y ranks first rather than propagating")
+        compare(bad.rowCount, 1, "only the finite y counts as a row")
+    }
+
+    // The stagger's whole observable behaviour. Note what is NOT asserted: any particular
+    // duration. The animation's length lives in Overview.qml; this function only decides how a
+    // shared 0..1 progress is divided between rows.
+    function test_row_phase_staggers_rows_without_lengthening_the_entrance() {
+        // THE discriminator. Get the rank wiring backwards, or drop the stride entirely, and
+        // every row returns the same phase -- which still animates, and still looks plausible,
+        // and is not a stagger at all.
+        verify(Logic.rowPhase(0.3, 1, 3) < Logic.rowPhase(0.3, 0, 3), "row 1 lags row 0")
+        verify(Logic.rowPhase(0.3, 2, 3) < Logic.rowPhase(0.3, 1, 3), "row 2 lags row 1")
+        // Every row completes exactly at the end -- the property that keeps the total fixed
+        // however many rows there are.
+        for (var k = 0; k < 3; k++) compare(Logic.rowPhase(1, k, 3), 1, "row " + k + " done at 1")
+        for (var j = 0; j < 8; j++) compare(Logic.rowPhase(1, j, 8), 1, "8 rows also done at 1")
+        // ...and the last row is genuinely still moving just before the end, so "done at 1" is
+        // not merely the p >= 1 guard firing early for everyone.
+        verify(Logic.rowPhase(0.99, 2, 3) < 1, "the last row is still arriving at 0.99")
+        verify(Logic.rowPhase(0.99, 7, 8) < 1, "still true with more rows")
+    }
+
+    function test_row_phase_is_total_at_the_ends_and_safe_in_between() {
+        compare(Logic.rowPhase(0, 0, 3), 0, "nothing has started")
+        compare(Logic.rowPhase(0, 2, 3), 0, "including the last row")
+        compare(Logic.rowPhase(0.5, 0, 1), 0.5, "a single row just follows progress")
+        // A NaN must leave the grid VISIBLE, not invisible. The opposite default would produce
+        // a card that holds keyboard focus while painting nothing -- the same failure mode
+        // screenMargin's guard exists to prevent.
+        compare(Logic.rowPhase(NaN, 0, 3), 1, "NaN progress")
+        compare(Logic.rowPhase(0.5, NaN, 3), Logic.rowPhase(0.5, 0, 3), "NaN rank ranks first")
+        compare(Logic.rowPhase(0.5, 0, NaN), 0.5, "NaN rowCount degrades to no stagger")
+        compare(Logic.rowPhase(0.5, 99, 3), Logic.rowPhase(0.5, 2, 3), "rank clamps to the last row")
+    }
 }

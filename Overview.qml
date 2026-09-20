@@ -11,6 +11,15 @@ Item {
     id: root
     property bool opened: false
     property var targetScreen: null
+    // The entrance/exit animations drive THIS, not card.scale directly, so that card.scale can
+    // carry a live binding (barMode ? 1 : entranceScale) instead. A running animation's
+    // interpolation is fixed at start and only re-reads from/to on its next loop -- so animating
+    // card.scale directly left a flip INTO bar mode mid-entrance still riding out the stale
+    // 0.96->1 trajectory while width/anchors (ordinary live bindings) snapped to bar geometry
+    // instantly, detaching the card from the screen edges for the rest of that run. Gating
+    // through a live binding on card.scale itself removes that window: the binding re-reads on
+    // every dependency change, not just on the animation's next loop.
+    property real entranceScale: 1
 
     property var boxes: []
     property var handleByAddress: ({})
@@ -63,11 +72,31 @@ Item {
     property color background: Color.menu.background
     property color foreground: Color.menu.text
     property color scrim: Color.menu.scrim
+    // The bar's own ground, a DIFFERENT token from the menu one (Bar.qml:71). Both fall through
+    // to the same base background on a theme without a shell.toml, so they match by accident
+    // there; a theme that sets [bar] background diverges them, and an attached card must follow
+    // the bar.
+    property color barBackground: Color.bar.background
     property color selBackground: Color.menu.selectedBackground
     property color selText: Color.menu.selectedText
     function tone(a) { return Qt.rgba(foreground.r, foreground.g, foreground.b, a) }
-    readonly property color wellColor: tone(Style.normalFillAlpha)      // occupied workspace well
-    readonly property color emptyWellColor: tone(Style.normalFillAlpha / 2)   // one step lower
+    // Tinted glass, used for the wells and the hint ground while the card is wallpaper-backed.
+    // tone() is foreground at 0.04, and 0.02 for an empty well: a lift you can only see against
+    // a flat card. Over a photograph both vanish, and with them the only cue that an empty
+    // workspace is there at all.
+    //
+    // Built on `background` with the accent mixed in at 12%, rather than being accent. Most
+    // themes' accents are LIGHT -- rose-pine's is #ebbcba, luminance 0.78 against a background
+    // of 0.10 -- so an accent-dominant glass would wash the photograph instead of darkening it,
+    // and the numerals (foreground at 0.10 alpha) would come out harder to read, not easier.
+    // 12% is enough to read as a deliberate tint and not enough to stop it working.
+    function glass(a) {
+        var m = Logic.glassMix(background, accent)
+        return Qt.rgba(m.r, m.g, m.b, a)
+    }
+    readonly property color wellColor: wallpaperBacked ? glass(0.55) : tone(Style.normalFillAlpha)
+    readonly property color emptyWellColor: wallpaperBacked ? glass(0.40)
+                                                            : tone(Style.normalFillAlpha / 2)
     // Typography follows the shell: the menu family and the theme's size tokens, so the picker
     // tracks `omarchy display text size` like every other summoned surface.
     readonly property string fontFamily: Style.font.menuFamily
@@ -75,7 +104,7 @@ Item {
     readonly property int captionSize: Style.font.caption
     // Well under a drag: the only workspace-level drop cue (tiled drops also preview the
     // insertion half on the anchor tile), so it must read even on the focused workspace.
-    readonly property color dropWellColor: tone(Style.selectedFillAlpha)
+    readonly property color dropWellColor: wallpaperBacked ? glass(0.75) : tone(Style.selectedFillAlpha)
     readonly property color hairline: tone(0.12)                          // between previews
     readonly property color accent: selText
     readonly property bool darkTheme:
@@ -244,6 +273,77 @@ Item {
         maxCols: 5, minCellW: 140, maxCellW: 380, cellInset: 3, cellSpacing: 4,
         rowSpacing: 8, headerH: 22, groupInset: 6, minTileW: 8, minTileH: 6, slotGapTolerance: 24
     })
+    // ---- Bar attachment ------------------------------------------------------------------
+    // The reserved TOP strip of the screen the picker is ON. The overlay is an Overlay-layer
+    // surface with exclusionMode Ignore, so panel.height is the WHOLE screen and the bar sits
+    // underneath it; `reserved` is the only thing that says where the bar ends.
+    //
+    // Resolved through targetScreen, NOT through Hyprland.focusedMonitor. open() captures
+    // targetScreen once, but focus keeps moving: focus landing on a monitor that reserves a
+    // different amount — or nothing — would otherwise re-anchor the card, resize its height cap
+    // and flip bar mode off underneath an open picker.
+    //
+    // monitorEpoch is the dependency, exactly as the reminder frame's binding uses it:
+    // monitorFor() is a one-shot C++ invokable and nothing notifies QML when Hyprland REPLACES
+    // the monitor object for a screen, so without it this keeps a stale or null pointer.
+    readonly property int reservedTop: {
+        var m = (root.monitorEpoch,
+                 root.targetScreen ? Hyprland.monitorFor(root.targetScreen) : null)
+        var r = m && m.lastIpcObject ? m.lastIpcObject.reserved : null
+        return (r && r.length > 1 && isFinite(r[1]) && r[1] > 0) ? Math.round(r[1]) : 0
+    }
+    // No top bar to hang from (a side, bottom or hidden bar) means no attachment: the picker
+    // keeps the centred card rather than squaring itself against nothing.
+    readonly property bool barMode: config.anchor === "bar" && reservedTop > 0
+    // A transparent bar shows the WALLPAPER, because its exclusion zone keeps windows out of
+    // that strip. The card covers a region full of windows, so it cannot be transparent in the
+    // same way -- you would read the grid over the very windows it depicts. It paints the
+    // wallpaper instead: what the bar SHOWS, rather than what happens to be behind us.
+    // We WANT the wallpaper: bar mode, a transparent bar, and a resolved path. This drives the
+    // Image's source so it can start loading -- it says nothing about whether it succeeded.
+    readonly property bool wallpaperWanted:
+        barMode && config.barTransparent && config.wallpaperUrl !== ""
+    // ...and it is actually ON SCREEN. Everything visual keys off THIS, never off `wanted`.
+    //
+    // `readlink -f` yields a path for a broken symlink too, and exits 0 doing it, so a deleted
+    // or unreadable wallpaper still produces a perfectly good-looking URL. Going transparent on
+    // the strength of that leaves the card see-through with nothing painted behind it: the
+    // workspace grid drawn over the live windows it depicts, which is the single outcome this
+    // whole design exists to avoid. So the card stays opaque until the image says Ready.
+    readonly property bool wallpaperBacked:
+        wallpaperWanted && wallpaperBack.status === Image.Ready
+
+    // Key-hint contrast. HintCap's defaults (cap 0.75, label 0.45) are tuned for a flat card,
+    // where the label being quiet is the point. Over a wallpaper -- especially a bright one --
+    // 0.45 of the foreground washes out entirely and the hints stop being readable. Both are
+    // raised together so the cap stays louder than the label it belongs to; raising only the
+    // label would invert the hierarchy and make the words shout over the keys.
+    readonly property real hintCapOpacity: wallpaperBacked ? 0.95 : 0.75
+    readonly property real hintLabelOpacity: wallpaperBacked ? 0.78 : 0.45
+    // One progress for the whole bar-mode entrance; every row derives its own phase from it.
+    // Root-level and not per-delegate: tilesModel and boxesModel are reconciled IN PLACE, so
+    // delegates persist across rebuilds and a per-delegate Component.onCompleted would fire once
+    // at startup and never again. It also means a mid-session rebuild cannot replay the
+    // entrance — progress is already 1 by then.
+    // How far the bar-mode card has unfurled, 0..1. Its top stays pinned to the bar and its
+    // HEIGHT grows, so the rows are uncovered from the top down, the way a blind comes down.
+    //
+    // A rigid slide was the obvious alternative and is wrong: a card translating down from
+    // above the bar shows its BOTTOM edge first (content is visible only where local
+    // y >= (1 - p) * height), so the LAST row would appear before the first and the reveal
+    // would read upside down.
+    //
+    // Nothing is painted above the bar either way, so this needs no clipping wrapper -- which
+    // matters, because this surface is WlrLayer.Overlay and the bar is WlrLayer.Top, so
+    // anything drawn above the bar's edge would be drawn OVER the bar.
+    property real entranceOpen: 1
+    NumberAnimation {
+        id: openAnim
+        // motion.move, not motion.entrance: the entrance easing carries an overshoot, and an
+        // overshoot on a HEIGHT would open past the content and snap back.
+        target: root; property: "entranceOpen"
+        from: 0; to: 1; duration: root.motion.enter; easing.type: root.motion.move
+    }
     // Backdrop behind the focused monitor's group: a whisper of accent, so which screen is
     // live reads peripherally without touching the three well shades.
     readonly property color groupBackdropColor: Qt.rgba(accent.r, accent.g, accent.b, 0.08)
@@ -259,7 +359,9 @@ Item {
     // previously disagreed by 2 * card.pad, which is how the grid came to sit 10 px from the
     // edge of a 1920-logical screen (a 4K panel at 2x).
     readonly property real availCanvasW:
-        panel.width > 0 ? panel.width - 2 * card.pad - 2 * Logic.screenMargin(panel.width) : 1600
+        panel.width > 0
+            ? panel.width - 2 * card.pad - (root.barMode ? 0 : 2 * Logic.screenMargin(panel.width))
+            : 1600
     onAvailCanvasWChanged: if (opened) rebuild()
 
     function focusedScreen() {
@@ -1499,6 +1601,13 @@ Item {
         if (typeof Hyprland.refreshMonitors === "function") Hyprland.refreshMonitors()
         config.probeMotion()                       // async; result lands for this or the next open
         targetScreen = focusedScreen(); hideScratchpad(); selectedIndex = -1; opened = true
+        // The staged entrance is bar-mode only: a top-down stagger under a card that scales from
+        // its centre reads as a bug. With motion off, progress is SET, never animated — an
+        // unplayed animation would leave every row at 0, i.e. an invisible grid.
+        config.probeWallpaper()          // a theme switch between summons must not show the old one
+        openAnim.stop()
+        if (root.barMode && root.motion.enabled) { root.entranceOpen = 0; openAnim.start() }
+        else root.entranceOpen = 1
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
@@ -1545,7 +1654,12 @@ Item {
             return
         }
         enterAnim.stop(); exitAnim.stop()
-        card.scale = 1
+        root.entranceOpen = 1
+        root.entranceScale = 1                     // NEVER card.scale = 1 here: card.scale now
+                                                     // carries a live binding, and an imperative
+                                                     // assignment to a bound property destroys
+                                                     // the binding permanently (same failure
+                                                     // shape as the ternary-anchor bug).
         card.opacity = on ? 1 : 0
         scrimRect.opacity = on ? 1 : 0
     }
@@ -1555,7 +1669,11 @@ Item {
                           duration: root.motion.normal; easing.type: root.motion.move }
         NumberAnimation { target: card; property: "opacity"; to: 1
                           duration: root.motion.enter; easing.type: root.motion.move }
-        NumberAnimation { target: card; property: "scale"; from: 0.96; to: 1
+        // Animates entranceScale, not card.scale: card.scale is a live binding
+        // (barMode ? 1 : entranceScale) so a mid-flight mode flip is picked up instantly instead
+        // of waiting for this animation's stale trajectory to finish (see entranceScale's
+        // comment). Values are unconditional again -- the mode-awareness moved to the binding.
+        NumberAnimation { target: root; property: "entranceScale"; from: 0.96; to: 1
                           duration: root.motion.enter; easing.type: root.motion.entrance
                           easing.overshoot: root.motion.overshoot }
     }
@@ -1565,7 +1683,7 @@ Item {
                           duration: root.motion.exit; easing.type: root.motion.move }
         NumberAnimation { target: card; property: "opacity"; to: 0
                           duration: root.motion.exit; easing.type: root.motion.move }
-        NumberAnimation { target: card; property: "scale"; to: 0.98
+        NumberAnimation { target: root; property: "entranceScale"; to: 0.98
                           duration: root.motion.exit; easing.type: root.motion.move }
     }
     // Ask Hyprland for fresh client data, then rebuild every 60ms until five quiet ticks have
@@ -1718,7 +1836,12 @@ Item {
         Region { id: emptyRegion }
         exclusionMode: ExclusionMode.Ignore
 
-        Rectangle { id: scrimRect; anchors.fill: parent; color: root.scrim; visible: config.scrim; opacity: 0 }
+        // Starts BELOW the bar when the card is attached to it: a card meeting a dimmed bar
+        // reads as covering it, not as hanging from it, which is the whole point of attaching.
+        Rectangle { id: scrimRect
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom
+                              top: parent.top; topMargin: root.barMode ? root.reservedTop : 0 }
+                    color: root.scrim; visible: config.scrim; opacity: 0 }
         MouseArea { anchors.fill: parent; enabled: root.opened; onClicked: root.close() }
 
         // A 28% shadow reads on light themes but vanishes on dark ones (Tokyo Night sweep),
@@ -1728,21 +1851,76 @@ Item {
         // lift off the desktop now that there is real air around it. Reverted after looking at
         // it: raising blur, offset and alpha together was too much, and the border added below
         // already does the lifting the deeper shadow was for. Doing both was double.
-        SoftShadow { target: card; scale: card.scale; opacity: card.opacity
-                     color: Qt.rgba(0, 0, 0, root.darkTheme ? 0.55 : 0.28) }
+        SoftShadow {
+            id: cardShadow
+            target: card; scale: card.scale; opacity: card.opacity
+            // In bar mode the halo must not reach ABOVE the card. This surface is
+            // WlrLayer.Overlay and the bar is WlrLayer.Top, so whatever the shadow paints above
+            // the card's top edge lands on the bar itself. The halo reaches `blur - offset.y`
+            // upward, which at the defaults is 28 - 6 = 22 px: almost the whole of a 26 px bar,
+            // darkened at up to 0.55 alpha. That reads as the card and the bar not matching --
+            // in EVERY theme, and whether the bar is painting a colour or showing the desktop,
+            // because it darkens the bar either way. Pushing the offset out to the blur radius
+            // puts the halo's top edge exactly on the card's, leaving the shadow only below.
+            // Expressed against `blur` rather than as a literal so the two cannot drift.
+            offset: Qt.vector2d(0, root.barMode ? blur : 6)
+            color: Qt.rgba(0, 0, 0, root.darkTheme ? 0.55 : 0.28)
+        }
         Rectangle {
             id: card
-            anchors.centerIn: parent
-            radius: root.cardRadius
-            color: root.background
+            anchors.horizontalCenter: parent.horizontalCenter
+            // NOT a ternary pair (`verticalCenter: barMode ? undefined : parent.verticalCenter` /
+            // `top: barMode ? parent.top : undefined`). A QML binding that evaluates to
+            // `undefined` is DESTROYED, not merely skipped for that one evaluation, so such a pair
+            // survives exactly one mode flip and then stays corrupt — silently, no anchor-conflict
+            // warning — for the rest of the card's life. `card` is never recreated across
+            // open()/close(), and `barMode` can flip live (hiding the bar while the picker is open
+            // drops `reservedTop` to 0), so this is reachable, not theoretical. `AnchorChanges`
+            // inside a `State` exists precisely because anchors can't be rebound by a ternary; it
+            // reverses cleanly on state exit.
+            anchors.verticalCenter: parent.verticalCenter
+            states: State {
+                name: "bar"
+                when: root.barMode
+                AnchorChanges {
+                    target: card
+                    anchors.verticalCenter: undefined
+                    anchors.top: card.parent.top
+                }
+            }
+            anchors.topMargin: root.reservedTop
+            // Full width in bar mode. Setting `width` overrides the implicitWidth binding, so
+            // the Behavior on implicitWidth goes inert there — correct, since the width is the
+            // screen and must never animate.
+            width: root.barMode ? panel.width : implicitWidth
+            // Square against the bar, and no border of its own: with no radius there are no top
+            // corners to hide, so nothing is ever painted OVER the card. That matters because
+            // barBackground may carry alpha, and two stacked translucent fills composite darker
+            // than one (two at 50% give 75%), which is what a cover-up strip would produce.
+            radius: root.barMode ? 0 : root.cardRadius
+            border.width: root.barMode ? 0 : 1
+            // Three grounds. Wallpaper-backed, the Rectangle paints nothing and the Image
+            // below is the ground. Attached to an opaque bar, the bar's own token. Otherwise
+            // the menu ground, which is also the fallback when the wallpaper cannot be resolved.
+            color: root.wallpaperBacked ? "transparent"
+                 : (root.barMode && !config.barTransparent) ? root.barBackground
+                 : root.background
             // With real air around the card it must read as elevated rather than as a lighter
             // rectangle. Accent-derived rather than a fixed neutral: a black hairline looks like
             // a bug on a light card and a white one vanishes on it. `accent` is already
             // `selText` and already tracks the theme, so this needs no new colour. One logical
             // px is two device px at 2x — crisp at exactly the scale that reported the problem.
-            border.width: 1
             border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
             opacity: 0        // the entrance brings it in; panel.visible follows this
+            // A live binding, not the animation target itself: pins to 1 the instant barMode
+            // goes true even mid-animation, rather than riding out entranceScale's in-flight
+            // trajectory. See entranceScale's declaration for why that distinction matters.
+            scale: root.barMode ? 1 : root.entranceScale
+            // The unfurl: the card's top is pinned to the bar and its height grows, so `clip`
+            // is what uncovers the rows from the top down. The Flickable inside keeps its
+            // RESTING height (see its own comment) -- it is revealed, never squashed.
+            clip: root.barMode
+            height: root.barMode ? Math.round(root.entranceOpen * implicitHeight) : implicitHeight
             readonly property int pad: Math.round(Style.space(12))
             // Space under the grid for the key hints or, while a query is active, the find
             // bar. Reserves the larger of the two whenever either could show, so swapping one
@@ -1769,7 +1947,10 @@ Item {
             // allowed to widen a narrow card so the key hints are not clipped. The HEIGHT cap
             // does real work whenever there are enough monitor groups to overflow.
             readonly property real maxCardW: panel.width  > 0 ? panel.width  - 2 * Logic.screenMargin(panel.width)  : 1616
-            readonly property real maxCardH: panel.height > 0 ? panel.height - 2 * Logic.screenMargin(panel.height) : 900
+            readonly property real maxCardH: panel.height > 0
+                ? panel.height - (root.barMode ? root.reservedTop + Logic.screenMargin(panel.height)
+                                               : 2 * Logic.screenMargin(panel.height))
+                : 900
             // The hint row never widens past the screen (maxCardW still caps it), but it does
             // widen a narrow card: a layout with few/narrow workspaces must not clip the eight
             // key hints against the card edge.
@@ -1781,7 +1962,38 @@ Item {
                 NumberAnimation { duration: root.motion.normal; easing.type: root.motion.move } }
             Behavior on implicitHeight { enabled: root.layoutMotion
                 NumberAnimation { duration: root.motion.normal; easing.type: root.motion.move } }
+            // The wallpaper, sized and placed against the PANEL rather than the card and
+            // lifted by the bar's height. That makes it the same crop of the same image at the
+            // same screen position as the real wallpaper behind the bar, so the two are
+            // continuous across the seam instead of merely similar. Declared first so every
+            // other child paints over it; the card's own `clip` reveals it during the unfurl,
+            // which is why it stays still while the card grows rather than sliding with it.
+            Image {
+                id: wallpaperBack
+                visible: root.wallpaperBacked
+                x: 0; y: -root.reservedTop
+                width: panel.width; height: panel.height
+                // `wanted`, not `backed`: the source has to load before it can be Ready, and
+                // `backed` depends on that status. Keying the source off `backed` would be a
+                // binding loop that never resolves -- it could never start loading.
+                source: root.wallpaperWanted ? config.wallpaperUrl : ""
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                cache: true
+            }
+
             MouseArea { anchors.fill: parent; onClicked: {} }
+
+            // The card's only visible edge in bar mode: the top is the join with the bar, the
+            // sides are the screen edges. A child rather than the card's own border, because the
+            // border would also draw down both sides and along the join.
+            Rectangle {
+                id: bottomRule
+                visible: root.barMode
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: 1
+                color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
+            }
 
             Item {
                 id: keyCatcher
@@ -1986,9 +2198,26 @@ Item {
 
             Flickable {
                 id: flick
-                x: card.pad; y: card.pad
-                width: card.width - card.pad * 2
-                height: card.height - card.pad * 2 - card.hintSpace
+                // Centred on the card when the grid is narrower than the room available.
+                // layout() lays boxes out from x = 0 and the canvas is exactly the grid's
+                // width. In centred mode the card shrinks to the grid, so there is never any
+                // slack; a full-width bar-mode card leaves the difference -- 108 px on a
+                // 2048-logical panel, where maxCellW caps the cells at 380 before the width
+                // runs out -- and the grid would hug the left edge.
+                //
+                // It is the FLICKABLE that moves, not the canvas: pointerPoint() maps the
+                // pointer through `flick` and then calls the result canvas coordinates, which
+                // is only true while canvas.x is 0. Offsetting the canvas would silently break
+                // every hit test and the drag.
+                readonly property real avail: card.width - card.pad * 2
+                width: Math.min(canvas.implicitWidth, avail)
+                x: card.pad + Math.round(Math.max(0, (avail - width) / 2))
+                y: card.pad
+                // card.implicitHeight, NOT card.height: during the unfurl the card is shorter
+                // than its content, and sizing the viewport from the animated height would
+                // drive it toward zero -- onContentHeightChanged's clamp would then scroll the
+                // grid mid-animation and leave contentY wrong once it settled.
+                height: card.implicitHeight - card.pad * 2 - card.hintSpace
                 contentWidth: canvas.implicitWidth
                 contentHeight: canvas.implicitHeight
                 boundsBehavior: Flickable.StopAtBounds
@@ -2068,6 +2297,10 @@ Item {
                             color: isDrop ? root.dropWellColor
                                  : model.focused ? root.selBackground
                                  : model.occupied ? root.wellColor : root.emptyWellColor
+
+                            // Arrival phase for this box's row. A Translate, not a `y` change:
+                            // the y binding already carries the layout-motion Behavior, and the
+                            // entrance must never fight a glide still in flight.
 
                             // big low-contrast numeral, only where nothing would hide it
                             Text {
@@ -2180,6 +2413,8 @@ Item {
                             matched: model.matched
                             selectedMatch: model.selectedMatch
                             cursorTarget: model.cursor
+                            // Tiles take their BOX's rank, looked up by workspace id, so a tile
+                            // can never stagger out of step with the well it sits in.
                             closing: model.closing
                             dimmed: root.query.length > 0 && !model.matched && root.dropTargetAddress !== model.address
                             accent: root.accent
@@ -2423,6 +2658,20 @@ Item {
 
             // key hints: two tiers. The primary row is what a new user needs; `?` reveals the
             // advanced keys, which would otherwise crowd it past the card width on a laptop.
+            // A ground for whichever of the two bars is showing, while the card is
+            // wallpaper-backed. Both are bare text, and bare text on a photograph is not
+            // readable. Same glass as the wells, so the card reads as one material. Declared
+            // before them so it paints behind, and sized to whichever is visible.
+            Rectangle {
+                id: bottomBarGlass
+                visible: root.wallpaperBacked && (hintBox.visible || findBar.visible)
+                readonly property Item subject: hintBox.visible ? hintBox : findBar
+                x: subject.x - 14; y: subject.y - 7
+                width: subject.width + 28; height: subject.height + 14
+                radius: root.boxRadius
+                color: root.glass(0.55)
+            }
+
             Column {
                 id: hintBox
                 visible: config.hint && !card.findActive
@@ -2447,7 +2696,9 @@ Item {
                                  { k: "esc", l: "close" },
                                  { k: "?", l: root.hintsExpanded ? "less" : "more" } ]
                         HintCap { foreground: root.foreground; fill: root.wellColor
-                                  fontFamily: root.fontFamily; fontSize: root.captionSize }
+                                  fontFamily: root.fontFamily; fontSize: root.captionSize
+                                  capOpacity: root.hintCapOpacity
+                                  labelOpacity: root.hintLabelOpacity }
                     }
                 }
                 Row {
@@ -2461,7 +2712,9 @@ Item {
                                  { k: "right-click", l: "menu" },
                                  { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" } ]
                         HintCap { foreground: root.foreground; fill: root.wellColor
-                                  fontFamily: root.fontFamily; fontSize: root.captionSize }
+                                  fontFamily: root.fontFamily; fontSize: root.captionSize
+                                  capOpacity: root.hintCapOpacity
+                                  labelOpacity: root.hintLabelOpacity }
                     }
                 }
             }
