@@ -64,7 +64,8 @@ Use `var`. No arrow functions, no template literals, no classes. The 161 backtic
 all markdown prose inside comments, not template literals.
 
 This started as necessity — Qt 6.4 was the compatibility floor and its JS parser was what CI
-compiled against — and stays as convention now that the floor is 6.9
+compiled against — and stays as convention now that the floor is 6.9 (whether to modernise is
+omascape#37)
 ([[adrs/0004-qt-compatibility-floor]]): one dialect, no per-feature version lookups. The same
 record carries the identifier rule: never name a variable `long`, `short`, `int`, `char`,
 `float`, `double`, `byte`, `boolean`, `final` or `native`. On 6.9 the lexer rejects them only in

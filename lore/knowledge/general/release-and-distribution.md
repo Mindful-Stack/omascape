@@ -142,11 +142,11 @@ history is an un-updatable install. Protection is also the only practical way to
 "do not merge for a few days" is a message in a thread, while an enforced rule is not something a
 green PR can talk you past.
 
-> **Not yet enabled.** As of 2026-09-20 the GitHub API reports "Branch not protected" for `main`,
-> so neither rule is enforced and the convention rests on habit. It is a repository settings
-> change, not a code change: Settings → Branches → add a rule for `main` requiring `logic-tests`
-> and disallowing force-pushes. Until then, treat the two rules above as binding anyway — the
-> consequences land on users, not on the repository.
+Enabled 2026-09-20, after omascape#30 merged: the branch protection rule on `main` requires the
+`logic-tests` check (non-strict, so a PR need not be rebased onto the newest `main` to merge),
+blocks force-pushes and deletions, and does not require reviews — a solo repository would only
+be blocking itself. Admins are not exempt from the force-push block. Because a direct push
+cannot carry a passing check, every change to `main` now arrives through a PR.
 
 ## See also
 

@@ -146,8 +146,9 @@ inferred from one machine, never observed:
   scale conversion was checked on `eDP-1` only (`ROADMAP.md` item 1); an unconfigured hotplugged
   monitor is a known, uncaptured misbehaviour (`ROADMAP.md` item 15).
 
-Each is a Tier 2 case waiting to be written. Until then, a change that touches one of them is
-changing behaviour nobody has seen.
+Each is a Tier 2 case waiting to be written — tracked as omascape#38 (Move and Swap),
+omascape#39 (`special:` names) and omascape#40 (the docked layout). Until then, a change that
+touches one of them is changing behaviour nobody has seen.
 
 ## See Also
 
