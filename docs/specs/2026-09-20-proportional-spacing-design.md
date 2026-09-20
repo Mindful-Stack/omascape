@@ -2,7 +2,8 @@
 
 Date: 2026-09-20 · Target: Omarchy Quattro, Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1 ·
 builds on the bar drop-down (`docs/specs/2026-09-19-bar-dropdown-design.md`).
-Status: **approved, not yet implemented** (brainstorm 2026-09-20).
+Status: **approved, not yet implemented** (brainstorm 2026-09-20; review corrections applied the
+same day — integer fitting, the missing-width fallback, and the external-screen figures).
 
 ## Goal
 
@@ -14,9 +15,9 @@ where the tiles are the flexible part.
 ## Scope
 
 **In:** a gap that is a fraction of the cell width; edge padding equal to one gap, inside the
-canvas; cell width derived from what is left; the row spacing between sub-rows, between monitor
-groups and above the scratchpad following the same gap; `maxCellW` raised from a size to a sanity
-cap; tests; the README's note on layout constants.
+canvas; cell width derived from what is left, fitted to whole pixels; the row spacing between
+sub-rows, between monitor groups and above the scratchpad following the same gap; `maxCellW`
+raised from a size to a sanity cap; tests; the README's note on layout constants.
 
 **Out:** a config key for the ratio (it is a params constant, tuned by eye); top and bottom
 padding inside the card (stays `card.pad`, revisit by eye after the sweep); `cellInset`, `headerH`
@@ -47,32 +48,49 @@ the middle of it, which reads as cramped precisely because the room is there and
   the laptop's width with 4 px gaps, the very look being fixed); `space-evenly` (edges would take
   the same share as gaps, which is what the ratio does anyway, more simply).
 
-- **Edge padding equals one gap, inside the canvas.** The canvas is `2·gap + cols·cw +
-  (cols−1)·gap` wide and boxes start at `x = gap`. Putting the edge in `layout()` rather than in
-  the QML keeps the invariant the Flickable comment states: the canvas starts at x = 0, so every
-  hit test and the drag keep working. The Flickable still centres a canvas narrower than the
-  card, which is the only case where slack now exists (below).
+- **Edge padding equals one gap, inside the canvas.** The canvas is `cols·cw + (cols+1)·gap`
+  wide and boxes start at `x = gap`. Putting the edge in `layout()` rather than in the QML keeps
+  the invariant the Flickable comment states: the canvas starts at x = 0, so every hit test and
+  the drag keep working. The Flickable still centres a canvas narrower than the card.
 
-- **Cell width takes what is left.** A row of `n` cells at width `w` is `w·(n + (n+1)·r)` wide.
-  So `cols` is the largest `n ≤ maxCols` with `minCellW·(n + (n+1)·r) ≤ availW`, floored at 1,
-  and `cw = clamp(floor(availW / (cols + (cols+1)·r)), minCellW, maxCellW)`. Then
-  `gap = round(cw · r)`.
+- **Cell width takes what is left, fitted to whole pixels.** Written as integers throughout,
+  because the review of the first draft found the real-valued version overflowing the viewport
+  by 1–2 px at both of the author's widths. The rule, in the order it runs:
 
-  | screen (bar mode, `availW`) | today `cw` / gap | **new `cw` / gap** | row height (16:10) |
-  |---|---|---|---|
-  | laptop, 2024 | 380 / 4 | **369 / 30** | 231 |
-  | external, 2536 | 380 / 4 | **463 / 37** | 289 |
-  | 4K at 1×, 3816 | 380 / 4 | **696 / 56** | 435 |
-  | laptop, centred card, 1820 | 360 / 4 | **332 / 27** | 208 |
+  1. `gapMin = round(minCellW · r)` — the gap the narrowest legal cell would get (11 at
+     140 × 0.08).
+  2. `cols = clamp(floor((availW − gapMin) / (minCellW + gapMin)), 1, maxCols)` — the most
+     columns of minimum cells that fit *including both outer gaps*, i.e. the largest `n` with
+     `n·minCellW + (n+1)·gapMin ≤ availW`.
+  3. `cw = clamp(floor(availW / (cols + (cols+1)·r)), minCellW, maxCellW)`, then
+     `gap = round(cw · r)`.
+  4. **Fit:** while `cols·cw + (cols+1)·gap > availW` and `cw > minCellW`, decrement `cw` and
+     recompute `gap`. The real-valued estimate overshoots by at most `(cols+1)/2` px from the
+     gap's rounding, and one step of `cw` removes at least `cols` px, so the loop runs at most
+     once — verified by sweeping every `availW` from 162 to 8000: no overflow, never more than
+     one step. The only way the canvas is ever wider than `availW` is `minCellW` binding, and
+     then it overflows exactly as the pixel model already does.
 
-  The cost, stated plainly: the laptop's tiles shrink 380 → 369 in bar mode and 360 → 332
+  The canvas is therefore **never wider than `availW`** (bar the `minCellW` case) and at most
+  `2·cols + 1` px narrower when the cap does not bind: the overshoot the fit step removed plus
+  what the step over-removed. That remainder is centred by the Flickable, as slack is today.
+
+  | screen (bar mode, `availW`) | today `cw` / gap | **new `cw` / gap** | canvas | row height (16:10) |
+  |---|---|---|---|---|
+  | laptop, 2024 | 380 / 4 | **368 / 29** (one fit step) | 2014 | 230 |
+  | external, 2536 | 380 / 4 | **462 / 37** | 2532 | 289 |
+  | 4K at 1×, 3816 | 380 / 4 | **696 / 56** | 3816 | 435 |
+  | laptop, centred card, 1820 | 360 / 4 | **331 / 26** (one fit step) | 1811 | 207 |
+
+  The cost, stated plainly: the laptop's tiles shrink 380 → 368 in bar mode and 360 → 331
   centred, to pay for the gap. The ratio is the one knob; 0.08 was picked from these numbers,
   not from a screen, and the first restart may move it.
 
 - **`maxCellW` becomes a sanity cap: 800.** It never binds on anything up to 4K at 1× (696).
-  Past it — an 8K panel, a 6000-logical ultrawide — cells stop growing, the canvas is narrower
-  than the card, and the Flickable centres it as today. This is the only path that still produces
-  slack, and the bar-mode centring test moves there.
+  Past it — an 8K panel, a 6000-logical ultrawide — cells stop growing (`availW` 6000: `cw` 800,
+  gap 64, canvas 4384), the canvas is narrower than the card, and the Flickable centres it as
+  today. This is the only path that still produces large slack, and the bar-mode centring test
+  moves there.
 
 - **Vertical spacing follows the gap.** `rowSpacing` between sub-rows of one group, between
   monitor groups, and above the scratchpad group all become `gap`. A 5×2 grid with 37 px between
@@ -88,51 +106,60 @@ the middle of it, which reads as cramped precisely because the room is there and
 
 ## Changes
 
-- `logic.js` `layout()`: the `cols` / `cw` / `gap` derivation above; `rowGap` variable replacing
-  the three `P.rowSpacing` reads; `edge` added to every box `x` and every group `x`; `canvasW`
-  includes `2·edge`. Guard `gapRatio` with `isFinite` like every other input.
+- `logic.js` `layout()`: the derivation above; `rowGap` variable replacing the three
+  `P.rowSpacing` reads; `edge` added to every box `x` and every group `x`; `canvasW` includes
+  `2·edge`. Guard `gapRatio` with `isFinite` like every other input.
 - `Overview.qml` params: `gapRatio: 0.08`, `maxCellW: 800`. `cellSpacing` and `rowSpacing` stay,
   now documented as the fallback. The Flickable comment about 108 px of slack on a 2048 panel is
-  rewritten: slack now only exists when `maxCellW` binds.
+  rewritten: slack is now the fit step's few pixels, or `maxCellW` binding.
 - `README.md` "Layout constants" sentence names `gapRatio`.
 - `lore/knowledge/general/layout-and-sizing.md` gains the ratio rule under "A maximum is a cap,
   not a floor" (through the KB's PR flow, `make validate`).
 
 ## Edge cases
 
-- **One column.** `cols` = 1: the row is `2·gap + cw` wide, `cw = availW / (1 + 2r)`. Edges
-  still apply, so a single tile does not touch the card.
+- **One column.** `cols` = 1: the row is `cw + 2·gap` wide, `cw = floor(availW / (1 + 2r))`,
+  fitted. Edges still apply, so a single tile does not touch the card.
 - **Widest group narrower than `cols`.** A group with three workspaces on a five-column layout
   keeps the five-column pitch (columns line up across groups) and its canvas is centred by the
   Flickable, as today.
-- **`availW` missing.** The existing fallback (`maxCols·minCellW + (maxCols−1)·gap`) stays; in
-  ratio mode it is computed with `gap = round(minCellW · r)` so `cols` still resolves to `maxCols`
-  and `cw` to `minCellW`. Finite geometry either way.
+- **`availW` missing or not positive.** The fallback is `maxCols·minCellW + (maxCols+1)·gapMin`
+  — 766 at the chosen params, *both* outer gaps included. Step 2 then resolves `cols` to
+  `maxCols` exactly (the first draft's fallback omitted the edges and lost a column to the
+  real-valued column test; the integer step 2 is what makes it consistent), step 3 clamps `cw`
+  to `minCellW`, and the canvas is exactly 766: finite, valid geometry, one column short of
+  nothing.
 - **`minCellW` binds.** A very narrow screen: `cw` = 140, `gap` = 11, and the row may overflow
-  `availW` by a few pixels exactly as the pixel model already can — the Flickable scrolls it.
-- **Rounding.** `cw` floors, `gap` rounds; the canvas can be up to `cols + 1` px narrower than
-  `availW`, which the Flickable centres. Never wider.
+  `availW`, exactly as the pixel model already can — the Flickable scrolls it. `cols` drops to 1
+  before that, so it takes an `availW` under 162 to reach it.
+- **Rounding.** Covered by the fit step above: never wider, at most `2·cols + 1` narrower.
 
 ## Tests
 
 Tier 1, `tests/tst_layout.qml`, ratio on:
 
-- the three bar-mode rows of the table above, pinned: `cw`, `gap`, box `x` for the first two
-  columns (`gap` and `gap + cw + gap`), `canvasW` = `availW` minus rounding
+- the four rows of the table above, pinned: `cw`, `gap`, canvas width, box `x` for the first two
+  columns (`gap` and `gap + cw + gap`). The two one-fit-step rows (2024 and 1820) are the ones
+  the review found overflowing, so they are the ones that prove the fit step
+- a sweep: for every integer `availW` from 162 to 4384 (the cap's threshold), the canvas is
+  `≤ availW` and `≥ availW − (2·cols + 1)`; a single loop, one assertion each way, stated as the
+  property it is
+- `availW` missing (absent, `0`, negative, `NaN`): `cols` = 5, `cw` = 140, `gap` = 11, canvas 766
 - `rowSpacing` is ignored in ratio mode: second sub-row `y` = `gch + gap`; second monitor group
   `y` accounts for `gap`, not `rowSpacing`; scratchpad group likewise
-- `maxCellW` binds on a 6000 `availW`: `cw` = 800, `canvasW` < `availW`
-- `cols` drops below `maxCols` when `minCellW·(n + (n+1)·r)` no longer fits, and floors at 1
+- `maxCellW` binds on a 6000 `availW`: `cw` = 800, `gap` = 64, canvas 4384
+- `cols` drops below `maxCols` when `n·minCellW + (n+1)·gapMin` no longer fits (at 765 it is 4,
+  at 766 it is 5), and floors at 1
 - `gapRatio` absent, `0`, `NaN`, `Infinity`, a string: output identical to the pixel model, byte
   for byte against a run without the key
-- every box and group is finite for every row above (the NaN floor)
+- every box and group is finite for every case above (the NaN floor)
 
 Tier 1, `tests/ui/dropdown.qml`:
 
 - `test_the_grid_is_centred_when_narrower_than_the_card` seeds a panel wide enough for
   `maxCellW` to bind (6000 logical) instead of 2048, keeping its slack precondition honest
-- a new test at 2048: the canvas fills the card to within `cols + 1` px, and the first box starts
-  at `card.pad + gap`, not at `card.pad`
+- a new test at 2048: the canvas fills the card to within `2·cols + 1` px, and the first box
+  starts at `card.pad + gap`, not at `card.pad`
 
 Sweep by eye after `mise run link` and a restart on both screens: the ratio, and whether the top
 padding wants to follow the gap (out of scope here, noted for the sweep).
