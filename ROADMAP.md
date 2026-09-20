@@ -104,6 +104,11 @@ with a staggered per-row entrance, and resolves the reservation through the pick
 `targetScreen` — captured once at `open()` — rather than live focus, so a focus change to another
 monitor can't re-anchor or resize an open picker underneath the user.
 
+### 13. ~~Activate: select first, enter second~~ ✅ done (2026-09-19)
+`activate` config key: `"enter"` (default, unchanged) jumps/focuses immediately; `"select"`
+makes a digit or a click select instead, committed with `Enter`, the same digit again, or a
+double-click; see `docs/specs/2026-09-18-activate-select-design.md`.
+
 ## Maintenance gotchas (verified in-session)
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell
   rescanPlugins` reloads the registry but NOT the live QML component.

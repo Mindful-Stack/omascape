@@ -546,9 +546,15 @@ Item {
         }
         return out
     }
+    // The `selectMode` short-circuit below is an OPTIMISATION, not a second line of defence: the
+    // rule itself lives in Logic.target, which is handed the same flag and skips its pointer
+    // branch on it. Skipping the hit test here only avoids building tileCandidates() and running
+    // tileAt() for a result select mode would discard. Either one alone produces correct
+    // behaviour; the pure one is the one the Tier 1 suite asserts.
     function resolveTarget() {
+        var selectMode = config.activate === "select"
         var live = false, tileAddr = "", wsId = -1
-        if (pointerLive) {
+        if (!selectMode && pointerLive) {
             var p = pointerPoint()
             if (p.inView) {
                 live = true
@@ -559,11 +565,17 @@ Item {
                 }
             }
         }
-        return Logic.target({ pointerLive: live, pointerTileAddress: tileAddr,
+        return Logic.target({ selectMode: selectMode,
+                              pointerLive: live, pointerTileAddress: tileAddr,
                               pointerWorkspaceId: wsId, query: root.query,
                               matchAddress: root.selectedMatchAddress,
                               cursorAddress: root.cursorAddress, selectedId: root.selectedId })
     }
+    // The "select" policy's digit latch: the key code of the digit press that made the current
+    // selection, or 0. A press of the SAME key completes the gesture. Cleared by every other key
+    // that reaches the handler — but NOT by pointer movement, which changes nothing in select
+    // mode. Click-to-select clears it too: selectTile and selectWorkspaceBox both zero it first.
+    property int digitLatch: 0
     // ---- Peek (docs/specs/2026-09-18-peek-design.md) --------------------------------------
     // The hold carries exactly three pieces of state and no more. `peeking` is "the key is down
     // and the hold is live"; `peekedKey` is the identity currently on screen, read by the
@@ -745,6 +757,68 @@ Item {
         if (win && Logic.isScratchpad(win.workspaceId)) Hyprland.dispatch(Logic.scratchpadFocusLua(addr))
         else Hyprland.dispatch('hl.dsp.focus({ window = "address:' + addr + '" })')
         close()
+    }
+    // The workspace a tile is currently DRAWN in. Not the same as `_windowByAddress[addr]
+    // .workspaceId` for the ~1.8 s of an optimistic drop: the row carries the target while the
+    // compositor still reports the source (submitDrop, :982, notes it). A click must act on the
+    // box the user actually clicked into, so every selection path reads the row, not the report
+    // — which is also why this reads the model rather than taking the id from a caller.
+    function displayedWorkspaceOf(addr) {
+        for (var i = 0; i < tilesModel.count; i++)
+            if (tilesModel.get(i).address === addr) return tilesModel.get(i).wsid
+        return -1
+    }
+    // Click-to-select under the "select" policy. Sets BOTH the window cursor and the box
+    // selection: rebuild() drops a cursor that is not on selectedId (:1252), so a click
+    // that set only the cursor would lose its ring at the next rebuild.
+    function selectTile(addr) {
+        digitLatch = 0
+        var win = _windowByAddress[addr]
+        if (!win) return
+        if (query.length) { selectMatchOrClearQuery(addr); return }
+        selectedIndex = Logic.indexOfWorkspace(boxes, displayedWorkspaceOf(addr))
+        setCursor(addr)
+        ensureSelectedVisible()
+    }
+    // A click while a query is live. target() ranks the match above the cursor and the selected
+    // workspace, so a click that only set the cursor would ring one window and act on another.
+    // The split is on something already visible: matches ring in the accent, non-matches are
+    // dimmed. A click INSIDE the filter moves the selected match and keeps the query — the same
+    // thing Tab does. A click OUTSIDE it ends the query, then selects normally.
+    function selectMatchOrClearQuery(addr) {
+        for (var i = 0; i < matches.length; i++) {
+            if (matches[i].address !== addr) continue
+            matchIndex = i
+            applyMatchRoles()
+            // followMatch() moves selectedIndex and scrolls. The cursor stays empty, because
+            // setQuery holds find and the cursor as exclusive and this branch keeps the query.
+            // Note it resolves the box through _windowByAddress, NOT displayedWorkspaceOf — so
+            // clicking a MATCHING tile mid-drop selects the source box for the ~1.8 s the
+            // optimistic row and the compositor disagree. Deliberate: followMatch is find's own
+            // path, shared with Tab and the arrows, and making it drop-aware would change find
+            // everywhere for a corner this feature did not introduce.
+            followMatch()
+            return
+        }
+        // setQuery("") runs restorePreQuerySelection(), so the click's own selection must be
+        // applied AFTER it, never before.
+        setQuery("")
+        // displayedWorkspaceOf, not win.workspaceId: during an optimistic drop the row and the
+        // compositor's report disagree, and the click must follow the tile the user clicked.
+        selectedIndex = Logic.indexOfWorkspace(boxes, displayedWorkspaceOf(addr))
+        setCursor(addr)
+        ensureSelectedVisible()
+    }
+    // Click-to-select for a well. A live query is cleared first, then the box is selected; the
+    // window cursor is dropped so Enter enters the workspace rather than a stale window.
+    function selectWorkspaceBox(id) {
+        digitLatch = 0
+        if (query.length) setQuery("")         // runs restorePreQuerySelection(); must come first
+        var idx = Logic.indexOfWorkspace(boxes, id)
+        if (idx < 0) return
+        selectedIndex = idx
+        setCursor("")
+        ensureSelectedVisible()
     }
     // Enter: whatever the target rule names.
     function activateTarget() {
@@ -1537,6 +1611,7 @@ Item {
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
+        digitLatch = 0
         peekReset()                                 // nothing carries over from the previous summon
         // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
@@ -1679,9 +1754,12 @@ Item {
     // The watched config file changing the padded workspace count while open: the compositor
     // data is not stale, so a plain rebuild re-lays the wells at once. `lockBorder`/
     // `lockBorderSize` need no handler at all now — the frame binds to them directly.
+    // `activate`: a mid-session policy flip must not leave a stale latch behind, or the first
+    // digit after switching back to "select" would complete a gesture begun under the old policy.
     Connections {
         target: config
         function onWorkspacesChanged() { if (root.opened) root.rebuild() }
+        function onActivateChanged() { root.digitLatch = 0 }
     }
 
     // Share-time reminder frame: one per screen, four strips each (LockFrame.qml). Lives outside
@@ -1951,6 +2029,19 @@ Item {
                     e.accepted = true
                     // Lone modifiers belong to no class (see Logic.isModifierKey).
                     if (Logic.isModifierKey(e.key)) return
+                    // Take the latch: EVERY key that gets this far clears it, and only the digit
+                    // branch below re-arms — from `latch`, the value as it was on entry. Pointer
+                    // movement never reaches this handler, which is exactly why a mouse move
+                    // cannot break a pending repeat.
+                    //
+                    // Placement is the rule. ABOVE the dialog, menu and dismiss-key branches,
+                    // because each of those returns early: a key swallowed by a menu would
+                    // otherwise leave the latch armed, and a menu action can close or move a
+                    // window first — so `2`, a menu, `2` would enter a workspace after two
+                    // presses that never showed a selection. BELOW the modifier guard, because a
+                    // lone Shift or Ctrl changes nothing on screen and must not break a repeat.
+                    var latch = root.digitLatch
+                    root.digitLatch = 0
                     // The confirmation dialog owns every key while it is open, ahead of the menu
                     // branch: this plugin has exactly one focus item, so everything is routed
                     // through here. `handleKey`'s own return is not consulted — while the dialog
@@ -2065,8 +2156,21 @@ Item {
                         // same hand.
                         if (e.key === Qt.Key_Tab) { root.setCursor(""); root.selectByTab(1); return }
                         if (e.key === Qt.Key_Backtab) { root.setCursor(""); root.selectByTab(-1); return }
-                        if (e.key >= Qt.Key_1 && e.key <= Qt.Key_9) { root.setCursor(""); root.jump(e.key - Qt.Key_0); return }
-                        if (e.key === Qt.Key_0) { root.setCursor(""); root.jump(10); return }
+                        if (e.key >= Qt.Key_0 && e.key <= Qt.Key_9) {
+                            if (config.activate !== "select") {
+                                root.setCursor("")
+                                root.jump(e.key === Qt.Key_0 ? 10 : e.key - Qt.Key_0)
+                                return
+                            }
+                            var d = Logic.digitActivate(e.key, latch, root.boxes, e.isAutoRepeat)
+                            root.digitLatch = d.latch      // an auto-repeat hands `latch` back
+                            if (d.action === "none") return
+                            root.setCursor("")
+                            root.selectedIndex = d.index
+                            root.ensureSelectedVisible()
+                            if (d.action === "enter") root.jump(d.id)
+                            return
+                        }
                         if (e.key === Qt.Key_Left) { root.navigateCursor("left"); return }
                         if (e.key === Qt.Key_Right) { root.navigateCursor("right"); return }
                         if (e.key === Qt.Key_Up) { root.navigateCursor("up"); return }
@@ -2225,8 +2329,22 @@ Item {
                                 anchors.fill: parent
                                 enabled: root.opened
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                // The same one-dispatch hazard the tile has, and the same two
+                                // things hold it: `enabled: root.opened` above and jump()'s own
+                                // close(). No `!root.opened` line here, deliberately — a well
+                                // click that slipped through would only re-select a box, and
+                                // open() resets the selection anyway, where a tile click would
+                                // leave a stale cursor.
                                 onClicked: function (m) {
-                                    if (m.button === Qt.LeftButton) root.jump(boxItem.model.workspaceId)
+                                    if (m.button !== Qt.LeftButton) return
+                                    if (config.activate === "select")
+                                        root.selectWorkspaceBox(boxItem.model.workspaceId)
+                                    else root.jump(boxItem.model.workspaceId)
+                                }
+                                onDoubleClicked: function (m) {
+                                    if (m.button !== Qt.LeftButton) return
+                                    if (config.activate !== "select") return
+                                    root.jump(boxItem.model.workspaceId)
                                 }
                                 onPressed: function (m) {
                                     if (m.button === Qt.RightButton)
@@ -2301,6 +2419,14 @@ Item {
                             dimmed: root.query.length > 0 && !model.matched && root.dropTargetAddress !== model.address
                             accent: root.accent
                             dragging: root.draggingAddress === model.address
+                            // The lift waits for real movement. `dragging` arms on press, but a
+                            // press is not a carry: under the "select" policy the overview stays
+                            // open after a click, so a lift taken on press would be a 60% shrink
+                            // and spring-back on every click that picked nothing up. `dragArea.moved`
+                            // only turns true once Qt's drag threshold is crossed. The shrink
+                            // scales about the grab point, so starting it a few pixels late lands
+                            // that point under the cursor just the same.
+                            lifted: root.draggingAddress === model.address && dragArea.moved
                             handle: root.handleByAddress[model.address] || null
                             // Kept loaded while hidden (keepLoaded): captures run only while the
                             // surface is mapped. An armed box always falls back to its icon, share
@@ -2405,7 +2531,25 @@ Item {
                                     if (wasMoved && Logic.hasWs(targetWs))
                                         root.submitDrop(addr, targetWs, dropX, dropY, ptr.x, ptr.y)
                                     root.endDrag()
-                                    if (!wasMoved) { root.focusWindow(addr) }
+                                    if (!wasMoved) {
+                                        // Belt and braces, and known to be the braces: what
+                                        // actually guarantees a double-click dispatches exactly
+                                        // once is `enabled: root.opened` above plus close()'s own
+                                        // idempotence — focusWindow() closes on `doubleClicked`,
+                                        // the area is disabled, and the second `released` is
+                                        // never delivered. This line is what would catch it if
+                                        // that ordering ever changed, since selecting into a
+                                        // closed overview leaves state for the next summon.
+                                        if (!root.opened) return
+                                        if (config.activate === "select") root.selectTile(addr)
+                                        else root.focusWindow(addr)
+                                    }
+                                }
+                                onDoubleClicked: function (m) {
+                                    if (m.button !== Qt.LeftButton) return
+                                    if (config.activate !== "select") return
+                                    root.endDrag()
+                                    root.focusWindow(model.address)
                                 }
                             }
                         }
@@ -2539,8 +2683,14 @@ Item {
                     spacing: Math.round(Style.space(12))
                     Repeater {
                         id: hintKeys
-                        model: [ { k: "1–0", l: "jump" }, { k: "tab", l: "workspace" }, { k: "↑ ↓ ← →", l: "window" },
-                                 { k: "↵", l: "select" },
+                        // Every cap names what its key actually does, so the two keys whose job
+                        // the activate policy changes have to follow it
+                        // (docs/specs/2026-09-18-activate-select-design.md). Under "enter" a
+                        // digit jumps straight out and ↵ goes to whatever is highlighted; under
+                        // "select" a digit only moves the ring and ↵ is what commits.
+                        model: [ { k: "1–0", l: config.activate === "select" ? "select" : "jump" },
+                                 { k: "tab", l: "workspace" }, { k: "↑ ↓ ← →", l: "window" },
+                                 { k: "↵", l: config.activate === "select" ? "enter" : "select" },
                                  { k: "drag", l: "move window" }, { k: "type", l: "find" },
                                  { k: "hold space", l: "peek" },
                                  { k: "esc", l: "close" },

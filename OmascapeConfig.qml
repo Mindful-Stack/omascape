@@ -15,6 +15,10 @@ QtObject {
     // full-width. Bar mode needs an actual top bar to hang from — a side, bottom or hidden bar
     // reserves nothing at the top and falls back to centred on its own (Overview.qml barMode).
     property string anchor: "center"
+    // Activation policy (docs/specs/2026-09-18-activate-select-design.md).
+    // "enter"  — a digit jumps and a click focuses, both leaving the overview.
+    // "select" — both select instead; Enter, the same digit again, or a double-click commits.
+    property string activate: "enter"
     // Share-time reminder frame (docs/specs/2026-09-12-lock-design.md, addendum): the local-only
     // frame omascape draws around a monitor that is SHOWING an armed workspace while a share is
     // running (LockFrame.qml — four layer-shell strips, blanked in every capture). `lockBorder`
@@ -50,6 +54,7 @@ QtObject {
         cfg.scrim = o.scrim
         cfg.hint = o.hint
         cfg.workspaces = o.workspaces
+        cfg.activate = o.activate
         cfg.motion = o.motion
         cfg.anchor = o.anchor
         cfg.lockBorder = o.lockBorder
