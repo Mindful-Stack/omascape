@@ -98,7 +98,7 @@ Two of those bite in ordinary work:
 - Renaming or moving `Overview.qml` breaks installs unless `manifest.json`'s
   `entryPoints.overlay` moves with it, in the same commit.
 - **Never commit a symlink.** The repository currently contains none. Note that
-  `mise run dev:link` makes the *install path* a symlink to the worktree — that is deliberate and
+  `mise run link` makes the *install path* a symlink to the worktree — that is deliberate and
   local (see [[adrs/0001-dev-install-path]]), and is why `README.md` says to validate `.` rather
   than the install directory.
 

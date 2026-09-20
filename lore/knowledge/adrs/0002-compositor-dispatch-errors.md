@@ -103,3 +103,6 @@ The rules that follow:
 - `docs/specs/2026-09-12-lock-design.md`, `docs/specs/2026-09-15-actions-design.md` — the
   operations this shapes. Guard: `tests/tst_layout.qml`; parse and behaviour gate:
   `tests/lua-check.sh`, `tests/lua/tst_chunks.lua`.
+- `docs/plans/2026-09-10-hardening.md` — where this decision was made: the post-merge review of
+  [omascape#8](https://github.com/Mindful-Stack/omascape/pull/8) that turned `lua-check.sh` from
+  parse-only into a behaviour suite and made it mandatory in CI. There is no separate spec.

@@ -81,5 +81,8 @@ CI's Qt is the authority and it is older than the local one — see
 
 ## See also
 
+- [[learnings/right-click-cancels-a-mousearea-drag]] — the cancel path a `MouseArea` change must keep clean.
+- [[learnings/item-owns-a-final-layer-property]] — check a new property name against `Item` first.
+
 - [[general/testing]] — which tier a new test belongs in.
 - [[learnings/plugin-hot-reload-serves-cached-source]] — why you are not seeing your change.

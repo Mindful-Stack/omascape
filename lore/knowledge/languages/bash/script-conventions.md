@@ -1,6 +1,6 @@
 ---
 title: Bash script conventions
-description: Bash is the entry point for every gate in this repo — CI and all four mise tasks are `bash …` — and the conventions are uniform: shebang by tree, `set -euo pipefail` with two documented exceptions, never trust a bare tool name, mktemp plus an EXIT trap, and jq as the only IPC parser.
+description: Bash is the entry point for every gate in this repo — CI and all four mise tasks are `bash …` — and the conventions are uniform: shebang by tree, `set -euo pipefail` with three documented exceptions, never trust a bare tool name, mktemp plus an EXIT trap, and jq as the only IPC parser.
 tags: [languages, bash, testing, tooling, ci]
 ---
 
@@ -48,7 +48,7 @@ exceptions are deliberate and every one says so in the file:**
 - `tests/split-lore.sh` carries the same trailing comment as `tests/dev-link.sh`, for the same
   reason: its cases assert on non-zero exits.
 
-If you write a third exception, put the reason on the `set` line the way these two do.
+If you write a fourth exception, put the reason on the `set` line the way these three do.
 
 ## Never trust a bare tool name
 

@@ -84,3 +84,6 @@ and review, not by a test — see [[languages/lua/chunk-authoring]].
 - [[languages/lua/chunk-authoring]] — how the chunks under test are built.
 - [[adrs/0002-compositor-dispatch-errors]] — the contract both checks defend.
 - [[adrs/0003-test-tiers]] — Tier 1 is what CI runs.
+- `docs/plans/2026-09-10-hardening.md` — the plan that built both checks and the mock; also
+  records that the `qml` runtime is `/usr/lib/qt6/bin/qml` from `qml-qt6` on Ubuntu noble and
+  not on `PATH` there.

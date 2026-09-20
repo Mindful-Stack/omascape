@@ -4,17 +4,14 @@ The household's shared, durable knowledge base — domain model, architecture, a
 kept tool-native for the [Lorekeeper](https://github.com/Mindful-Stack/witan) plugin, which resolves
 `lore/` via sibling-fallback.
 
-> **This is a template.** Replace the placeholder `_starter.md` files and the examples below with your
-> household's real content; keep the structure and conventions.
-
 ## Layout
 
 ```
 knowledge/
 ├── general/      cross-cutting standards & conventions — code review, security, testing,
 │                 workflow, architecture, observability…
-├── domain/       the DDD bounded-context model — one node per context, plus meta files
-│                 (_context-map, _glossary, _journeys, _domain-questions)
+├── domain/       the doctrine the code enforces — targeting, find, the shared vocabulary
+├── adrs/         architecture decision records (/lore:adr) — each cites docs/specs/
 ├── frameworks/   per-framework patterns, review checklists, conventions (one subdir per framework)
 ├── languages/    per-language code style, error handling, review checklists (one subdir per language)
 └── learnings/    captured gotchas / tribal knowledge worth remembering
@@ -22,8 +19,6 @@ knowledge/
 
 There is no generated index. Retrieval greps frontmatter directly (`^(title|description|tags):`),
 so a node is searchable the moment it is written — nothing to rebuild.
-
-Each category ships with a `_starter.md` placeholder — replace it with real nodes as the workspace matures.
 
 ## Conventions
 
@@ -46,8 +41,9 @@ The `_tools/` CLI is wired into the workspace `Makefile`. From the workspace roo
 
 ## Where to start (new contributor)
 
-1. `knowledge/domain/_context-map.md` — the system at a glance (once a domain model exists).
-2. The bounded context or the standards relevant to your task.
+1. `knowledge/general/architecture.md` — the layering, and why `logic.js` holds the decisions.
+2. `knowledge/domain/ubiquitous-language.md` — the vocabulary the code and the specs share.
+3. The standard or the ADR relevant to your task; the ADR cites the spec that holds the evidence.
 
 ---
 *Part of a [witan-household](https://github.com/Mindful-Stack/witan-household). The `lore/` knowledge base

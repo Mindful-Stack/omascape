@@ -44,7 +44,7 @@ the only thing that knows the theme."*
 **A hex literal is a default on a `property color` declaration** — 17 of the 18 hex literals in
 the tree are exactly that. The single use-site hex is `WindowTile.qml:272`, and it is legitimate:
 the hover title `Text` is `"#fff"` because it sits on a deliberately theme-independent plate,
-`color: Qt.rgba(0, 0, 0, 0.55)` on the line above. White-on-black is the contract there, so
+`color: Qt.rgba(0, 0, 0, 0.55)` a few lines above it, in the same hover overlay. White-on-black is the contract there, so
 theming either half would break it. That is the only shape in which a use-site literal is
 correct — a self-contained pair where both colours are fixed together. A lone literal over a
 themed surface is a bug. `"transparent"` at a use site is always fine (10 uses).
@@ -104,6 +104,10 @@ still runs, instantly, so nothing has to branch on whether motion is on. `motion
 animation setting before the first frame.
 
 ## See also
+
+- [[learnings/shadow-alpha-switches-on-luminance]] — why the card shadow has two alphas.
+- [[learnings/a-behavior-cannot-share-x-with-drag-target]] — why the tile glide runs on `targetX`/`targetY`.
+- [[learnings/no-anim-layer-rule-stops-double-animation]] — the compositor's fade on top of ours.
 
 - [[frameworks/quickshell/component-patterns]] — where these properties sit in a component.
 - [[general/architecture]] — why only the root resolves either contract.

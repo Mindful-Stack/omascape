@@ -63,8 +63,9 @@ that must genuinely exclude specials keep an explicit test (`padWorkspaces`,
 ## Consequences
 
 - **`hasWs()` is load-bearing, not a convenience wrapper.** 15 call sites across `logic.js` and
-  `Overview.qml`, and no `>= 0` workspace test survives — the only remaining match on `main` is
-  the comment above `hasWs` describing what it replaced. Writing `id >= 0` again silently
+  `Overview.qml`, and no `>= 0` *workspace* test survives. `>= 0` still appears about a dozen
+  times in each file, but every one is an index or bounds check (array positions, pixel
+  coordinates, key codes) — plus the comment above `hasWs` describing what it replaced. Writing `id >= 0` again silently
   excludes the scratchpad from whatever that code does.
 - **New code must pick a test deliberately.** "Has a workspace" is `hasWs()`. "Is a real numbered
   workspace" is an explicit specials check. The two are no longer the same expression.

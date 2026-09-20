@@ -37,6 +37,13 @@ Two specific traps have cost time repeatedly:
 The gotcha is repeated in at least six plan and brief documents, which is what makes it a
 decision rather than a note: it keeps being rediscovered.
 
+The floor is enforced only for what the offscreen fixture compiles. `SoftShadow.qml` is a
+`RectangularShadow` from `QtQuick.Effects`, which is Qt 6.9+ (`docs/specs/2026-09-10-restyle-design.md`
+§ Design), and `tests/ui/prepare.py` replaces it with a stub because the offscreen platform cannot
+run the shader. So CI never compiles the real shadow, and the plugin as shipped needs Qt 6.9 to
+*render* even though everything CI checks is valid on 6.4. The floor this record states is the
+one CI can hold, not the one a user's machine needs; Omarchy ships well above both.
+
 ## Considered options
 
 - **Develop against 6.4 and treat it as the floor** — CI stays the authority, and the code runs

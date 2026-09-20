@@ -41,8 +41,9 @@ Tests are split by what the environment can provide, and only the hermetic level
 - **Tier 1** is `mise run test` → `tests/run.sh`, and it is what CI runs. It is everything that
   works offscreen: the pure logic suites (`tests/tst_*.qml` under `qmltestrunner` with
   `QT_QPA_PLATFORM=offscreen`), the offscreen UI fixture built from production QML by
-  `tests/ui/prepare.py`, the real-Lua parse and behaviour suites (`tests/lua-check.sh`), and the
-  stub-driven shell tests (`tests/dev-link.sh`). No compositor, no seat, no display.
+  `tests/ui/prepare.py`, the real-Lua parse and behaviour suites (`tests/lua-check.sh`), the
+  stub-driven shell tests (`tests/dev-link.sh`), and the throwaway-repo tests for the KB split
+  script (`tests/split-lore.sh`). No compositor, no seat, no display.
 - **Tier 2** is `mise run test-integration`: a nested, isolated Hyprland asserting semantics that
   only a real compositor shows, such as silent-move behaviour. It is **not** in CI, because a
   runner cannot give it a compositor.
@@ -62,7 +63,7 @@ what it needs.
 - The `SKIP:`-is-fatal rule is enforced in exactly one place. `tests/integration/` still exits 0
   on each of its several skip paths, so an integration run can report success having tested
   almost nothing — and since it is not in CI, nothing else catches that.
-- Tier 1 carries a lot for one name: four different runners, two languages and a Python fixture
+- Tier 1 carries a lot for one name: five different runners, two languages and a Python fixture
   generator. "Tier 1 passed" is a weaker statement than it sounds, and `tests/run.sh` failing
   does not say which part failed without reading the output.
 - Rejecting Tier 3 means pointer behaviour is verified against synthesised Qt mouse events on an

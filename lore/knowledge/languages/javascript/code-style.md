@@ -91,7 +91,7 @@ Text interpolated into a chunk is truncated **before** it is escaped, never afte
 ## Tests
 
 Every function here is expected to be reachable from the Tier 1 logic suites
-(`tests/tst_layout.qml`, `tst_find.qml`, `tst_actions.qml`, `tst_motion.qml`), which run
+(`tests/tst_layout.qml`, `tst_find.qml`, `tst_actions.qml`, `tst_motion.qml`, `tst_smoke.qml`), which run
 offscreen with no compositor. A change to `logic.js` that cannot be exercised from a test is a
 sign the logic belongs somewhere else, or that the function is doing QML's job.
 

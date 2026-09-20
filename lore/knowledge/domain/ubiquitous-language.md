@@ -71,6 +71,11 @@ growing a `shift` parameter, and a latch-then-clear ordering — which is likewi
 Treat that spec as a design, not a description. If you implement it, the doctrine node needs
 updating in the same PR.
 
+It is also **blocked, not merely unstarted**: the swap half needs a Lua chunk that retargets a
+specific monitor to a workspace, and no existing chunk or `mock_hl.lua` dispatcher does that.
+`ROADMAP.md` item 14 holds the probe to run first and the two decisions in the spec that read
+wrong and are right.
+
 ## See Also
 
 - [[domain/targeting-and-pointer-liveness]] — how target, cursor, selection and liveness combine.

@@ -131,9 +131,29 @@ The leaf then reads live properties off it (`monitor.scale`, which *is* reactive
 compositor" rule true while leaves still show per-monitor state — see
 [[frameworks/quickshell/component-patterns]].
 
+## Unverified assumptions
+
+Three things this node and the actions doctrine lean on have been read from Hyprland's source or
+inferred from one machine, never observed:
+
+- **Move and Swap between monitors.** The semantics of `moveworkspacetomonitor` and
+  `swapactiveworkspaces` were read from `CWorkspacePlacementController`; the overlay has only ever
+  run with one monitor connected during development (`ROADMAP.md` item 10, `DESIGN.md` § Actions).
+- **`hl.get_workspace()` with the `special:…` name form.** Close-all on the scratchpad row depends
+  on it. If it is not accepted, that row closes nothing and reports "workspace not found" — wrong
+  but inert and visible.
+- **The docked two-row layout and the external monitor's mini-map coordinates.** The origin and
+  scale conversion was checked on `eDP-1` only (`ROADMAP.md` item 1); an unconfigured hotplugged
+  monitor is a known, uncaptured misbehaviour (`ROADMAP.md` item 15).
+
+Each is a Tier 2 case waiting to be written. Until then, a change that touches one of them is
+changing behaviour nobody has seen.
+
 ## See Also
 
 - [[adrs/0002-compositor-dispatch-errors]] — the write side: dispatch, Lua chunks, error surfacing.
+- [[learnings/preserve-split-rederives-the-split-axis]] — a compositor default the integration rig has to pin.
+- [[learnings/no-anim-layer-rule-stops-double-animation]] — the compositor animating the overlay's layer.
 - [[general/architecture]] — why every compositor call is in one file.
 - [[frameworks/quickshell/component-patterns]] — how a leaf receives what it needs.
 - [[learnings/quickshell-list-is-display-scoped]] — the same snapshot-vs-live trap outside QML.

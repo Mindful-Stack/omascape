@@ -61,7 +61,11 @@ synthesise `isAutoRepeat`.
 That list is why [[adrs/0004-qt-compatibility-floor]] and the standing rules in `CLAUDE.md` exist:
 the gotchas were being retyped into every plan because nothing surfaced them at authoring time.
 **When you find yourself writing a gotcha into a plan preamble, that is the signal it belongs in
-the knowledge base instead.**
+the knowledge base instead.** The ones that list carried are now nodes:
+[[learnings/item-owns-a-final-layer-property]],
+[[learnings/listmodel-roles-are-fixed-at-first-append]] and
+[[learnings/qttest-cannot-synthesise-isautorepeat]]; the reserved words are in
+[[adrs/0004-qt-compatibility-floor]].
 
 Plans also carry the real thing rather than a description of it — the peek plan's Task 10 contains
 the Tier 2 shell script verbatim, comments included.
@@ -74,7 +78,8 @@ the Tier 2 shell script verbatim, comments included.
   `docs` 32, `feat` 31, `test` 22, `fix` 17, `build` 4, with the scope naming the feature
   (`peek` 32, `dropdown` 27, `activate` 24, `dev-link` 13).
 - **The body says why, not what.** The diff says what.
-- Every commit carries a `Co-Authored-By` trailer naming the model that wrote it.
+- Most commits carry a `Co-Authored-By` trailer naming the model that wrote it (102 of the last
+  120 non-merge commits on `main`); the ones that do not are small manual fixes.
 - **PR descriptions are long here on purpose** — what was measured, what was corrected, what was
   deliberately not done. Say which of `README.md` § Testing's manual checks you actually ran; see
   [[general/release-and-distribution]].
