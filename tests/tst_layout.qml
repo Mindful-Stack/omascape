@@ -1177,6 +1177,23 @@ TestCase {
         compare(Logic.screenMargin(undefined), 16, "missing argument")
     }
 
+    // The bar's transparency lives in the SHELL's config, not ours, and the card falls back
+    // to the menu ground when it is on. Every failure mode must yield false -- "paint the
+    // bar's colour" -- because that is what the code did before this key was consulted.
+    function test_shell_bar_transparency_is_read_defensively() {
+        compare(Logic.shellBarTransparent('{"bar":{"transparent":true}}'), true, "the real case")
+        compare(Logic.shellBarTransparent('{"bar":{"transparent":false}}'), false, "explicitly off")
+        compare(Logic.shellBarTransparent('{"bar":{}}'), false, "bar subtree, no key")
+        compare(Logic.shellBarTransparent('{}'), false, "no bar subtree")
+        compare(Logic.shellBarTransparent('{"bar":"yes"}'), false, "bar is not an object")
+        // THE discriminator against a truthy test: only the boolean true counts, so a config
+        // written by hand with a string does not silently flip the card's background.
+        compare(Logic.shellBarTransparent('{"bar":{"transparent":"true"}}'), false, "string, not bool")
+        compare(Logic.shellBarTransparent('{"bar":{"transparent":1}}'), false, "number, not bool")
+        compare(Logic.shellBarTransparent('not json'), false, "unparseable")
+        compare(Logic.shellBarTransparent(''), false, "missing file")
+    }
+
     // Config keys are validated, never trusted: an unknown value must fall back rather than
     // reach a binding. The "left" case is the one that discriminates real validation from
     // `o.anchor || "center"`, which would happily return "left" and anchor the card nowhere.

@@ -98,11 +98,6 @@ Item {
     property real appearScale: 1
     property real appearOpacity: 1
     property bool priming: false
-    // The CARD's staged entrance (bar mode), driven from Overview so a tile arrives with the row
-    // of boxes it sits in. Deliberately separate from appearScale/appearOpacity: those belong to
-    // a single tile appearing mid-session and are written by appearAnim, not bound.
-    property real entranceOpacity: 1
-    property real entranceOffsetY: 0
     function appear() {
         if (!tile.motion.enabled) return
         priming = true
@@ -120,22 +115,19 @@ Item {
     transformOrigin: Item.Center
     // Hover raises a tile within its own layer only; dragging is the single global exception.
     z: dragging ? 99999 : tileLayer * 10 + (hh.hovered ? 1 : 0)
-    opacity: (dragging ? dragOpacity : ((dimmed || closing) ? 0.35 : 1)) * appearOpacity * entranceOpacity
+    opacity: (dragging ? dragOpacity : ((dimmed || closing) ? 0.35 : 1)) * appearOpacity
     Behavior on scale { enabled: tile.motion.enabled && !appearAnim.running && !priming
         NumberAnimation { duration: tile.motion.fast; easing.type: tile.motion.hover } }
     Behavior on opacity { enabled: tile.motion.enabled && !appearAnim.running && !priming
         NumberAnimation { duration: tile.motion.fast; easing.type: tile.motion.hover } }
-    transform: [
-        Scale {
-            id: ghost
-            origin.x: tile.grabX; origin.y: tile.grabY
-            xScale: tile.dragging ? tile.dragScale : 1
-            yScale: xScale
-            Behavior on xScale { enabled: tile.motion.enabled
-                NumberAnimation { duration: tile.motion.fast; easing.type: tile.motion.hover } }
-        },
-        Translate { y: tile.entranceOffsetY }
-    ]
+    transform: Scale {
+        id: ghost
+        origin.x: tile.grabX; origin.y: tile.grabY
+        xScale: tile.dragging ? tile.dragScale : 1
+        yScale: xScale
+        Behavior on xScale { enabled: tile.motion.enabled
+            NumberAnimation { duration: tile.motion.fast; easing.type: tile.motion.hover } }
+    }
 
     // Floating windows sit above the tiled ones on the real desktop; a soft shadow says so
     // here too. Hidden in transit (the ghost is already lifted by scale and opacity).

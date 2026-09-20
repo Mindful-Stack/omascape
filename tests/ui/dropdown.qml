@@ -36,12 +36,12 @@ TestCase {
 
     // One monitor, `perMon` workspaces, bar reserving `top`. The panel is sized BEFORE open()
     // so the first rebuild already sees the real width.
-    function seed(top, perMon, anchor) {
+    function seed(top, perMon, anchor, panelW) {
         view = createTemporaryObject(overview, tc)
         verify(view)
         screenA = createTemporaryObject(screenStub, tc, { name: "A" })
         view.testConfig.anchor = anchor === undefined ? "bar" : anchor
-        view.testPanel.width = 1920
+        view.testPanel.width = panelW === undefined ? 1920 : panelW
         view.testPanel.height = 1080
         var monA = monitor("A", 0, top)
         var wss = []
@@ -115,7 +115,14 @@ TestCase {
         seed(26, 40)
         verify(view.testCanvas.implicitHeight > 1080 - 26 - Logic.screenMargin(1080),
                "fixture must overflow, got " + view.testCanvas.implicitHeight)
-        compare(view.testCard.height, 1080 - 26 - Logic.screenMargin(1080), "the cap binds")
+        // implicitHeight, not height: `height` is the UNFURL's animated value in bar mode, and
+        // the subject here is the resting size that maxCardH caps. Both are asserted -- the cap
+        // binds, and the unfurl actually reaches it -- which is strictly more than the single
+        // assertion this replaced, back when the two were always equal.
+        var cap = 1080 - 26 - Logic.screenMargin(1080)
+        compare(view.testCard.implicitHeight, cap, "the cap binds")
+        wait(300)
+        compare(view.testCard.height, cap, "and the unfurl opens all the way to it")
         verify(view.testFlick.contentHeight > view.testFlick.height, "a capped card still scrolls")
     }
 
@@ -277,74 +284,65 @@ TestCase {
 
     // The stagger's observable contract, asserted on the delegates rather than on the pure
     // function (which tst_layout.qml already covers): rows must differ from one another
-    // mid-entrance, and everything must end fully visible.
-    function test_rows_arrive_staggered_and_all_end_visible() {
+    // THE unfurl. Sampled mid-animation, because at rest an unfurled and a never-animated
+    // card are identical. Three things have to hold at once, and each catches a different
+    // mistake: the card is genuinely shorter than its content (it is opening), the Flickable
+    // keeps its RESTING height (it is uncovered, not squashed), and contentY has not moved
+    // (the viewport never shrank enough for onContentHeightChanged's clamp to scroll it).
+    function test_the_card_unfurls_downward_from_the_bar() {
         view = createTemporaryObject(overview, tc)
         verify(view)
         screenA = createTemporaryObject(screenStub, tc, { name: "A" })
-        view.motion.scale = 10
+        view.motion.scale = 10                 // stretch the entrance so sampling is not a race
         view.testConfig.anchor = "bar"
         view.testPanel.width = 1920
         view.testPanel.height = 1080
         var monA = monitor("A", 0, 26)
         var wss = []
-        // One window on workspace 6 -- the SECOND row -- so the tile path is covered too.
-        // `at` is monitor-relative and this monitor sits at y=0 (unlike the stacked-monitor
-        // fixtures elsewhere that use large `at` values against a monitor offset to match): it
-        // must land inside the usable rect (reserved top 26, height 1080) or _tileRect's clamp
-        // returns null and no tile is ever created, silently.
-        var win = { address: "0xA", at: [100, 100], size: [400, 400], floating: false,
-                    title: "alpha", "class": "alpha", fullscreen: 0 }
-        for (var k = 1; k <= 10; k++)
-            wss.push({ id: k, monitor: monA,
-                       toplevels: { values: k === 6 ? [{ lastIpcObject: win }] : [] } })
+        for (var k = 1; k <= 10; k++) wss.push({ id: k, monitor: monA, toplevels: { values: [] } })
         view.compositor.monitors = { values: [monA] }
         view.compositor.focusedMonitor = monA
         view.compositor.focusedWorkspace = { id: 1 }
         view.compositor.workspaces = { values: wss }
         view.testScreens = [screenA]
         view.open()
-        // wait(150) against a 10x-stretched entrance (motion.scale) lands entranceProgress near
-        // 0.21 (OutCubic at t/duration = 0.075). Row 1 (of 2) doesn't start ramping until
-        // progress >= (1 - ROW_SPAN) / (rowCount - 1) = 0.4, so this sample is safely mid-row-0
-        // and pre-row-1 -- but that margin is a function of ROW_SPAN and the stretched duration,
-        // not a law: change either in logic.js/Overview.qml and re-check this wait against 0.4.
-        wait(150)
-        // Ten workspaces at maxCols 5 is two rows. Workspace 1 is in the first, 6 in the second.
-        var first = view.boxOpacityFor(1)
-        var second = view.boxOpacityFor(6)
-        verify(first > second,
-               "row 0 must lead row 1 mid-entrance, got " + first + " and " + second)
-        // The tile path, which is wired through WindowTile's entranceOpacity rather than its
-        // opacity. Without this the tile wiring is never exercised and a tile left at full
-        // opacity while its well fades in would ship unnoticed.
-        fuzzyCompare(view.tileEntranceFor("0xA"), second, 0.01,
-                     "a tile must share its box's phase exactly")
+        wait(200)
+
+        var resting = view.testCard.implicitHeight
+        verify(resting > 0, "precondition: the card has a resting height")
+        verify(view.testCard.height < resting,
+               "mid-unfurl the card must be shorter than its content, got "
+               + view.testCard.height + " of " + resting)
+        verify(view.testCard.y === 26, "and its top stays pinned to the bar throughout")
+        compare(view.testFlick.height, resting - view.testCard.pad * 2 - view.testCard.hintSpace,
+                "the viewport keeps its resting height — revealed, not squashed")
+        compare(view.testFlick.contentY, 0, "the clamp must not have scrolled the grid")
+
         wait(3000)
-        fuzzyCompare(view.boxOpacityFor(1), 1, 0.01, "row 0 ends visible")
-        fuzzyCompare(view.boxOpacityFor(6), 1, 0.01, "row 1 ends visible")
+        compare(view.testCard.height, resting, "and it ends fully open")
     }
 
-    // A rebuild mid-session must not replay the entrance. boxesModel is reconciled in place, so
-    // a stagger keyed on delegate creation would be invisible here but a stagger re-triggered by
-    // a rebuild would flash the whole grid every time a window moved.
-    function test_a_rebuild_does_not_replay_the_stagger() {
+    // A rebuild mid-session must not replay the entrance. boxesModel/tilesModel are reconciled
+    // in place so the delegates persist; an entrance keyed to anything a rebuild re-triggers
+    // would re-close and re-open the card every time a window moved.
+    function test_a_rebuild_does_not_replay_the_unfurl() {
         seed(26, 10)
         wait(400)
-        fuzzyCompare(view.boxOpacityFor(1), 1, 0.01, "precondition: the entrance has finished")
+        compare(view.entranceOpen, 1, "precondition: the unfurl has finished")
         view.compositor.rawEvent({ name: "openwindow", data: "" })
         view.rebuild()
         wait(30)
-        fuzzyCompare(view.boxOpacityFor(1), 1, 0.01, "a rebuild must not restart the entrance")
-        fuzzyCompare(view.boxOpacityFor(6), 1, 0.01, "nor for the later row")
+        compare(view.entranceOpen, 1, "a rebuild must not restart the unfurl")
+        compare(view.testCard.height, view.testCard.implicitHeight, "and the card stays open")
     }
 
-    // Motion off means arrived, not hidden.
-    function test_motion_off_shows_every_row_immediately() {
+    // Motion off means open, not closed. The opposite default would leave a zero-height card
+    // on a surface that still holds keyboard focus.
+    function test_motion_off_opens_the_card_at_once() {
         view = createTemporaryObject(overview, tc)
         verify(view)
         screenA = createTemporaryObject(screenStub, tc, { name: "A" })
-        view.motion.scale = 0                 // disables root.motion.enabled
+        view.motion.scale = 0                  // disables root.motion.enabled
         view.testConfig.anchor = "bar"
         view.testPanel.width = 1920
         view.testPanel.height = 1080
@@ -358,16 +356,54 @@ TestCase {
         view.testScreens = [screenA]
         view.open()
         wait(30)
-        compare(view.entranceProgress, 1, "progress is set directly, not animated")
-        fuzzyCompare(view.boxOpacityFor(6), 1, 0.01, "the last row is visible at once")
+        compare(view.entranceOpen, 1, "set directly, never animated")
+        compare(view.testCard.height, view.testCard.implicitHeight, "fully open immediately")
     }
 
-    // Finding 3 from the spec review. open() captures targetScreen once; focus keeps moving.
-    // Reading live focus would re-anchor the card and resize its height cap underneath an open
-    // picker whenever focus landed on a monitor reserving a different amount -- or flip bar mode
-    // off entirely on a monitor with no top bar.
+    // The card must not cast its shadow onto the bar it hangs from. This surface is
+    // WlrLayer.Overlay and the bar is WlrLayer.Top, so a halo above the card's top edge is
+    // painted straight onto the bar -- darkening it, and making the two read as different
+    // colours whatever the bar is showing. The halo reaches `blur - offset.y` upward, so the
+    // offset has to be at least the blur.
     //
-    // The fixture keeps compositor.focusedMonitor independently settable from testScreens, which
+    // Asserted as a RELATIONSHIP, not against 28 and 6: the point is that the two can never
+    // drift apart, and pinning literals here would pass while someone raised blur alone.
+    function test_the_card_casts_no_shadow_onto_the_bar() {
+        seed(26, 10)
+        verify(view.testShadow.blur > 0, "precondition: there is a shadow to reason about")
+        verify(view.testShadow.offset.y >= view.testShadow.blur,
+               "in bar mode the halo must not reach above the card: offset.y "
+               + view.testShadow.offset.y + " must be >= blur " + view.testShadow.blur)
+    }
+
+    // ...and the centred card must KEEP its shadow all round. Without this, "fix" the bar-mode
+    // halo by pushing the offset out unconditionally and every other test still passes while
+    // the default picker grows a lopsided shadow.
+    function test_the_centred_card_keeps_its_shadow_above() {
+        seed(26, 10, "center")
+        verify(view.testShadow.offset.y < view.testShadow.blur,
+               "centred, the shadow still haloes above the card: offset.y "
+               + view.testShadow.offset.y + " should be < blur " + view.testShadow.blur)
+    }
+
+    // The grid must sit in the middle of a full-width card, not hug its left edge. layout()
+    // places boxes from x = 0 and the canvas is exactly the grid's width, so on a panel where
+    // maxCellW caps the cells before the width runs out the remainder is pure slack. 2048
+    // logical is the real case that reported this: cells cap at 380, the grid is 1916, and
+    // 108 px were being dumped on the right.
+    function test_the_grid_is_centred_when_narrower_than_the_card() {
+        seed(26, 10, "bar", 2048)
+        var avail = view.testCard.width - view.testCard.pad * 2
+        var slack = avail - view.testFlick.width
+        verify(slack > 20,
+               "precondition: this panel must actually leave slack, got " + slack)
+        compare(view.testFlick.x, view.testCard.pad + Math.round(slack / 2),
+                "the slack must be split evenly, not left on one side")
+        // ...and the grid still fits, i.e. centring did not shrink the viewport below content.
+        verify(view.testFlick.contentWidth <= view.testFlick.width,
+               "content " + view.testFlick.contentWidth + " must fit " + view.testFlick.width)
+    }
+
     // is the one property that makes this test able to tell the bug from the fix.
     function test_focus_moving_to_another_monitor_does_not_move_the_card() {
         view = createTemporaryObject(overview, tc)
@@ -390,7 +426,10 @@ TestCase {
         wait(120)
         compare(view.targetScreen, screenA, "precondition: opened on A")
         compare(view.reservedTop, 26, "precondition: A's bar")
-        var y = view.testCard.y, h = view.testCard.height
+        // implicitHeight, not height: `height` animates during the unfurl, so sampling it
+        // before and after would compare two points on an animation rather than the card's
+        // size, and would be timing-dependent whichever way the focus binding behaved.
+        var y = view.testCard.y, h = view.testCard.implicitHeight
 
         // Focus moves to B without the picker closing.
         view.compositor.focusedMonitor = monB
@@ -398,7 +437,7 @@ TestCase {
         wait(60)
         compare(view.reservedTop, 26, "still A's reservation, not B's 52")
         compare(view.testCard.y, y, "the card must not re-anchor")
-        compare(view.testCard.height, h, "nor resize")
+        compare(view.testCard.implicitHeight, h, "nor resize")
 
         // ...and a focused monitor with NO top bar must not drop bar mode either.
         view.compositor.monitors = { values: [monA, monitor("B", 1080, 0)] }

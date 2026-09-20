@@ -34,6 +34,10 @@ QtObject {
     function probeMotion() { hyprProc.running = true; probeFallback.restart() }
 
     readonly property string path: Quickshell.env("HOME") + "/.config/omarchy/omascape.json"
+    // The shell's own config, watched read-only for one key: whether the bar is transparent.
+    // Not ours to write, and nothing here ever does.
+    property bool barTransparent: false
+    readonly property string shellPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
 
     function apply(raw) {
         var o = Logic.parseConfig(raw)
@@ -53,6 +57,15 @@ QtObject {
         onLoaded: cfg.apply(text())
         onFileChanged: reload()
         onLoadFailed: cfg.apply("")
+    }
+
+    property FileView shellFile: FileView {
+        path: cfg.shellPath
+        watchChanges: true
+        printErrors: false
+        onLoaded: cfg.barTransparent = Logic.shellBarTransparent(text())
+        onFileChanged: reload()
+        onLoadFailed: cfg.barTransparent = false
     }
 
     property Process hyprProc: Process {

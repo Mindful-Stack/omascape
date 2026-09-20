@@ -1069,6 +1069,22 @@ var LOCK_BORDER_RE = /^rgba?\([0-9a-fA-F]{6}([0-9a-fA-F]{2})?\)$/
 
 // ~/.config/omarchy/omascape.json → a fully-defaulted settings object. Every key has a default;
 // a missing file, a parse error, a wrong type or an unknown key never changes behaviour.
+// Whether the Omarchy bar is drawing itself transparent. This lives in the SHELL's config,
+// not ours: double-clicking the bar calls mutateShellConfig and writes `bar.transparent`
+// there. It matters because an attached card paints the bar's colour TOKEN, which does not
+// change when the bar switches to painting nothing -- so without this the card keeps the
+// bar's configured background while the bar shows the desktop through itself.
+//
+// Fails to `false` on anything unexpected: a missing file, a malformed one, or a bar subtree
+// that is not an object. False means "paint the bar's colour", which is the behaviour that
+// was correct before this existed.
+function shellBarTransparent(raw) {
+    var o
+    try { o = JSON.parse(String(raw || "")) } catch (e) { return false }
+    if (!o || typeof o !== "object") return false
+    return !!(o.bar && typeof o.bar === "object" && o.bar.transparent === true)
+}
+
 function parseConfig(raw) {
     var o = {}
     try { o = JSON.parse(String(raw || "")) || {} } catch (e) { o = {} }

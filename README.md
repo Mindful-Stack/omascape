@@ -1,7 +1,7 @@
 # Omascape
 
 A workspace overview overlay for [Omarchy](https://omarchy.org)'s Quickshell shell.
-Press **SUPER+A** to get a visual, spatial overview of every workspace — grouped by
+Press **SUPER+TAB** to get a visual, spatial overview of every workspace — grouped by
 monitor, with a **live thumbnail** of each window in its real position — then jump to a
 workspace, or **drag a window onto another workspace** to move it there.
 
@@ -16,7 +16,8 @@ Then bind a key, because Omascape only appears when you toggle it. Add this to
 `~/.config/hypr/bindings.lua` and run `hyprctl reload`:
 
 ```lua
-o.bind("SUPER + A", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
+hl.unbind("SUPER + TAB")   -- it is "Next workspace" by default
+o.bind("SUPER + TAB", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
 ```
 
 Full instructions, including the classic `.conf` syntax and a script that adds the bind for
@@ -155,8 +156,11 @@ omarchy plugin list | grep omascape
 
 ### 2. Bind a key to toggle it
 
-Omascape only appears when you toggle it, so bind a key. **SUPER+A** is the intended bind, and
-it is unbound in a stock Omarchy Quattro.
+Omascape only appears when you toggle it, so bind a key. **SUPER+TAB** is the intended bind.
+Unlike most suggestions it is *not* free in a stock Omarchy Quattro — it is "Next workspace", and
+SUPER+SHIFT+TAB is "Previous workspace". Taking it is deliberate: inside Omascape, Tab already
+steps between workspaces, so Tab comes to mean "workspaces" everywhere. The script below unbinds
+the old meaning before binding the new one; if you would rather keep it, pass any other key.
 
 Omarchy plugins cannot register keybinds themselves, and Omascape will not edit your Hyprland
 config behind your back, so this step is yours. Either add the line below by hand, or run the
@@ -172,7 +176,8 @@ and refuses to add a second copy:
 If your Omarchy uses the Lua binding config (`~/.config/hypr/bindings.lua`):
 
 ```lua
-o.bind("SUPER + A", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
+hl.unbind("SUPER + TAB")   -- it is "Next workspace" by default
+o.bind("SUPER + TAB", "Workspace overview", "omarchy-shell shell toggle se.mindfulstack.omascape")
 ```
 
 If you use plain Hyprland config (`~/.config/hypr/bindings.conf` or `hyprland.conf`):
@@ -189,11 +194,11 @@ hyprctl reload
 
 ### 3. Use it
 
-Press **SUPER+A**. The overlay opens on your focused monitor.
+Press **SUPER+TAB**. The overlay opens on your focused monitor.
 
 | Key / action             | Effect                                                    |
 | ------------------------ | --------------------------------------------------------- |
-| **SUPER+A**              | Toggle the overlay (open and close)                       |
+| **SUPER+TAB**              | Toggle the overlay (open and close)                       |
 | **1–9, 0**               | Jump to that workspace (`0` = 10)                         |
 | **Tab / Shift+Tab**      | Next / previous workspace (by number, wrapping; the first Tab goes to the one after yours) |
 | **Enter**                | Jump to the highlighted workspace                         |
@@ -232,7 +237,7 @@ omarchy plugin update se.mindfulstack.omascape
 omarchy plugin remove se.mindfulstack.omascape
 ```
 
-…then delete the SUPER+A bind you added and `hyprctl reload`.
+…then delete the SUPER+TAB bind you added and `hyprctl reload`.
 
 ### What it touches on your system
 
@@ -265,7 +270,7 @@ to create the runtime directory). No packages are installed and nothing is downl
 
 ### Troubleshooting
 
-- **Nothing happens on SUPER+A.** Check the plugin is `enabled` (`omarchy plugin list |
+- **Nothing happens on SUPER+TAB.** Check the plugin is `enabled` (`omarchy plugin list |
   grep omascape`) and that your bind targets the exact id `se.mindfulstack.omascape`. Re-run
   `hyprctl reload` after editing the bind.
 - **`summon: plugin not enabled` in the shell log.** Run `omarchy plugin enable
@@ -288,6 +293,7 @@ Optional user settings live in `~/.config/omarchy/omascape.json` (watched; edits
   "hint": true,
   "workspaces": 10,
   "motion": "auto",
+  "anchor": "center",
   "lockBorder": "rgb(ff4444)",
   "lockBorderSize": 6
 }
@@ -303,6 +309,12 @@ Optional user settings live in `~/.config/omarchy/omascape.json` (watched; edits
   follows. `0` shows only what Hyprland reports.
 - `motion` — `"auto"` (default) animates only when Hyprland's `animations:enabled` is on;
   `"full"` always animates; `"off"` never does (every duration is 0).
+- `anchor` — where the picker sits. `"center"` (default) floats it in the middle of the screen.
+  `"bar"` hangs it off the top bar instead: full width, square corners, the bar's own background
+  colour, and an accent hairline along its bottom edge. It unfurls downward from the bar rather
+  than fading in. Bar mode needs a *top* bar to hang from — with the bar on another edge, hidden,
+  or absent, there is nothing reserved at the top and the picker quietly stays centred. Any value
+  other than these two is treated as `"center"`.
 - `lockBorder` — colour of the share-time reminder frame drawn around a monitor showing an armed
   workspace (default `"rgb(ff4444)"`); only the `rgb(hhhhhh)` / `rgba(hhhhhhhh)` hex forms are
   accepted (Hyprland's own colour syntax), anything else falls back to the default. The alpha of
@@ -458,7 +470,7 @@ checking behavior by hand. Before opening a PR, confirm:
 
 - [ ] `mise run test` passes.
 - [ ] `omarchy plugin validate .` passes.
-- [ ] SUPER+A opens and closes the overlay; `Esc` and click-outside close it.
+- [ ] SUPER+TAB opens and closes the overlay; `Esc` and click-outside close it.
 - [ ] Number keys `1`–`0` jump to the right workspace; Tab + `Enter` work; arrows step windows; click works.
 - [ ] The window mini-map roughly matches your real window layout.
 - [ ] It re-themes correctly after `omarchy theme next` (or any theme switch).

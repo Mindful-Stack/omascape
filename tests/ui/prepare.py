@@ -92,6 +92,7 @@ qml = qml.replace('id: root', '''id: root
     property alias testPanel: panel
     property alias testCard: card
     property alias testScrim: scrimRect
+    property alias testShadow: cardShadow
     property alias testConfig: config
     property alias testLocks: locks
     property alias testEnterAnim: enterAnim
@@ -108,13 +109,6 @@ qml = qml.replace('id: root', '''id: root
         for (var i = 0; i < boxRepeater.count; i++) {
             var b = boxRepeater.itemAt(i)
             if (b && b.model && b.model.workspaceId === wsid) return b.opacity
-        }
-        return -1
-    }
-    function tileEntranceFor(addr) {
-        for (var i = 0; i < tileRepeater.count; i++) {
-            var t = tileRepeater.itemAt(i)
-            if (t && t.tileAddress === addr) return t.entranceOpacity
         }
         return -1
     }
@@ -215,6 +209,7 @@ for edge in ('left', 'right'):
     '           property int workspaces: 0\n'
     '           property string motion: "auto"; property string motionEffective: "full"\n'
     '           property string anchor: "center"\n'
+    '           property bool barTransparent: false\n'
     '           property bool motionResolved: true\n'
     '           property string lockBorder: "rgb(ff4444)"; property int lockBorderSize: 6\n'
     '           function probeMotion() {} }\n')
@@ -270,9 +265,16 @@ keep_loaded = json.loads((source / 'manifest.json').read_text()).get('keepLoaded
 (dest / 'Manifest.qml').write_text(
     'import QtQuick\nQtObject { readonly property bool keepLoaded: %s }\n'
     % ('true' if keep_loaded else 'false'))
+# SoftShadow stub: the real one is a RectangularShadow (a shader item the offscreen platform
+# has no use for), but its DEFAULTS are behaviour, not decoration -- the halo reaches
+# `blur - offset.y` above its target, which is what decides whether the bar-mode card paints
+# over the bar. A stub defaulting blur to 0 would make any test about that geometry reason
+# about zeros and pass for the wrong reason, so these mirror SoftShadow.qml exactly. Keep them
+# in step with it.
 (dest / 'SoftShadow.qml').write_text(
-    'import QtQuick\nItem { property Item target: parent; property real radius: 0; property real blur: 0\n'
-    '       property var offset: null; property color color: "black" }\n')
+    'import QtQuick\nItem { property Item target: parent; property real radius: 0\n'
+    '       property real blur: 28; property real spread: 0\n'
+    '       property var offset: Qt.vector2d(0, 6); property color color: "black" }\n')
 # Ui/ConfirmDialog stub: the real component (/usr/share/omarchy/shell/Ui/ConfirmDialog.qml) imports
 # qs.Commons for its theme (Color/Style/Util), which the offscreen fixture has none of, so it needs
 # the same "keep the behaviour, drop the shell wiring" treatment as OmascapeConfig/OmascapeLocks

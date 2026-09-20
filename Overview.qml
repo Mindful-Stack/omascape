@@ -285,12 +285,23 @@ Item {
     // delegates persist across rebuilds and a per-delegate Component.onCompleted would fire once
     // at startup and never again. It also means a mid-session rebuild cannot replay the
     // entrance — progress is already 1 by then.
-    property real entranceProgress: 1
-    property var rowRankMap: ({})
-    property int rowCount: 0
+    // How far the bar-mode card has unfurled, 0..1. Its top stays pinned to the bar and its
+    // HEIGHT grows, so the rows are uncovered from the top down, the way a blind comes down.
+    //
+    // A rigid slide was the obvious alternative and is wrong: a card translating down from
+    // above the bar shows its BOTTOM edge first (content is visible only where local
+    // y >= (1 - p) * height), so the LAST row would appear before the first and the reveal
+    // would read upside down.
+    //
+    // Nothing is painted above the bar either way, so this needs no clipping wrapper -- which
+    // matters, because this surface is WlrLayer.Overlay and the bar is WlrLayer.Top, so
+    // anything drawn above the bar's edge would be drawn OVER the bar.
+    property real entranceOpen: 1
     NumberAnimation {
-        id: staggerAnim
-        target: root; property: "entranceProgress"
+        id: openAnim
+        // motion.move, not motion.entrance: the entrance easing carries an overshoot, and an
+        // overshoot on a HEIGHT would open past the content and snap back.
+        target: root; property: "entranceOpen"
         from: 0; to: 1; duration: root.motion.enter; easing.type: root.motion.move
     }
     // Backdrop behind the focused monitor's group: a whisper of accent, so which screen is
@@ -1147,12 +1158,6 @@ Item {
     // box never owns a pointer grab). Roles are prefixed so `model.bx` cannot be confused
     // with the delegate's own x.
     function applyBoxes(boxes) {
-        // Row ordinals for the bar-mode entrance. Recomputed on every rebuild so the map stays
-        // correct as the layout changes; that costs nothing visually, because entranceProgress
-        // is already 1 outside the entrance itself.
-        var rr = Logic.rowRanks(boxes)
-        root.rowRankMap = rr.ranks
-        root.rowCount = rr.rowCount
         var seen = {}
         for (var i = 0; i < boxes.length; i++) {
             var b = boxes[i]
@@ -1314,9 +1319,9 @@ Item {
         // The staged entrance is bar-mode only: a top-down stagger under a card that scales from
         // its centre reads as a bug. With motion off, progress is SET, never animated — an
         // unplayed animation would leave every row at 0, i.e. an invisible grid.
-        staggerAnim.stop()
-        if (root.barMode && root.motion.enabled) { root.entranceProgress = 0; staggerAnim.start() }
-        else root.entranceProgress = 1
+        openAnim.stop()
+        if (root.barMode && root.motion.enabled) { root.entranceOpen = 0; openAnim.start() }
+        else root.entranceOpen = 1
         lockUnresolvedNotified = false; lockInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
@@ -1360,6 +1365,7 @@ Item {
             return
         }
         enterAnim.stop(); exitAnim.stop()
+        root.entranceOpen = 1
         root.entranceScale = 1                     // NEVER card.scale = 1 here: card.scale now
                                                      // carries a live binding, and an imperative
                                                      // assignment to a bound property destroys
@@ -1553,8 +1559,21 @@ Item {
         // lift off the desktop now that there is real air around it. Reverted after looking at
         // it: raising blur, offset and alpha together was too much, and the border added below
         // already does the lifting the deeper shadow was for. Doing both was double.
-        SoftShadow { target: card; scale: card.scale; opacity: card.opacity
-                     color: Qt.rgba(0, 0, 0, root.darkTheme ? 0.55 : 0.28) }
+        SoftShadow {
+            id: cardShadow
+            target: card; scale: card.scale; opacity: card.opacity
+            // In bar mode the halo must not reach ABOVE the card. This surface is
+            // WlrLayer.Overlay and the bar is WlrLayer.Top, so whatever the shadow paints above
+            // the card's top edge lands on the bar itself. The halo reaches `blur - offset.y`
+            // upward, which at the defaults is 28 - 6 = 22 px: almost the whole of a 26 px bar,
+            // darkened at up to 0.55 alpha. That reads as the card and the bar not matching --
+            // in EVERY theme, and whether the bar is painting a colour or showing the desktop,
+            // because it darkens the bar either way. Pushing the offset out to the blur radius
+            // puts the halo's top edge exactly on the card's, leaving the shadow only below.
+            // Expressed against `blur` rather than as a literal so the two cannot drift.
+            offset: Qt.vector2d(0, root.barMode ? blur : 6)
+            color: Qt.rgba(0, 0, 0, root.darkTheme ? 0.55 : 0.28)
+        }
         Rectangle {
             id: card
             anchors.horizontalCenter: parent.horizontalCenter
@@ -1588,7 +1607,10 @@ Item {
             // than one (two at 50% give 75%), which is what a cover-up strip would produce.
             radius: root.barMode ? 0 : root.cardRadius
             border.width: root.barMode ? 0 : 1
-            color: root.barMode ? root.barBackground : root.background
+            // A transparent bar has no colour to be continuous WITH, so the card stops
+            // pretending and uses the menu ground instead. It cannot follow the bar literally:
+            // a see-through card would put the workspace grid over live windows.
+            color: (root.barMode && !config.barTransparent) ? root.barBackground : root.background
             // With real air around the card it must read as elevated rather than as a lighter
             // rectangle. Accent-derived rather than a fixed neutral: a black hairline looks like
             // a bug on a light card and a white one vanishes on it. `accent` is already
@@ -1600,6 +1622,11 @@ Item {
             // goes true even mid-animation, rather than riding out entranceScale's in-flight
             // trajectory. See entranceScale's declaration for why that distinction matters.
             scale: root.barMode ? 1 : root.entranceScale
+            // The unfurl: the card's top is pinned to the bar and its height grows, so `clip`
+            // is what uncovers the rows from the top down. The Flickable inside keeps its
+            // RESTING height (see its own comment) -- it is revealed, never squashed.
+            clip: root.barMode
+            height: root.barMode ? Math.round(root.entranceOpen * implicitHeight) : implicitHeight
             readonly property int pad: Math.round(Style.space(12))
             // Space under the grid for the key hints or, while a query is active, the find
             // bar. Reserves the larger of the two whenever either could show, so swapping one
@@ -1734,9 +1761,26 @@ Item {
 
             Flickable {
                 id: flick
-                x: card.pad; y: card.pad
-                width: card.width - card.pad * 2
-                height: card.height - card.pad * 2 - card.hintSpace
+                // Centred on the card when the grid is narrower than the room available.
+                // layout() lays boxes out from x = 0 and the canvas is exactly the grid's
+                // width. In centred mode the card shrinks to the grid, so there is never any
+                // slack; a full-width bar-mode card leaves the difference -- 108 px on a
+                // 2048-logical panel, where maxCellW caps the cells at 380 before the width
+                // runs out -- and the grid would hug the left edge.
+                //
+                // It is the FLICKABLE that moves, not the canvas: pointerPoint() maps the
+                // pointer through `flick` and then calls the result canvas coordinates, which
+                // is only true while canvas.x is 0. Offsetting the canvas would silently break
+                // every hit test and the drag.
+                readonly property real avail: card.width - card.pad * 2
+                width: Math.min(canvas.implicitWidth, avail)
+                x: card.pad + Math.round(Math.max(0, (avail - width) / 2))
+                y: card.pad
+                // card.implicitHeight, NOT card.height: during the unfurl the card is shorter
+                // than its content, and sizing the viewport from the animated height would
+                // drive it toward zero -- onContentHeightChanged's clamp would then scroll the
+                // grid mid-animation and leave contentY wrong once it settled.
+                height: card.implicitHeight - card.pad * 2 - card.hintSpace
                 contentWidth: canvas.implicitWidth
                 contentHeight: canvas.implicitHeight
                 boundsBehavior: Flickable.StopAtBounds
@@ -1821,20 +1865,6 @@ Item {
                             // Arrival phase for this box's row. A Translate, not a `y` change:
                             // the y binding already carries the layout-motion Behavior, and the
                             // entrance must never fight a glide still in flight.
-                            // NO `|| 0` on the lookup. Rank 0 is a legitimate value (every
-                            // layout has a top row), so `|| 0` would turn a MISS into a silent
-                            // "first row". A miss cannot happen -- every box gets a rank, and
-                            // logic.js:397 skips any window whose workspace has no box, so no
-                            // tile can reference a rankless workspace -- and if that invariant
-                            // ever breaks it must be visible, not smoothed over. rowPhase's own
-                            // non-finite guard is the single fail-safe.
-                            readonly property real rowPhase: root.barMode
-                                ? Logic.rowPhase(root.entranceProgress,
-                                                 root.rowRankMap[model.workspaceId],
-                                                 root.rowCount)
-                                : 1
-                            opacity: rowPhase
-                            transform: Translate { y: (1 - boxItem.rowPhase) * 10 }
 
                             // big low-contrast numeral, only where nothing would hide it
                             Text {
@@ -1935,14 +1965,6 @@ Item {
                             cursorTarget: model.cursor
                             // Tiles take their BOX's rank, looked up by workspace id, so a tile
                             // can never stagger out of step with the well it sits in.
-                            // Same rule as the box delegate: no `|| 0`. See the comment there.
-                            readonly property real rowPhase: root.barMode
-                                ? Logic.rowPhase(root.entranceProgress,
-                                                 root.rowRankMap[model.wsid],
-                                                 root.rowCount)
-                                : 1
-                            entranceOpacity: rowPhase
-                            entranceOffsetY: (1 - rowPhase) * 10
                             closing: model.closing
                             dimmed: root.query.length > 0 && !model.matched && root.dropTargetAddress !== model.address
                             accent: root.accent
