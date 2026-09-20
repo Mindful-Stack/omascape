@@ -333,6 +333,34 @@ TestCase {
         compare(view.testCard.height, resting, "and it ends fully open")
     }
 
+    // The hint tiers, in the mode that states the claim most exactly. A bar-mode card's top is
+    // pinned and it grows downward, so the first tier's resting position is IDENTICAL before and
+    // after `?` — every pixel the row moves is spurious. The defect moved it 21 px up in one
+    // frame (hintBox takes its new size at once) and eased it back down over the card's 160 ms
+    // growth: a round trip to nowhere, read as the hints flickering. The centred case, where the
+    // row does legitimately end up somewhere new, is pinned in tests/ui/actions.qml.
+    function test_expanding_the_hints_never_moves_the_first_tier_in_bar_mode() {
+        seed(26, 4)
+        // The unfurl first. seed() waits 120 ms; the entrance runs 200 and openSettle holds the
+        // layout Behaviors off for 300 (both suppress layoutMotion), so sampling straight away
+        // would measure the card still opening — the row would move for a reason that has
+        // nothing to do with the tier, and with the Behaviors still off it could not show the
+        // defect either way.
+        tryVerify(function () { return view.layoutMotion }, 2000,
+                  "precondition: the entrance must be over and the layout Behaviors live")
+        compare(view.testCard.height, view.testCard.implicitHeight, "and the card fully unfurled")
+        var start = view.testHintRow.mapToItem(view, 0, 0).y
+        keyClick("?")
+        var worst = 0
+        for (var i = 0; i < 12; i++) {
+            wait(20)
+            worst = Math.max(worst, Math.abs(view.testHintRow.mapToItem(view, 0, 0).y - start))
+        }
+        verify(view.hintsExpanded, "precondition: the tier actually expanded")
+        verify(worst <= 1, "the row must stay put while the card grows beneath it; moved "
+               + worst + " px at its worst")
+    }
+
     // A rebuild mid-session must not replay the entrance. boxesModel/tilesModel are reconciled
     // in place so the delegates persist; an entrance keyed to anything a rebuild re-triggers
     // would re-close and re-open the card every time a window moved.
