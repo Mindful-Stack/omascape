@@ -53,6 +53,19 @@ QtObject {
     // defaults -- parseConfig is total -- so this is purely how the user finds out.
     signal invalidFile(string why)
 
+    // Emitted when the file could not be written. Mirrors OmascapeLocks: FileView raises
+    // `onSaveFailed`, and this is the component's own signal on top of it.
+    signal writeFailed(string why)
+
+    // True once `file.text()` is something save() can trust: either a successful load, or a
+    // load failure confirmed to be "no such file" (empty text is then the right starting point
+    // -- Logic.configWithKey treats "" as {} and creates the file). Any other load failure
+    // (permission denied, a directory sitting where the file should be, ...) leaves this false:
+    // text() may be stale or empty while the real file on disk is neither, and writing would
+    // destroy it. Same missing/error split as OmascapeLocks.qml:72-74, for the same reason --
+    // apply("") is still fine for display, since parseConfig is total either way.
+    property bool readableForSave: false
+
     function apply(raw) {
         var why = Logic.configParseError(raw)
         if (why.length > 0) cfg.invalidFile(why)
@@ -67,13 +80,42 @@ QtObject {
         cfg.lockBorderSize = o.lockBorderSize
     }
 
+    // Persist one setting. Reads the file's CURRENT text rather than rebuilding from the parsed
+    // properties, so keys this build does not know about are carried through (see
+    // Logic.configWithKey). Refused, not overwritten, when the file is not known to be either
+    // loaded or missing (readableForSave) or when it does not parse (configWithKey returns ""):
+    // the user may be mid-edit, and replacing their work with { changedKey: value } would be
+    // worse than doing nothing.
+    function save(key, value) {
+        if (!readableForSave) {
+            cfg.writeFailed("the file could not be read; fix that before changing settings here")
+            return false
+        }
+        var next = Logic.configWithKey(file.text(), key, value)
+        if (next.length === 0) {
+            cfg.writeFailed("the file could not be parsed; fix it before changing settings here")
+            return false
+        }
+        file.setText(next)
+        return true
+    }
+
     property FileView file: FileView {
         path: cfg.path
         watchChanges: true
+        atomicWrites: true
         printErrors: false
-        onLoaded: cfg.apply(text())
+        onLoaded: { cfg.apply(text()); cfg.readableForSave = true }
         onFileChanged: reload()
-        onLoadFailed: cfg.apply("")
+        // FileViewError distinguishes "no such file" (first run: text() == "" is genuinely the
+        // whole file) from every other failure (permission, a directory in its place, ...): those
+        // must NOT be treated as readable, or save() would trust an empty/stale text() and
+        // silently replace content it never actually saw.
+        onLoadFailed: function (error) {
+            cfg.apply("")
+            cfg.readableForSave = (error === FileViewError.FileNotFound)
+        }
+        onSaveFailed: function (error) { cfg.writeFailed(FileViewError.toString(error)) }
     }
 
     property FileView shellFile: FileView {

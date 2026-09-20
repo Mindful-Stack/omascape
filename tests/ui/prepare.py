@@ -292,7 +292,16 @@ peeklayer = replaced(peeklayer, '    id: peek\n',
     '           property string lockBorder: "rgb(ff4444)"; property int lockBorderSize: 6\n'
     '           signal invalidFile(string why)\n'
     '           function emitInvalid(why) { invalidFile(why) }\n'
-    '           function probeMotion() {} }\n')
+    '           function probeMotion() {}\n'
+    '           property var writes: []\n'
+    '           signal writeFailed(string why)\n'
+    # Records that a change was REQUESTED, and nothing more: the real save() reads the file's
+    # current text, validates it through Logic.configWithKey and writes atomically, none of
+    # which this wholesale-replaced stub can exercise. Preservation, atomicity and failure
+    # handling are covered elsewhere (Task 3's Tier 1 tests for configWithKey; the write path
+    # itself is a live check) -- same disclaimer as the OmascapeLocks stub above, same reason.
+    '           function save(key, value) { writes = writes.concat([key + "=" + value]); return true }\n'
+    '           }\n')
 # Lock state stub: the real OmascapeLocks.qml watches two files through Quickshell.Io. The stub
 # keeps the one property later tests depend on — `armed` is null until a load resolves — and
 # records writes instead of touching disk. Real file watching, atomic rename and load ordering
