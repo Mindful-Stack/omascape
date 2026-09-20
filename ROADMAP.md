@@ -22,13 +22,17 @@ inert rather than escalating to Close all.
 
 ## Next steps
 
-### 1. Verify when docked (not yet tested — no external display at build time) — omascape#40
-- [ ] Overlay opens on the **focused** monitor, not always the primary
+### 1. ~~Verify when docked~~ ✅ verified by eye (2026-09-20, omascape#40)
+- [x] Overlay opens on the **focused** monitor, not always the primary
       (`focusedScreen()` matches `Hyprland.focusedMonitor.name` → `Quickshell.screens`).
-- [ ] Two-row layout renders: laptop `eDP-1` (1–5) and external `HDMI-A-1` (6–10),
+- [x] Two-row layout renders: laptop `eDP-1` (1–5) and external `HDMI-A-1` (6–10),
       grouped by each workspace's `.monitor`; collapses to one row when undocked.
-- [ ] Window mini-map coordinates are correct on the **external** monitor too (the
+- [x] Window mini-map coordinates are correct on the **external** monitor too (the
       origin/scale conversion was only checked on `eDP-1`, origin `(0,1440)` scale `1.25`).
+
+Checked on real hardware with the external display attached; no Tier 2 case was written, so
+this is a by-eye verification of the configured-monitor case, not a regression test. Item 15
+(a monitor with *no* config entry) is still open.
 
 ### 2. v2 — both-screens rendering with dimming (the original idea)
 Currently a single overlay on the active monitor shows every monitor's workspaces as
@@ -125,7 +129,7 @@ Shift+arrow swaps workspace *contents* (accepted as the risky half although
 *lands*, never on which arrow was pressed, because direction-keyed rules are dead for
 single-monitor users.
 
-### 15. Unknown-monitor hotplug — deferred bug (2026-09-18) — capture alongside omascape#40
+### 15. Unknown-monitor hotplug — deferred bug (2026-09-18)
 Plugging in a monitor that has no entry in the user's Hyprland monitor config makes the overview
 misbehave. The symptom has not been captured and the cause not isolated; it may be that machine's
 monitor setup rather than an omascape bug, so it is parked, not triaged. When work next touches

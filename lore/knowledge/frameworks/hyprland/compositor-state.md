@@ -142,13 +142,14 @@ inferred from one machine, never observed:
 - **`hl.get_workspace()` with the `special:…` name form.** Close-all on the scratchpad row depends
   on it. If it is not accepted, that row closes nothing and reports "workspace not found" — wrong
   but inert and visible.
-- **The docked two-row layout and the external monitor's mini-map coordinates.** The origin and
-  scale conversion was checked on `eDP-1` only (`ROADMAP.md` item 1); an unconfigured hotplugged
-  monitor is a known, uncaptured misbehaviour (`ROADMAP.md` item 15).
+Both are Tier 2 cases waiting to be written — tracked as omascape#38 (Move and Swap) and
+omascape#39 (`special:` names). Until then, a change that touches one of them is changing
+behaviour nobody has seen.
 
-Each is a Tier 2 case waiting to be written — tracked as omascape#38 (Move and Swap),
-omascape#39 (`special:` names) and omascape#40 (the docked layout). Until then, a change that
-touches one of them is changing behaviour nobody has seen.
+The docked two-row layout and the external monitor's mini-map coordinates were on this list
+until 2026-09-20, when they were verified by eye on real hardware (`ROADMAP.md` item 1,
+omascape#40). That is an observation, not a regression test; an unconfigured hotplugged monitor
+remains a known, uncaptured misbehaviour (`ROADMAP.md` item 15).
 
 ## See Also
 
