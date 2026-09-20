@@ -284,6 +284,7 @@ peeklayer = replaced(peeklayer, '    id: peek\n',
                                   '''    id: peek
     property alias testWindowTile: peekWindowTile
     property alias testMiniMap: miniMap
+    property alias testFrameRadius: frame.radius
 ''', 'peek id (test alias anchor)')
 (dest / 'PeekLayer.qml').write_text(peeklayer)
 # Shell-only helpers: the config loader needs Quickshell.Io, the shadow a GPU shader.

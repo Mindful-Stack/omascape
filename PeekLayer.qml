@@ -37,6 +37,13 @@ Item {
     // with the backdrop off.
     property bool scrimVisible: true
     property real cardRadius: 12
+    // The WINDOW peek's radius, and deliberately not the card's. A workspace peek rounds a
+    // backing PLATE — the mini-map's tiles sit inside it at their own small radius, so the card's
+    // ~20 reads as a soft edge on empty background. A window peek has no plate: the capture fills
+    // the frame, so the same 20 is a bite taken straight out of the screenshot, several times
+    // rounder than the window looks on the desktop. The box's own radius instead, so a peeked
+    // window reads like the workspace boxes it was summoned from.
+    property real windowRadius: 8
     property string fontFamily: ""
     property int captionSize: 10
     property bool darkTheme: false
@@ -75,7 +82,7 @@ Item {
         id: frame
         anchors.centerIn: parent
         width: Math.max(1, peek.fit.w); height: Math.max(1, peek.fit.h)
-        radius: peek.cardRadius
+        radius: peek.isWindow ? peek.windowRadius : peek.cardRadius
         color: peek.background
         // A zero fit means there is nothing honest to draw (a 0x0 monitor, a window that left the
         // model between the resolve and this binding). Draw nothing rather than a 1px artefact.
@@ -94,10 +101,11 @@ Item {
             motion: peek.motion
             iconMax: 96
             decorated: false
-            // Fills `frame`, so its own corners must be drawn at the frame's radius — the grid's
-            // r5 default reads as a smaller, squarer rectangle sitting inside the r20 frame, with
-            // a hairline the card never shows, and pokes past the SoftShadow at all four corners.
-            cornerRadius: peek.cardRadius
+            // Fills `frame`, so its own corners must be drawn at the frame's radius — any other
+            // value reads as a differently-shaped rectangle sitting inside the frame, with a
+            // hairline the card never shows, and pokes past the SoftShadow at all four corners.
+            // The frame is on `windowRadius` here (see its own comment), so this follows it.
+            cornerRadius: peek.windowRadius
             // A fresh capture is created on every hold (see iconGraceMs's own comment in
             // WindowTile.qml), so unlike a grid tile this one races the icon against the first
             // frame every single time — the bug docs/specs/2026-09-18-peek-design.md's own
