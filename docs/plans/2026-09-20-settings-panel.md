@@ -699,6 +699,92 @@ git commit -m "feat(settings): ctrl+, opens the panel; Esc closes it, not the pi
 
 ### Task 7: Wire the rows, the changes and the peek interaction
 
+## ⚠ Carried from Task 5's review — a lost update in the FILE, not just the display
+
+`FileView.text()` is a cache that only updates on `operationFinished`, and `saveAsync()` captures
+its payload *before* cancelling any in-flight write (verified in Quickshell 0.3.1's
+`src/io/fileview.cpp:321-338`). So two `save()` calls in quick succession do this:
+
+1. save#1 builds new text from `text()`, starts a write.
+2. save#2 — before that write finishes — reads `text()`, **which still returns the ORIGINAL
+   content**, builds its own new text from it, and cancels write#1.
+3. The file ends up with change#2 only. **Change#1 is lost.**
+
+This is reachable by the exact scenario this task tests: two quick Rights on `workspaces`. And
+`test_two_quick_presses_do_not_collapse_into_one_value` would **pass anyway**, because the stub
+records two distinct requests — the loss happens in a write path the fixture does not have.
+
+**So `applySettingChange` must pass the whole pending set, not one key.** `root.settingsPending`
+already holds every unconfirmed change (it exists for the displayed-value version of this same
+bug). Applying all of them to the file's text on every save makes write#2's payload a superset of
+write#1's, so a cancelled write loses nothing:
+
+```qml
+    function applySettingChange(key, dir) {
+        var row = null
+        for (var i = 0; i < root.settingsRows.length; i++)
+            if (root.settingsRows[i].key === key) row = root.settingsRows[i]
+        if (!row || !row.editable) return
+        var current = root.settingValue(key)
+        var next = Logic.nextSettingValue(key, current, dir)
+        if (next === current) return                 // clamped: nothing to write
+        var pending = {}
+        for (var k in root.settingsPending) pending[k] = root.settingsPending[k]
+        pending[key] = next
+        root.settingsPending = pending
+        // The WHOLE pending set, not just `key`: FileView.text() is a cache that does not
+        // update until a write completes, and a second save cancels the first while having
+        // built its payload from the pre-first-write text. Sending every unconfirmed change
+        // each time makes each payload a superset of the last, so a cancelled write loses
+        // nothing. Verified against fileview.cpp:321-338.
+        if (!config.saveAll(pending)) {
+            var revert = {}
+            for (var j in root.settingsPending) if (j !== key) revert[j] = root.settingsPending[j]
+            root.settingsPending = revert
+        }
+    }
+```
+
+`OmascapeConfig` gains `saveAll(obj)` beside `save(key, value)` — applying each key in turn
+through `Logic.configWithKey`, refusing entirely if any step returns `""`, and writing once:
+
+```qml
+    // Applies several settings in ONE write. See the caller's comment: a second write cancels
+    // the first and builds its payload from stale cached text, so each payload must carry every
+    // unconfirmed change rather than only the newest.
+    function saveAll(values) {
+        if (!readableForSave) {
+            cfg.writeFailed("the file could not be read; fix that before changing settings here")
+            return false
+        }
+        var next = file.text()
+        for (var k in values) {
+            next = Logic.configWithKey(next, k, values[k])
+            if (next.length === 0) {
+                cfg.writeFailed("the file could not be parsed; fix it before changing settings here")
+                return false
+            }
+        }
+        file.setText(next)
+        return true
+    }
+```
+
+Clear `settingsPending` on `config`'s reload, as the plan already specifies. `FileView` also has
+a `saved()` signal (`fileview.hpp:342`) if a tighter clear is wanted later.
+
+**Test it:** the existing two-quick-presses test stays (it pins the *request* side). Add one
+asserting the second request carries BOTH changes — that is the half the stub can actually see:
+
+```qml
+        // The second write must carry the first change too, or a cancelled write loses it.
+        verify(String(view.testConfig.writes[before + 1]).indexOf("workspaces") >= 0,
+               "the second save still carries workspaces")
+```
+
+Adjust the stub to record the whole map rather than one `key=value` string.
+
+
 **Files:** Modify `Overview.qml` · Modify `tests/ui/settings.qml`
 
 - [ ] **Step 1: Write the failing tests**
