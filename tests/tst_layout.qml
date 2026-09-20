@@ -1600,6 +1600,16 @@ TestCase {
         compare(Logic.nextSettingValue("workspaces", 20, 1), 20, "and clamp at the top")
         compare(Logic.nextSettingValue("workspaces", 0, -1), 0, "and at the bottom")
         compare(Logic.nextSettingValue("lockBorderSize", 6, -1), 5, "the other stepper too")
+        // Every row the panel renders as EDITABLE must have somewhere to cycle to. Without this, a
+        // setting added to the schema and to SETTING_ORDER but forgotten here shows arrows that do
+        // nothing -- and `nextSettingValue` being TOTAL means it fails silently rather than throwing.
+        var rows = Logic.settingsRows(Logic.parseConfig("{}"))
+        var uncovered = []
+        for (var i = 0; i < rows.length; i++)
+            if (rows[i].editable && !Logic.SETTING_CYCLES[rows[i].key]
+                                 && !Logic.SETTING_RANGES[rows[i].key])
+                uncovered.push(rows[i].key)
+        compare(uncovered.join(","), "", "every editable row needs a cycle or a range")
     }
 
     function test_next_setting_value_is_total() {
@@ -1609,5 +1619,7 @@ TestCase {
         compare(Logic.nextSettingValue("workspaces", NaN, 1), 0, "a non-finite number restarts at 0")
         compare(Logic.nextSettingValue("anchor", "barr", 1), "center",
                 "an out-of-set value lands on the first valid one, not on itself")
+        compare(Logic.nextSettingValue("anchor", "barr", -1), "center",
+                "an out-of-set value recovers in BOTH directions, not just forward")
     }
 }
