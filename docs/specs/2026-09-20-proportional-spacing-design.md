@@ -72,7 +72,7 @@ the middle of it, which reads as cramped precisely because the room is there and
      then it overflows exactly as the pixel model already does.
 
   The canvas is therefore **never wider than `availW`** (bar the `minCellW` case) and at most
-  `2·cols + 1` px narrower when the cap does not bind: the overshoot the fit step removed plus
+  `2·cols` px narrower when the cap does not bind: the fit condition is strict, so a step only runs on an overshoot of at least 1 px, and it removes at most `cols + (cols+1)` px — the overshoot it removed plus
   what the step over-removed. That remainder is centred by the Flickable, as slack is today.
 
   | screen (bar mode, `availW`) | today `cw` / gap | **new `cw` / gap** | canvas | row height (16:10) |
@@ -132,7 +132,7 @@ the middle of it, which reads as cramped precisely because the room is there and
 - **`minCellW` binds.** A very narrow screen: `cw` = 140, `gap` = 11, and the row may overflow
   `availW`, exactly as the pixel model already can — the Flickable scrolls it. `cols` drops to 1
   before that, so it takes an `availW` under 162 to reach it.
-- **Rounding.** Covered by the fit step above: never wider, at most `2·cols + 1` narrower.
+- **Rounding.** Covered by the fit step above: never wider, at most `2·cols` narrower (measured: exactly 2, 4, 6, 8, 10 for one to five columns).
 
 ## Tests
 
@@ -142,7 +142,7 @@ Tier 1, `tests/tst_layout.qml`, ratio on:
   columns (`gap` and `gap + cw + gap`). The two one-fit-step rows (2024 and 1820) are the ones
   the review found overflowing, so they are the ones that prove the fit step
 - a sweep: for every integer `availW` from 162 to 4384 (the cap's threshold), the canvas is
-  `≤ availW` and `≥ availW − (2·cols + 1)`; a single loop, one assertion each way, stated as the
+  `≤ availW` and `≥ availW − 2·cols`, plus a finiteness check per width; a single loop, one assertion each way, stated as the
   property it is
 - `availW` missing (absent, `0`, negative, `NaN`): `cols` = 5, `cw` = 140, `gap` = 11, canvas 766
 - `rowSpacing` is ignored in ratio mode: second sub-row `y` = `gch + gap`; second monitor group
@@ -158,7 +158,7 @@ Tier 1, `tests/ui/dropdown.qml`:
 
 - `test_the_grid_is_centred_when_narrower_than_the_card` seeds a panel wide enough for
   `maxCellW` to bind (6000 logical) instead of 2048, keeping its slack precondition honest
-- a new test at 2048: the canvas fills the card to within `2·cols + 1` px, and the first box
+- a new test at 2048: the canvas fills the card to within `2·cols` px, and the first box
   starts at `card.pad + gap`, not at `card.pad`
 
 Sweep by eye after `mise run link` and a restart on both screens: the ratio, and whether the top

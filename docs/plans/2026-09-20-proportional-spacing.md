@@ -463,7 +463,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: The width sweep — never wider, never more than `2·cols + 1` narrower
+### Task 4: The width sweep — never wider, never more than `2·cols` narrower
 
 **Files:**
 - Modify: `tests/tst_layout.qml`
@@ -474,7 +474,7 @@ Append after Task 3's tests:
 
 ```qml
     // Distinguishes: a missing fit step (some width in 162..4384 overflows — the first draft
-    // did at 2024 and 1820) and an over-eager one (a canvas more than 2*cols+1 px short of
+    // did at 2024 and 1820) and an over-eager one (a canvas more than 2*cols px short of
     // the width it was given, which is the most a single step can leave behind). Stated once as
     // the property, for every integer width up to the point maxCellW starts binding (4384 =
     // 5*800 + 6*64), rather than for the widths the table happens to name.
@@ -484,11 +484,11 @@ Append after Task 3's tests:
             var r = fiveOn(w), cols = firstRowCount(r), canvas = r.canvasSize.w
             if (canvas > w)
                 fail("availW " + w + ": canvas " + canvas + " overflows")
-            if (canvas < w - (2 * cols + 1))
+            if (canvas < w - 2 * cols)
                 fail("availW " + w + ": canvas " + canvas + " is " + (w - canvas) + " short with " + cols + " columns")
             if (w - canvas > worstSlack) worstSlack = w - canvas
         }
-        verify(worstSlack <= 11, "five columns can leave at most 11 px, left " + worstSlack)
+        compare(worstSlack, 10, "five columns leave at most 10 px, at availW 791")
     }
 ```
 
@@ -741,7 +741,7 @@ In `tests/ui/dropdown.qml`, replace the comment and function
         compare(avail, 2024, "precondition: bar mode gives the canvas the panel minus the pad")
         var canvas = view.testFlick.contentWidth
         verify(canvas <= avail, "the canvas fits: " + canvas + " in " + avail)
-        verify(avail - canvas <= 11, "five columns leave at most 2*5+1 px, left " + (avail - canvas))
+        verify(avail - canvas <= 10, "five columns leave at most 2*5 px, left " + (avail - canvas))
         var first = view.boxes[0]
         verify(first.x > 0, "the first cell does not touch the canvas edge")
         compare(first.x, Math.round(first.w * view.params.gapRatio),
@@ -764,7 +764,7 @@ bash tests/ui/run.sh Dropdown::test_the_grid_fills_a_laptop_width_with_a_gap_at_
 
 Expected: the first **passes** already (at 6000 the old 380 cap leaves even more slack, and the
 centring code is on `main`); it is being moved, not written. The second fails at
-`verify(avail - canvas <= 11)` with `left 108`, or at `first.x > 0` — the production params are
+`verify(avail - canvas <= 10)` with `left 108`, or at `first.x > 0` — the production params are
 still the pixel model.
 
 - [ ] **Step 3: Update the production params and the stale comment**
@@ -793,7 +793,7 @@ narrower…` through `…and the grid would hug the left edge.`) becomes:
                 // layout() lays boxes out from x = 0 and the canvas is exactly the grid's
                 // width, edges included. In centred mode the card shrinks to the grid, so there
                 // is never any slack; a full-width bar-mode card leaves the fit step's few
-                // pixels (at most 2*cols+1), and real slack only where maxCellW binds — a
+                // pixels (at most 2*cols), and real slack only where maxCellW binds — a
                 // canvas past 4384 logical. Either way the remainder must not sit on one side.
 ```
 
@@ -981,7 +981,7 @@ Spec: `docs/specs/2026-09-20-proportional-spacing-design.md`. Plan:
 | 3816 (4K at 1x) | 696 / 56 | 3816 |
 | 1820 (laptop, centred) | 331 / 26 | 1811 |
 
-The sweep test proves no width from 162 to 4384 overflows or is more than 2·cols+1 px short.
+The sweep test proves no width from 162 to 4384 overflows or is more than 2·cols px short.
 
 ## Corrected during review of the spec
 
@@ -1031,5 +1031,5 @@ anyway; it is part of the loop, not an afterthought.
   `multiWithScratchpad` are defined once (Tasks 1, 3, 5) and used by name afterwards; `edge`,
   `rowGap`, `gapMin`, `edges`, `proportional` are Task 2's names and Task 5 uses the same ones.
 - **Spec conflicts.** None found; the plan's numbers are the spec's post-review numbers. The
-  spec says the canvas is "at most `2·cols + 1` narrower when the cap does not bind" and the
+  spec says the canvas is "at most `2·cols` narrower when the cap does not bind" and the
   sweep pins exactly that.
