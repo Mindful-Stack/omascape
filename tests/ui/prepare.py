@@ -261,6 +261,7 @@ peeklayer = replaced(peeklayer, '    id: peek\n',
 (dest / 'OmascapeConfig.qml').write_text(
     'import QtQuick\nQtObject { property bool scrim: true; property bool hint: true\n'
     '           property int workspaces: 0\n'
+    '           property string activate: "enter"\n'
     '           property string motion: "auto"; property string motionEffective: "full"\n'
     '           property bool motionResolved: true\n'
     '           property string lockBorder: "rgb(ff4444)"; property int lockBorderSize: 6\n'

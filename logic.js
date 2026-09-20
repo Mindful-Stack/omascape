@@ -1072,6 +1072,7 @@ function parseConfig(raw) {
         workspaces: (typeof o.workspaces === "number" && isFinite(o.workspaces))
             ? Math.max(0, Math.floor(o.workspaces)) : 10,
         motion: (o.motion === "full" || o.motion === "off") ? o.motion : "auto",
+        activate: (o.activate === "select") ? "select" : "enter",
         lockBorder: (typeof o.lockBorder === "string" && LOCK_BORDER_RE.test(o.lockBorder))
             ? o.lockBorder : "rgb(ff4444)",
         lockBorderSize: (typeof o.lockBorderSize === "number" && isFinite(o.lockBorderSize))
@@ -1197,9 +1198,13 @@ function tileAt(candidates, px, py) {
     return best ? best.address : ""
 }
 
-// "Most recent input device wins." A live pointer (see Overview.pointerLive) names what it is
-// over and nothing else — over empty canvas an action has NO target, deliberately: silently
-// falling back to the keyboard would make Ctrl+W close a window the user is not looking at.
+// "Most recent input device wins" — under the "enter" activate policy. A live pointer (see
+// Overview.pointerLive) names what it is over and nothing else — over empty canvas an action has
+// NO target, deliberately: silently falling back to the keyboard would make Ctrl+W close a window
+// the user is not looking at.
+// Under the "select" policy the pointer is not a targeting device at all — pointing highlights,
+// clicking selects — so the pointer branch is skipped entirely and the keyboard precedence below
+// is the whole rule, empty canvas included. See docs/specs/2026-09-18-activate-select-design.md.
 // Otherwise the keyboard: while a query is active the target is the find match and nothing
 // else — a query with no match is a TERMINAL "no target", not a fall-through to the cursor or
 // the selected workspace. Without that, a mistyped search plus Enter would jump to whatever
@@ -1209,7 +1214,7 @@ function tileAt(candidates, px, py) {
 // fall-through by "simplifying" it back in.) With no query, the window cursor, then the selected
 // workspace.
 function target(input) {
-    if (input.pointerLive) {
+    if (!input.selectMode && input.pointerLive) {
         if (input.pointerTileAddress) return { kind: "window", address: input.pointerTileAddress }
         if (hasWs(input.pointerWorkspaceId)) return { kind: "workspace", id: input.pointerWorkspaceId }
         return null
@@ -1388,6 +1393,34 @@ function isActionKey(key, chord, ctrlMask) {
     // it must read pointer liveness rather than clearing it — see the peek spec, "`Space` is an
     // action key". A chorded Space is excluded by the line above.
     return key === 0x01000004 || key === 0x01000005 || key === 0x20
+}
+
+// The "select" activate policy's digit rule (docs/specs/2026-09-18-activate-select-design.md).
+// Pure: `boxes` is the same plain layout array indexOfWorkspace reads, so the whole gesture is
+// decided here rather than half here and half in the key handler.
+//
+// The box test comes FIRST, and that ordering is the rule, not an optimisation. hasWs() tests an
+// id for validity, not a box for existence, so without this a digit for a workspace with no box
+// would arm the latch and a second press would enter a workspace the user never saw selected.
+// Testing it first also covers, with no extra case, a box that disappears between the two presses.
+//
+// The latch is the PREVIOUS key code, not the previous workspace: "2" then "3" must select 3, not
+// enter it. Returns null for anything that is not a digit; `latch` in the result is always what
+// the caller should store.
+//
+// `autoRepeat` is handled here rather than by an early return in the key handler so that "a
+// repeat is a true no-op" is a Tier 1 assertion: QtTest's QML key API cannot synthesise a real
+// auto-repeat event (tests/ui/actions.qml:431), so the offscreen suite could never cover it.
+// It is checked BEFORE the box lookup, because a repeat must change nothing at all — including
+// the latch of a digit whose box has since gone.
+function digitActivate(key, latch, boxes, autoRepeat) {
+    if (key < 0x30 || key > 0x39) return null            // Qt.Key_0 .. Qt.Key_9 (ASCII)
+    var id = (key === 0x30) ? 10 : key - 0x30            // Qt.Key_0 is workspace 10
+    if (autoRepeat) return { action: "none", id: id, index: -1, latch: latch }
+    var index = indexOfWorkspace(boxes || [], id)
+    if (index < 0) return { action: "none", id: id, index: -1, latch: 0 }
+    if (latch === key) return { action: "enter", id: id, index: index, latch: 0 }
+    return { action: "select", id: id, index: index, latch: key }
 }
 
 // ---- Scratchpad (docs/specs/2026-09-12-scratchpad-design.md) ---------------------------

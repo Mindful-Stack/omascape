@@ -116,6 +116,11 @@ What the prototype already establishes, so it need not be rediscovered:
   bar's own ground across themes. That is the whole risk of the square-corner treatment and it
   has not been looked at by eye.
 
+### 13. ~~Activate: select first, enter second~~ ✅ done (2026-09-19)
+`activate` config key: `"enter"` (default, unchanged) jumps/focuses immediately; `"select"`
+makes a digit or a click select instead, committed with `Enter`, the same digit again, or a
+double-click; see `docs/specs/2026-09-18-activate-select-design.md`.
+
 ## Maintenance gotchas (verified in-session)
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell
   rescanPlugins` reloads the registry but NOT the live QML component.
