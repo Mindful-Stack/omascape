@@ -138,3 +138,5 @@ compositor" rule true while leaves still show per-monitor state — see
 - [[frameworks/quickshell/component-patterns]] — how a leaf receives what it needs.
 - [[learnings/quickshell-list-is-display-scoped]] — the same snapshot-vs-live trap outside QML.
 - [[languages/lua/chunk-authoring]] — what `Hyprland.dispatch` is given.
+- [[learnings/overlay-layer-focus-must-be-ondemand]] — the layer-shell side of the same
+  compositor boundary.

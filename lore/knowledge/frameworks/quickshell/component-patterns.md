@@ -138,3 +138,5 @@ Cite the spec. It is the only link between a component and the reasoning behind 
   handed to it, and what it must not.
 - [[adrs/0009-live-window-previews]] — `WindowTile` as the worked example: a leaf handed a
   capture handle as a property.
+- [[learnings/overlay-layer-focus-must-be-ondemand]] — the focus settings these surfaces take.
+- [[learnings/only-left-button-submits-a-drop]] — the audit a widened `acceptedButtons` owes.

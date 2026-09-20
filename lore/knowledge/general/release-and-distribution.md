@@ -153,3 +153,6 @@ green PR can talk you past.
 - [[general/testing]] — what Tier 1 actually covers before a merge ships.
 - [[general/architecture]] — the files that make up the shipped plugin.
 - [[adrs/0004-qt-compatibility-floor]] — why CI's Qt is the one that matters.
+- [[learnings/omarchy-plugin-install-mechanics]] — what `omarchy plugin add` does on the user's
+  machine, and why the manifest `id` cannot change.
+- [[general/feature-workflow]] — how a change gets to the point of being merged at all.

@@ -103,3 +103,4 @@ The rules this implies:
   (95 assertions when this record was written; 112 on `7200771`, Tier 1).
 - [[languages/bash/test-harnesses]] — how that suite is written, and the stub-and-sandbox idiom.
 - [[languages/bash/script-conventions]] — the conventions `scripts/dev-link.sh` follows.
+- [[learnings/omarchy-plugin-install-mechanics]] — the ordinary install this one stands in for.
