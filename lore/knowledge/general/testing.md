@@ -1,6 +1,6 @@
 ---
 title: Testing — which tier a test belongs in, and how to write it
-description: Tier 1 (`mise run test`) gates every merge and holds 532 test functions across four runners; a logic test is auto-discovered, a UI suite must be registered in tests/ui/run.sh by hand, and the offscreen fixture fails loudly rather than silently only where prepare.py guards it.
+description: Tier 1 (`mise run test`) gates every merge and holds 542 test functions across four runners; a logic test is auto-discovered, a UI suite must be registered in tests/ui/run.sh by hand, and the offscreen fixture fails loudly rather than silently only where prepare.py guards it.
 tags: [testing, ci, qml, javascript, tooling]
 ---
 
@@ -8,7 +8,7 @@ tags: [testing, ci, qml, javascript, tooling]
 
 [[adrs/0003-test-tiers]] records *why* there are two tiers and why a third was rejected. This node
 is the working rule: where a new test goes, what it is called, and what has to be edited for it to
-run at all. Counts taken 2026-09-20 against `origin/main`.
+run at all. Counts taken 2026-09-20 against `origin/main` (`7200771`).
 
 ## Pick the tier, then pick the runner
 
@@ -24,7 +24,7 @@ sequence, and "Tier 1 passed" means all four:
 | `tests/integration/` | Only a real compositor can show it | `mise run test-integration`, **not in CI** |
 
 If it can be answered by calling a `Logic.*` function, it belongs in `tests/tst_*.qml` — that
-tier is cheap, hermetic and already holds 188 of the 532 test functions.
+tier is cheap, hermetic and already holds 188 of the 542 test functions.
 
 ## Registering the test
 
@@ -45,6 +45,41 @@ underscore after the prefix; the eight that do not are single-word cases.
 Assertions across both QML tiers: `compare` 1503, `verify` 597, `fuzzyCompare` 36, `fail` 23,
 `tryVerify` 9, `tryCompare` 1. Prefer `compare` — it prints both values on failure where `verify`
 prints only "false". `fuzzyCompare` is for animated or scaled geometry only.
+
+## Every test says what it falsifies
+
+The strongest convention in this suite is one comment line. **350 `Distinguishes:` comments sit
+against 542 test functions**, each naming the specific wrong implementation the test would catch.
+11 of the 17 test files use it, led by `tests/ui/actions.qml` (78) and `tests/tst_actions.qml`
+(55).
+
+```qml
+// Distinguishes: a fixture where a synthetic mouseMove never reaches the HoverHandler — which
+// would make every pointer-targeting test below vacuously pass on the keyboard path.
+function test_a_mouse_move_makes_the_pointer_live() {
+```
+
+It is not a description of the test. It names the **bug that would survive without it**, which is
+a different sentence and a much harder one to write — and writing it is the check. A test whose
+`Distinguishes:` line can only say "it would be broken" is a test that is asserting the
+implementation back to itself.
+
+Three forms recur, and all three are worth copying:
+
+- **The regression it was written for.** `// Distinguishes: THE bug this suite exists for (found
+  on a real desktop, 2026-09-18)` — with the date and where it was found, so the test can be read
+  years later as the record of an incident.
+- **The plausible wrong fix.** `tests/ui/monitors.qml:98` distinguishes "THE regression a naive
+  'skip what has no monitor' produces" — it pins the *near miss*, not just the bug.
+- **Fixture health.** `tests/ui/actions.qml`, `activate.qml` and `peek.qml` each open with a
+  `// ---- fixture health ----` section whose tests exist only to prove the other tests are not
+  vacuous: that `keyClick` reaches the key catcher, that a synthetic `mouseMove` reaches the
+  `HoverHandler`. **An offscreen fixture can fail by doing nothing**, and every assertion after it
+  passes. If a new UI suite depends on a synthetic event reaching a handler, prove it reaches the
+  handler first.
+
+Write the line before the test body. If you cannot say what a passing run rules out, the test is
+not ready.
 
 **Wait on a condition, not on a duration.** Use `tryVerify(() => cond)` whenever the test is
 waiting for something to become true. Use `wait(N)` only where the test is deliberately asserting
@@ -103,3 +138,4 @@ Say in the PR which of them you ran — see [[general/release-and-distribution]]
 - [[languages/lua/testing]] — the parse-and-behave pair for generated chunks.
 - [[languages/bash/test-harnesses]] — how the two bash suites assert, and what a `SKIP:` owes you.
 - [[languages/bash/script-conventions]] — every runner here is a bash entry point.
+- [[domain/targeting-and-pointer-liveness]] — the rule the largest suites exist to pin.
