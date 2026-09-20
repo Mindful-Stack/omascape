@@ -1546,9 +1546,10 @@ TestCase {
         compare(Logic.rowPhase(0.5, 99, 3), Logic.rowPhase(0.5, 2, 3), "rank clamps to the last row")
     }
 
-    // The panel's model. The FIRST assertion is the one that matters long-term: every key
-    // parseConfig returns must appear exactly once. Without it, a future setting gets added to
-    // the schema and simply never shows up in the panel — silently, with every test still green.
+    // The panel's model. SETTING_ORDER must cover the entire schema — this is the assertion
+    // that catches drift. The key-set comparison below documents the contract but cannot fail,
+    // because the fallback loop guarantees rows.keys == cfg.keys by construction. The fallback's
+    // job is to keep a drifted build honest to the user, not to catch drift in CI.
     function test_settings_rows_cover_every_config_key() {
         var cfg = Logic.parseConfig("{}")
         var rows = Logic.settingsRows(cfg)
@@ -1556,6 +1557,12 @@ TestCase {
         for (var i = 0; i < rows.length; i++) keys.push(rows[i].key)
         var schema = []
         for (var k in cfg) schema.push(k)
+        // SETTING_ORDER is the drift detector: it must name every schema key, no more, no less.
+        compare(Logic.SETTING_ORDER.slice().sort().join(","),
+                schema.slice().sort().join(","),
+                "SETTING_ORDER must name every schema key")
+        // The key-set assertion documents the contract — every parseConfig key gets exactly one row.
+        // It cannot fail because the fallback loop appends rows for any cfg key SETTING_ORDER omits.
         compare(keys.slice().sort().join(","), schema.slice().sort().join(","),
                 "every parseConfig key needs a row, and no row may invent one")
         // lockBorder is present but not editable: a colour needs a real picker.

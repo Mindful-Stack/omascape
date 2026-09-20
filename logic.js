@@ -1199,9 +1199,9 @@ function shellBarTransparent(raw) {
 //
 // The settings panel's model: one row per key parseConfig returns, in display order.
 //
-// Derived from the CONFIG OBJECT rather than a hand-written list, so a key added to parseConfig
-// and forgotten here shows up as a missing row in the Tier 1 test rather than as a setting the
-// panel silently cannot see.
+// SETTING_ORDER controls display order and is the schema drift detector: the Tier 1 test
+// directly asserts it names every config key. Derived from the CONFIG OBJECT, so a key added to
+// parseConfig and forgotten from SETTING_ORDER fails that test in CI.
 //
 // `lockBorder` is deliberately not editable: it is an rgb(hhhhhh) string and wants a real colour
 // picker. It is still listed, because a setting you cannot see is worse than one you cannot
@@ -1224,8 +1224,9 @@ function settingsRows(cfg) {
                     editable: k !== "lockBorder" })
     }
     // Anything parseConfig returns that SETTING_ORDER has not been told about still gets a row,
-    // at the end, rather than vanishing. The Tier 1 test fails on it, which is the point -- but
-    // a user on a build where that slipped through still sees the setting exists.
+    // at the end, rather than vanishing. This keeps a drifted build honest to its user: they see
+    // the setting exists even if the panel was not wired to edit it. CI catches drift via the
+    // SETTING_ORDER assertion in the test, not via this fallback.
     for (k in cfg)
         if (!seen[k]) rows.push({ key: k, label: k, value: cfg[k], editable: false })
     return rows
