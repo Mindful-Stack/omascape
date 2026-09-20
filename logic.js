@@ -1638,13 +1638,13 @@ function lockInstallLua() {
         '      L.borders = nil\n' +
         '    end\n' +
         '    function L.ensureDir()\n' +
-        '      local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset") end\n' +
+        '      local base = os.getenv("XDG_RUNTIME_DIR"); if not base then error("XDG_RUNTIME_DIR unset", 0) end\n' +
         '      local dir = base .. "/omascape"\n' +
         '      local probe = io.open(dir .. "/.omascape-probe", "w")\n' +
         '      if not probe then\n' +
         '        os.execute("mkdir -p \'" .. dir .. "\'")\n' +
         '        probe = io.open(dir .. "/.omascape-probe", "w")\n' +
-        '        if not probe then error("runtime dir unavailable: " .. dir) end\n' +
+        '        if not probe then error("runtime dir unavailable: " .. dir, 0) end\n' +
         '      end\n' +
         '      probe:close(); os.remove(dir .. "/.omascape-probe")\n' +
         '      L.dir = dir\n' +
@@ -1657,11 +1657,11 @@ function lockInstallLua() {
         '        tmp, dst = L.dir .. "/share-state.tmp", L.dir .. "/share-state"\n' +
         '        f = io.open(tmp, "w")\n' +
         '      end\n' +
-        '      if not f then error("cannot write share-state") end\n' +
+        '      if not f then error("cannot write share-state", 0) end\n' +
         '      local w = f:write(L.effective and "1" or "0"); local c = f:close()\n' +
-        '      if not w or not c then os.remove(tmp); error("write share-state failed") end\n' +
+        '      if not w or not c then os.remove(tmp); error("write share-state failed", 0) end\n' +
         '      local rok, rerr = os.rename(tmp, dst)\n' +
-        '      if not rok then os.remove(tmp); error("rename share-state: " .. tostring(rerr)) end\n' +
+        '      if not rok then os.remove(tmp); error("rename share-state: " .. tostring(rerr), 0) end\n' +
         '    end\n' +
         // L.apply() is defined here — before the subVer check and the observer subscription
         // below, which calls it — so a fresh subscription's callback always closes over a
