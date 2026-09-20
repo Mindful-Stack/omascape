@@ -157,8 +157,11 @@ k        = Math.min(peekBoxW / aspectW, peekBoxH / aspectH)     // fit, never st
 Backdrop: the existing `root.scrim`, at a step above the card's own, so the grid reads as
 "behind" rather than as competing content, and following `config.scrim` the same way the card's
 own scrim does — off means no backdrop, but the frame keeps its opaque background and shadow. The
-peek carries the same `cardRadius` and the card's `SoftShadow` treatment so it reads as the same
-material as the picker.
+peek carries the card's `SoftShadow` treatment so it reads as the same material as the picker.
+Its frame carries `cardRadius` on a WORKSPACE target only. A window target drops to the box's own
+radius (`windowRadius`, 8): there the capture fills the frame, so the rounding cuts the screenshot
+itself rather than the empty plate a mini-map sits on, and the card's ~20 reads as several times
+rounder than the window actually is on the desktop.
 
 **Window target.** One `ScreencopyView` on `handleByAddress[addr]`, the same path `WindowTile.qml`
 uses, with the existing icon fallback for windows that have no toplevel handle. The ROADMAP's

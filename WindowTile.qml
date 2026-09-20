@@ -87,10 +87,12 @@ Item {
     property bool decorated: true
     // Same opt-in as iconMax/decorated, for the same reason: the grid's r5 (box radius 8 minus
     // the cell inset 3, concentric with the well) is wrong at peek size, where the frame around
-    // this tile carries the card's own cardRadius (~20). Left at the grid default everywhere
-    // except the window peek, which passes cardRadius so its capture's corners — and the
+    // this tile carries the peek's own radius. Left at the grid default everywhere except the
+    // window peek, which passes PeekLayer's `windowRadius` so its capture's corners — and the
     // hairline right at its edge — read as the SAME shape the frame and its SoftShadow are
-    // drawn at, instead of a smaller rectangle poking past the shadow at all four corners.
+    // drawn at, instead of a differently-shaped rectangle poking past the shadow at all four
+    // corners. Note that is the BOX's radius, not the card's: the capture fills the frame, so
+    // the rounding cuts the screenshot itself rather than an empty plate behind a mini-map.
     property int cornerRadius: 5
 
     // Peek's own opt-in, for a different reason than the three above: the grid's ScreencopyView

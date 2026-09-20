@@ -3020,6 +3020,7 @@ Item {
             // must not get one reintroduced just by holding Space.
             scrimVisible: config.scrim
             cardRadius: root.cardRadius
+            windowRadius: root.boxRadius
             fontFamily: root.fontFamily; captionSize: root.captionSize
             darkTheme: root.darkTheme
             motion: root.motion

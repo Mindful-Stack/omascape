@@ -399,27 +399,48 @@ TestCase {
         keyRelease(Qt.Key_Space)
     }
 
-    // Distinguishes: the peek's window tile drawing at the GRID's corner radius instead of the
-    // card's own (Task 5's fix, previously flagged as "cannot be verified offscreen" and left to
-    // a live-check item — see docs/specs/2026-09-18-peek-design.md and this repo's own peek
-    // live-check notes). The ClippingRectangle -> Rectangle substitution in prepare.py happens to
-    // make `radius` a real, readable property offscreen for the first time (see that file's own
-    // comment on `testCornerRadius`); bank that coverage rather than continuing to leave the
+    // Distinguishes: the peek's window tile drawing at the GRID's corner radius, or at the CARD's
+    // (Task 5's fix, previously flagged as "cannot be verified offscreen" and left to a live-check
+    // item — see docs/specs/2026-09-18-peek-design.md and this repo's own peek live-check notes).
+    // The ClippingRectangle -> Rectangle substitution in prepare.py happens to make `radius` a
+    // real, readable property offscreen for the first time (see that file's own comment on
+    // `testCornerRadius`); bank that coverage rather than continuing to leave the
     // hardest-to-judge-by-eye item on the manual checklist. A grid tile keeps the grid's own
     // default (5, WindowTile.qml's own `cornerRadius`) since nothing in Overview.qml overrides it
-    // for the grid delegate — only the peek's window tile passes `cardRadius` explicitly.
+    // for the grid delegate. The window peek passes `windowRadius`, which is the BOX's radius and
+    // deliberately much smaller than the card's: the capture fills the frame, so the frame's
+    // radius is a bite taken out of the screenshot itself rather than the barely-visible plate
+    // corner it is behind a mini-map.
     function test_a_grid_tile_and_the_peeked_window_tile_draw_at_different_corner_radii() {
         var children = view.testCanvas.children, gridTile = null
         for (var i = 0; i < children.length; i++)
             if (children[i].model && children[i].model.address === "0xB") gridTile = children[i]
         verify(gridTile !== null, "precondition: the grid tile for 0xB exists")
         compare(gridTile.testCornerRadius, 5, "a grid tile keeps the grid's own default")
+        verify(view.testPeek.windowRadius < view.testPeek.cardRadius,
+               "precondition: the window peek's radius is smaller than the card's ("
+               + view.testPeek.windowRadius + " vs " + view.testPeek.cardRadius + ")")
         hoverTile("0xB")
         keyPress(Qt.Key_Space)
         var t = view.testPeek.testWindowTile
         verify(t !== null && t !== undefined, "the fixture must expose the peeked WindowTile")
-        compare(t.testCornerRadius, view.testPeek.cardRadius,
-                "the peek's window tile must draw at the CARD's radius, not the grid's")
+        compare(t.testCornerRadius, view.testPeek.windowRadius,
+                "the peek's window tile must draw at the window radius, not the card's or the grid's")
+        compare(view.testPeek.testFrameRadius, view.testPeek.windowRadius,
+                "the frame under it — and so its SoftShadow — must be drawn at the same radius")
+        keyRelease(Qt.Key_Space)
+    }
+
+    // Distinguishes: the smaller window radius leaking into the WORKSPACE peek, whose frame is a
+    // backing plate behind the mini-map rather than the content itself, and which keeps the
+    // card's own radius so it reads as the same material as the picker (spec: "The peek layer").
+    function test_the_workspace_peek_keeps_the_cards_own_radius() {
+        // Same "no hover, no cursor" state test_space_peeks_a_workspace_as_a_mini_map relies on:
+        // init() parks the pointer off every tile, so the target is the selected workspace.
+        keyPress(Qt.Key_Space)
+        compare(view.testPeek.peekTarget.kind, "workspace", "precondition: a workspace target")
+        compare(view.testPeek.testFrameRadius, view.testPeek.cardRadius,
+                "the workspace peek's plate stays at the card's radius")
         keyRelease(Qt.Key_Space)
     }
 
