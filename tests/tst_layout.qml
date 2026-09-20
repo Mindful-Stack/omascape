@@ -64,7 +64,9 @@ TestCase {
 
     // Two monitors (so the group inset and header band are on), six workspaces on the first
     // so it wraps into a second sub-row, and the scratchpad shown: every vertical seam the
-    // layout has. availW 2024 less the 2*6 inset is 2012 — cw 367, gap 29, no fit step.
+    // layout has. availW 2024 less the 2*6 inset is 2012 — cw 367, gap 29, no fit step, with
+    // the default ratioParams; under the pixel `params` the same fixture is cw 380, gap 8, and
+    // the wrap still happens.
     function multiWithScratchpad(p) {
         var wss = []
         for (var i = 1; i <= 6; i++) wss.push({ id: i, monitorName: "eDP-1", focused: i === 1, occupied: false })
@@ -1767,16 +1769,20 @@ TestCase {
     // it is the regression guard for the pixel model every other fixture in this file pins. The
     // second fixture wraps a sub-row, has two monitor groups and shows the scratchpad, so every
     // seam and the scratchpad row are on the guarded path — the single-monitor fixture reaches
-    // none of them.
+    // none of them. The third fixture has no width at all, so the fallback expression is on the
+    // path too.
     function test_an_invalid_ratio_leaves_the_pixel_model_untouched() {
         var base = JSON.stringify(fiveOn(1632, params))
         var baseMulti = JSON.stringify(multiWithScratchpad(params))
+        var baseNoWidth = JSON.stringify(fiveOn(undefined, params))
         var invalid = [undefined, null, 0, -0.1, NaN, Infinity, -Infinity, "0.08", true, {}]
         for (var i = 0; i < invalid.length; i++) {
             var out = JSON.stringify(fiveOn(1632, withRatio(params, invalid[i])))
             compare(out, base, "invalid[" + i + "] = " + String(invalid[i]) + " must not change the layout")
             compare(JSON.stringify(multiWithScratchpad(withRatio(params, invalid[i]))), baseMulti,
                     "invalid[" + i + "] = " + String(invalid[i]) + " must not change a wrapped, two-monitor, scratchpad layout either")
+            compare(JSON.stringify(fiveOn(undefined, withRatio(params, invalid[i]))), baseNoWidth,
+                    "invalid[" + i + "] = " + String(invalid[i]) + " must not change the missing-width fallback either")
         }
     }
 
@@ -1909,18 +1915,19 @@ TestCase {
         compare(s.x + s.w / 2, r.canvasSize.w / 2, "the scratchpad cell is centred on the canvas")
         compare(r.groups[2].w, widest, "the scratchpad row spans the widest group")
         compare(r.canvasSize.h, r.groups[2].y + r.groups[2].h, "the canvas ends with the scratchpad row, 1082")
+        compare(r.canvasSize.h, 1082, "the canvas ends with the scratchpad row")
     }
 
-    // Distinguishes: a cap applied before the fit (fit would then "repair" the slack and shrink
-    // the cell below 800 for no reason) or a cap that stopped binding altogether when the
-    // formula changed. At 6000 the cell stops at 800, the gap at 64, and the 1616 px left over
-    // is slack for the Flickable to centre — the one path that still produces real slack.
+    // Distinguishes: a cap applied AFTER the fit — the gap would then be 8% of the UNCAPPED
+    // 1094, putting the first cell 88 px in and the canvas at 4528 — or a cap that stopped
+    // binding altogether when the formula changed (cw 1094, x 88, canvas 5998). At 6000 the
+    // cell stops at 800, the gap at 64, and the 1616 px left over is slack for the Flickable
+    // to centre — the one path that still produces real slack.
     function test_max_cell_width_caps_the_cell_and_leaves_the_rest_as_slack() {
         var r = fiveOn(6000)
         compare(boxById(r, 1).w, 800, "capped")
         compare(boxById(r, 1).x, 64, "gap is 8% of the CAPPED width")
-        compare(r.canvasSize.w, 5 * 800 + 6 * 64, "4384: the canvas does not stretch to fill")
-        verify(r.canvasSize.w < 6000, "so the width it was given is not consumed")
+        compare(r.canvasSize.w, 5 * 800 + 6 * 64, "4384: the canvas does not stretch to fill the 6000 it was given")
         assertFinite(r, "6000")
     }
 }
