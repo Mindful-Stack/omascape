@@ -664,16 +664,16 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - [ ] **Step 1: Write the test**
 
 ```qml
-    // Distinguishes: a cap applied before the fit (fit would then "repair" the slack and shrink
-    // the cell below 800 for no reason) or a cap that stopped binding altogether when the
-    // formula changed. At 6000 the cell stops at 800, the gap at 64, and the 1616 px left over
-    // is slack for the Flickable to centre — the one path that still produces real slack.
+    // Distinguishes: a cap applied AFTER the fit — the gap would then be 8% of the UNCAPPED
+    // 1094, putting the first cell 88 px in and the canvas at 4528 — or a cap that stopped
+    // binding altogether when the formula changed (cw 1094, x 88, canvas 5998). At 6000 the
+    // cell stops at 800, the gap at 64, and the 1616 px left over is slack for the Flickable
+    // to centre — the one path that still produces real slack.
     function test_max_cell_width_caps_the_cell_and_leaves_the_rest_as_slack() {
         var r = fiveOn(6000)
         compare(boxById(r, 1).w, 800, "capped")
         compare(boxById(r, 1).x, 64, "gap is 8% of the CAPPED width")
-        compare(r.canvasSize.w, 5 * 800 + 6 * 64, "4384: the canvas does not stretch to fill")
-        verify(r.canvasSize.w < 6000, "so the width it was given is not consumed")
+        compare(r.canvasSize.w, 5 * 800 + 6 * 64, "4384: the canvas does not stretch to fill the 6000 it was given")
         assertFinite(r, "6000")
     }
 ```
