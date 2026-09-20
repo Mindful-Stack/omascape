@@ -1787,14 +1787,15 @@ TestCase {
     // 766 px wide in a 765 px canvas. The integer rule is the largest n with
     // n*140 + (n+1)*11 <= availW: 766 is the first width that seats five.
     function test_column_count_counts_both_outer_gaps() {
-        var below = fiveOn(765), at = fiveOn(766)
+        var below = fiveOn(765), above = fiveOn(766)
         compare(firstRowCount(below), 4, "765: four columns")
         compare(boxById(below, 1).w, 173, "765: cells widen to fill four columns")
         compare(below.canvasSize.w, 762, "765: 4*173 + 5*14")
-        compare(firstRowCount(at), 5, "766: five columns of the minimum cell")
-        compare(boxById(at, 1).w, 140, "766: minCellW")
-        compare(at.canvasSize.w, 766, "766: 5*140 + 6*11, exactly the width")
-        assertFinite(below, "765"); assertFinite(at, "766")
+        compare(firstRowCount(above), 5, "766: five columns of the minimum cell")
+        compare(boxById(above, 1).w, 140, "766: minCellW")
+        compare(above.canvasSize.w, 766, "766: 5*140 + 6*11, exactly the width")
+        compare(boxById(above, 1).x, 11, "766: the edge is the minimum gap")
+        assertFinite(below, "765"); assertFinite(above, "766")
     }
 
     // Distinguishes: a fallback that omits the outer gaps (744, the first draft's) — step 2 then
@@ -1813,9 +1814,10 @@ TestCase {
         }
     }
 
-    // Distinguishes: a column floor that lets cols reach 0 (a division by zero in cw) and a fit
-    // step that shrinks BELOW minCellW to satisfy a width nothing legal fits — at 100 the row
-    // is 162 wide and that overflow is the documented behaviour, not a bug to fit away.
+    // Distinguishes: a column floor that lets cols reach 0 — which does not divide by zero but
+    // spins layout()'s row loop (s += cols) forever, hanging the runner — and a fit step that
+    // shrinks BELOW minCellW to satisfy a width nothing legal fits: at 100 the row is 162 wide
+    // and that overflow is the documented behaviour, not a bug to fit away.
     function test_a_width_below_one_minimum_cell_still_lays_out_one_column() {
         var r = fiveOn(100)
         compare(firstRowCount(r), 1, "one column")
@@ -1824,5 +1826,23 @@ TestCase {
         compare(r.canvasSize.w, 162, "140 + 2*11: wider than the 100 it was given, by design")
         compare(r.boxes.length, 5, "all five workspaces are laid out, one per row")
         assertFinite(r, "100")
+    }
+
+    // Distinguishes: a missing fit step (some width in 162..4384 overflows — the first draft
+    // did at 2024 and 1820) and an over-eager one (a canvas more than 2*cols+1 px short of
+    // the width it was given, which is the most a single step can leave behind). Stated once as
+    // the property, for every integer width up to the point maxCellW starts binding (4384 =
+    // 5*800 + 6*64), rather than for the widths the table happens to name.
+    function test_ratio_mode_never_overflows_and_never_over_shrinks() {
+        var worstSlack = 0, steps = 0
+        for (var w = 162; w <= 4384; w++) {
+            var r = fiveOn(w), cols = firstRowCount(r), canvas = r.canvasSize.w
+            if (canvas > w)
+                fail("availW " + w + ": canvas " + canvas + " overflows")
+            if (canvas < w - (2 * cols + 1))
+                fail("availW " + w + ": canvas " + canvas + " is " + (w - canvas) + " short with " + cols + " columns")
+            if (w - canvas > worstSlack) worstSlack = w - canvas
+        }
+        verify(worstSlack <= 11, "five columns can leave at most 11 px, left " + worstSlack)
     }
 }
