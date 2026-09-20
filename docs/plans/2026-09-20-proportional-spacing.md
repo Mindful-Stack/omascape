@@ -875,7 +875,8 @@ gap = round(cw * ratio)
 while (cols * cw + (cols + 1) * gap > availW && cw > minCellW) { cw--; gap = round(cw * ratio) }
 ```
 
-`maxCellW` is 800 now and binds nowhere below a 4384-logical canvas; it is a sanity cap. The
+`maxCellW` is 800 now and only binds once the card offers more than 4384 logical px of
+interior width; below that it is a sanity cap that never fires. The
 row spacing between sub-rows, monitor groups and the scratchpad follows the same gap. Without
 `gapRatio` — absent, or anything but a positive finite number — the pixel `cellSpacing` and
 `rowSpacing` apply exactly as before, which is the fallback rule below applied to a new input.
