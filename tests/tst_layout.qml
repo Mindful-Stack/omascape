@@ -1914,7 +1914,7 @@ TestCase {
         var s = boxById(r, Logic.SCRATCHPAD_ID)
         compare(s.x + s.w / 2, r.canvasSize.w / 2, "the scratchpad cell is centred on the canvas")
         compare(r.groups[2].w, widest, "the scratchpad row spans the widest group")
-        compare(r.canvasSize.h, r.groups[2].y + r.groups[2].h, "the canvas ends with the scratchpad row, 1082")
+        compare(r.canvasSize.h, r.groups[2].y + r.groups[2].h, "no trailing gap below the last group")
         compare(r.canvasSize.h, 1082, "the canvas ends with the scratchpad row")
     }
 
