@@ -58,10 +58,18 @@ Item {
         // wait out with a refresh + settle.
         rebuild()
         if (scratchpadShown) {
-            // Showing the row can append it below the fold on an overflowing layout: scroll it
+            // Showing the row can append it below the fold on an OVERFLOWING layout: scroll it
             // fully into view without moving the keyboard selection (a different intent).
+            //
+            // Against `restingHeight`, never `flick.height`: the card's implicitHeight Behavior
+            // has only just started toward the taller value, so `flick.height` here is still
+            // the viewport as it was BEFORE the row was added. Measured against it, a row the
+            // card is about to grow to fit looks like it is below the fold -- so the grid
+            // scrolled down (242 px on a 1920x1080 bar-mode layout) and then slid back up over
+            // the next 160 ms as the viewport caught up, counter to the card's own growth.
             var b = boxForWs(Logic.SCRATCHPAD_ID)
-            if (b && b.y + b.h > flick.contentY + flick.height) flick.contentY = b.y + b.h - flick.height
+            var h = flick.restingHeight
+            if (b && b.y + b.h > flick.contentY + h) flick.contentY = b.y + b.h - h
         }
         // A mid-drag toggle changes what boxes/tiles exist under the pointer; without this the
         // drop preview would stay stale until the next pointer move.
@@ -2390,6 +2398,14 @@ Item {
                 // drive it toward zero -- onContentHeightChanged's clamp would then scroll the
                 // grid mid-animation and leave contentY wrong once it settled.
                 height: card.implicitHeight - card.pad * 2 - card.hintSpace
+                // The height this viewport is HEADING for. `card.implicitHeight` is itself the
+                // animated property (its Behavior animates implicitHeight, not height), so the
+                // line above reads a value in flight for the whole 160 ms after any layout
+                // change. Anything deciding "does this fit?" must ask about the resting size
+                // instead -- see toggleScratchpad, where reading the in-flight height scrolled
+                // the grid to reveal a row the card was already growing to fit.
+                readonly property real restingHeight:
+                    Math.min(canvas.implicitHeight, card.maxCardH - card.pad * 2 - card.hintSpace)
                 contentWidth: canvas.implicitWidth
                 contentHeight: canvas.implicitHeight
                 boundsBehavior: Flickable.StopAtBounds
