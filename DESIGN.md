@@ -71,8 +71,11 @@ jump to one — keyboard or mouse.
 
 - Omarchy-shell **user plugin**: `~/.config/omarchy/plugins/se.mindfulstack.omascape/`
   (`manifest.json` + `Overview.qml` + any JS helpers). Lives in the user config dir →
-  survives `omarchy update`; hot-reloads on save (`omarchy-shell shell rescanPlugins`
-  to force).
+  survives `omarchy update`. It does **not** hot-reload on save, despite what this line
+  originally claimed: the shell's plugin reload destroys and re-creates the component but
+  never clears the QML type cache, so an edit is served from cached source until the shell
+  restarts. `rescanPlugins` reloads the manifest and registry, not the live QML. Use
+  `mise run dev:link`. Measured 2026-09-19; see README § Local development loop.
 - Toggled via `omarchy-shell shell toggle se.mindfulstack.omascape`, bound to **SUPER+P** in
   `~/.config/hypr/bindings.lua` (replacing the walker picker line).
 - Built on the shell's shared overlay (`Ui/Panel.qml`) + Hyprland service. Data:
