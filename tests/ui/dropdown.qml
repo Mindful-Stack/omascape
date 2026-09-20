@@ -57,6 +57,17 @@ TestCase {
 
     function cleanup() { if (view) view.close() }
 
+    // Put the card into wallpaper-backed mode with an image that genuinely LOADS. prepare.py
+    // writes wallpaper-probe.png into the fixture root, which is this suite's own directory.
+    // Tests must not use a path that does not exist: the card may only go transparent once the
+    // image is Ready, so a missing file exercises the FAILURE branch, never this one.
+    function goWallpaper() {
+        view.testConfig.wallpaperUrl = Qt.resolvedUrl("wallpaper-probe.png")
+        view.testConfig.barTransparent = true
+        tryVerify(function () { return view.wallpaperBacked }, 3000,
+                  "the probe image must reach Image.Ready")
+    }
+
     function test_the_card_hangs_from_the_reserved_top_strip() {
         seed(26, 10)
         compare(view.testCard.y, 26, "the card's top edge meets the bar's bottom edge")
@@ -367,16 +378,39 @@ TestCase {
     // because the two halves would be the same picture at different offsets.
     function test_a_transparent_bar_makes_the_card_paint_the_wallpaper() {
         seed(26, 10)
-        view.testConfig.wallpaperUrl = "file:///tmp/does-not-exist.png"
-        view.testConfig.barTransparent = true
-        wait(60)
-        verify(view.wallpaperBacked, "precondition: the card should be wallpaper-backed")
+        goWallpaper()
         compare(view.testCard.color.a, 0, "the Rectangle paints nothing; the image is the ground")
         compare(view.testWallpaper.visible, true, "the wallpaper is shown")
         compare(view.testWallpaper.y, -26, "lifted by the bar's height, so it aligns with the real one")
         compare(view.testWallpaper.x, 0, "and flush with the screen's left edge")
         compare(view.testWallpaper.width, view.testPanel.width, "sized to the panel, not the card")
         compare(view.testWallpaper.height, view.testPanel.height, "in both axes")
+    }
+
+    // THE regression this file previously asserted BACKWARDS. `readlink -f` returns a path for
+    // a broken symlink and exits 0 doing it, so a deleted or unreadable wallpaper still yields
+    // a perfectly well-formed URL. Going transparent on the strength of a non-empty path leaves
+    // the card see-through with nothing painted behind it: the workspace grid over the live
+    // windows it depicts.
+    //
+    // The earlier version of the suite pointed every wallpaper test at a file that does not
+    // exist and asserted the card WAS transparent -- enshrining this defect as the expected
+    // behaviour. That is why this test uses a missing path deliberately and asserts the
+    // opposite, and why the passing cases now use an image that genuinely loads.
+    function test_a_wallpaper_that_fails_to_load_leaves_the_card_opaque() {
+        seed(26, 10)
+        view.testConfig.wallpaperUrl = "file:///tmp/omascape-no-such-wallpaper.png"
+        view.testConfig.barTransparent = true
+        tryVerify(function () { return view.testWallpaper.status === Image.Error }, 3000,
+                  "precondition: the image must actually fail, not stay Loading")
+        verify(view.wallpaperWanted, "the path is non-empty, so the card WANTS the wallpaper")
+        verify(!view.wallpaperBacked, "but it never loaded, so the card must not go transparent")
+        verify(view.testCard.color.a > 0,
+               "the card must paint an opaque ground, alpha is " + view.testCard.color.a)
+        // ...and everything that follows the wallpaper must fall back with it, or the wells
+        // would carry glass tuned for a photograph that is not there.
+        verify(view.emptyWellColor.a < 0.1, "the wells keep their flat-card tones")
+        compare(view.testHintGlass.visible, false, "and the hints keep their bare ground")
     }
 
     // ...and it must fall back rather than paint nothing. An unresolvable wallpaper -- the probe
@@ -399,10 +433,7 @@ TestCase {
     function test_a_wallpaper_backed_card_gives_the_wells_a_real_surface() {
         seed(26, 10)
         var flatEmpty = view.emptyWellColor.a
-        view.testConfig.wallpaperUrl = "file:///tmp/does-not-exist.png"
-        view.testConfig.barTransparent = true
-        wait(60)
-        verify(view.wallpaperBacked, "precondition: the card is wallpaper-backed")
+        goWallpaper()
         // THE point: an empty well has to go from near-invisible to an actual surface.
         verify(view.emptyWellColor.a > 0.25,
                "an empty well must read over a photograph, alpha is " + view.emptyWellColor.a)
@@ -432,9 +463,7 @@ TestCase {
     function test_the_key_hints_are_readable_over_a_wallpaper() {
         seed(26, 10)
         var flatCap = view.hintCapOpacity, flatLabel = view.hintLabelOpacity
-        view.testConfig.wallpaperUrl = "file:///tmp/does-not-exist.png"
-        view.testConfig.barTransparent = true
-        wait(60)
+        goWallpaper()
         verify(view.hintLabelOpacity > flatLabel,
                "the label must lift over a wallpaper, " + flatLabel + " -> " + view.hintLabelOpacity)
         verify(view.hintCapOpacity > flatCap, "and the cap with it")

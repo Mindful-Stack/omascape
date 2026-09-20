@@ -299,8 +299,19 @@ Item {
     // that strip. The card covers a region full of windows, so it cannot be transparent in the
     // same way -- you would read the grid over the very windows it depicts. It paints the
     // wallpaper instead: what the bar SHOWS, rather than what happens to be behind us.
-    readonly property bool wallpaperBacked:
+    // We WANT the wallpaper: bar mode, a transparent bar, and a resolved path. This drives the
+    // Image's source so it can start loading -- it says nothing about whether it succeeded.
+    readonly property bool wallpaperWanted:
         barMode && config.barTransparent && config.wallpaperUrl !== ""
+    // ...and it is actually ON SCREEN. Everything visual keys off THIS, never off `wanted`.
+    //
+    // `readlink -f` yields a path for a broken symlink too, and exits 0 doing it, so a deleted
+    // or unreadable wallpaper still produces a perfectly good-looking URL. Going transparent on
+    // the strength of that leaves the card see-through with nothing painted behind it: the
+    // workspace grid drawn over the live windows it depicts, which is the single outcome this
+    // whole design exists to avoid. So the card stays opaque until the image says Ready.
+    readonly property bool wallpaperBacked:
+        wallpaperWanted && wallpaperBack.status === Image.Ready
 
     // Key-hint contrast. HintCap's defaults (cap 0.75, label 0.45) are tuned for a flat card,
     // where the label being quiet is the point. Over a wallpaper -- especially a bright one --
@@ -1884,7 +1895,10 @@ Item {
                 visible: root.wallpaperBacked
                 x: 0; y: -root.reservedTop
                 width: panel.width; height: panel.height
-                source: root.wallpaperBacked ? config.wallpaperUrl : ""
+                // `wanted`, not `backed`: the source has to load before it can be Ready, and
+                // `backed` depends on that status. Keying the source off `backed` would be a
+                // binding loop that never resolves -- it could never start loading.
+                source: root.wallpaperWanted ? config.wallpaperUrl : ""
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
                 cache: true

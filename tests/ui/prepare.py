@@ -1,6 +1,8 @@
 """Build an offscreen fixture from production QML; replace only shell/compositor adapters.
 MouseArea events, ListModel, bindings, timers and reconciliation run unchanged in Qt.
 """
+import struct
+import zlib
 from pathlib import Path
 import json
 import re
@@ -345,6 +347,25 @@ keep_loaded = json.loads((source / 'manifest.json').read_text()).get('keepLoaded
 # over the bar. A stub defaulting blur to 0 would make any test about that geometry reason
 # about zeros and pass for the wrong reason, so these mirror SoftShadow.qml exactly. Keep them
 # in step with it.
+# A real, loadable 2x2 PNG in the fixture root. The wallpaper tests need an image that
+# genuinely reaches Image.Ready: the card may only go transparent once one has LOADED, and a
+# test pointing at a path that does not exist can only ever exercise the failure branch. Suites
+# reach it as Qt.resolvedUrl("wallpaper-probe.png"), since the fixture root is their own dir.
+def _probe_png(w=2, h=2):
+    # Built here rather than embedded as base64: a pasted literal can carry a valid PNG header
+    # with corrupt image data, which `file` reports as a PNG and Qt refuses with "Unable to read
+    # image data" -- exactly what the first version of this did. Generating it means the CRCs
+    # are right by construction.
+    def chunk(tag, data):
+        return (struct.pack('>I', len(data)) + tag + data
+                + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff))
+    ihdr = struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)          # 8-bit truecolour RGB
+    raw = b''.join(b'\x00' + b'\x40\x30\x60' * w for _ in range(h))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr)
+            + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
+
+
+(dest / 'wallpaper-probe.png').write_bytes(_probe_png())
 (dest / 'SoftShadow.qml').write_text(
     'import QtQuick\nItem { property Item target: parent; property real radius: 0\n'
     '       property real blur: 28; property real spread: 0\n'
