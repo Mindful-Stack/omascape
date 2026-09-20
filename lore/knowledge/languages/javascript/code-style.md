@@ -6,7 +6,14 @@ tags: [languages, javascript, qml, testing]
 
 # JavaScript code style (`logic.js`)
 
-Almost all of Omascape's JavaScript lives in one file. `logic.js` is 1886 lines and 82
+> **Scope: `logic.js` only — the JavaScript that loads into the QML engine.** Everything below
+> is a consequence of Qt 6.4 being the compatibility floor, and none of it applies to the Node
+> tooling under `lore/_tools/` and `scripts/*.mjs`, which is ordinary modern JavaScript. That
+> tree is 6244 lines against this file's 2048, so a search of this category will surface it —
+> see [[languages/javascript/tooling-dialect]] before applying any rule here to a file outside
+> the plugin.
+
+Almost all of Omascape's *shipped* JavaScript lives in one file. `logic.js` is 1886 lines and 82
 top-level functions holding the layout maths, the reconcile diff, search ranking, key handling
 and the Lua chunk builders. Counts taken 2026-09-20 against this branch's base, `a72ecda`;
 `main` has moved on since, so the totals read low. The rules, not the totals, are the standard.
@@ -90,6 +97,8 @@ sign the logic belongs somewhere else, or that the function is doing QML's job.
 
 ## See Also
 
+- [[languages/javascript/tooling-dialect]] — the other JavaScript in this repository, and why
+  none of these rules reach it.
 - [[adrs/0004-qt-compatibility-floor]] — why the dialect is pinned this far back.
 - [[languages/lua/chunk-authoring]] — the chunk builders that live in this file.
 - [[adrs/0003-test-tiers]] — where the logic suites run.
