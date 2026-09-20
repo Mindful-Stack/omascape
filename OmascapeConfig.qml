@@ -49,7 +49,13 @@ QtObject {
     property bool barTransparent: false
     readonly property string shellPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
 
+    // Emitted when the file exists but could not be used. The settings still resolve to their
+    // defaults -- parseConfig is total -- so this is purely how the user finds out.
+    signal invalidFile(string why)
+
     function apply(raw) {
+        var why = Logic.configParseError(raw)
+        if (why.length > 0) cfg.invalidFile(why)
         var o = Logic.parseConfig(raw)
         cfg.scrim = o.scrim
         cfg.hint = o.hint

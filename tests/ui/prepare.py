@@ -289,6 +289,8 @@ peeklayer = replaced(peeklayer, '    id: peek\n',
     '           function probeWallpaper() {}\n'
     '           property bool motionResolved: true\n'
     '           property string lockBorder: "rgb(ff4444)"; property int lockBorderSize: 6\n'
+    '           signal invalidFile(string why)\n'
+    '           function emitInvalid(why) { invalidFile(why) }\n'
     '           function probeMotion() {} }\n')
 # Lock state stub: the real OmascapeLocks.qml watches two files through Quickshell.Io. The stub
 # keeps the one property later tests depend on — `armed` is null until a load resolves — and

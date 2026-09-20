@@ -128,6 +128,10 @@ Item {
     // (unlike the armed set, "still malformed" has no "unchanged" case to suppress it against).
     // Without this guard that would toast on every such echo, not just the first.
     property bool lockInvalidNotified: false
+    // Same one-shot rule as lockInvalidNotified. The config file is WATCHED, so notifying on
+    // every save would fire on each keystroke-save while the user is repairing it -- which is
+    // precisely when they least need it. Reset in open(), so each summon tells them once.
+    property bool configInvalidNotified: false
     // Bumped wherever the monitor snapshots are refreshed, purely so the reminder frame's
     // `Hyprland.monitorFor(screen)` binding re-resolves. That call is a C++ invokable returning a
     // one-shot value: nothing notifies QML when Hyprland REPLACES the HyprlandMonitor object for a
@@ -213,6 +217,17 @@ Item {
         clearPendingForWorkspace(wsId)
         Hyprland.dispatch(Logic.workspaceSwapLua(wsId, b.monitorName, monitorName))
         scheduleRebuild()
+    }
+    Connections {
+        target: config
+        function onInvalidFile(why) {
+            if (root.configInvalidNotified) return
+            root.configInvalidNotified = true
+            // Names the file, because "omascape.json" is not a path most people have memorised,
+            // and says the settings fell back -- the symptom they are actually looking at.
+            Hyprland.dispatch(Logic.notifyLua(
+                "omascape: ~/.config/omarchy/omascape.json ignored, using defaults — " + why))
+        }
     }
     Connections {
         target: locks
@@ -1608,7 +1623,7 @@ Item {
         openAnim.stop()
         if (root.barMode && root.motion.enabled) { root.entranceOpen = 0; openAnim.start() }
         else root.entranceOpen = 1
-        lockUnresolvedNotified = false; lockInvalidNotified = false
+        lockUnresolvedNotified = false; lockInvalidNotified = false; configInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
         digitLatch = 0

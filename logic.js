@@ -1187,6 +1187,37 @@ function shellBarTransparent(raw) {
     return !!(o.bar && typeof o.bar === "object" && o.bar.transparent === true)
 }
 
+// Why a config file could not be used, or "" when it is fine.
+//
+// Separate from parseConfig because the two want opposite things: parseConfig must be TOTAL --
+// it always returns a usable settings object, so a broken file degrades to defaults rather
+// than breaking the picker -- and that totality is exactly what swallows the reason. This
+// recovers the reason so the user can be told, without making parseConfig fallible.
+//
+// An empty or whitespace-only file is NOT an error: that is what a missing file looks like by
+// the time apply("") is called, and an empty file is a legitimate "use every default".
+//
+// A JSON array or scalar parses cleanly and is still unusable -- parseConfig reads properties
+// off it, finds none, and returns every default. Silent, and indistinguishable from an empty
+// file, so it is reported too.
+function configParseError(raw) {
+    var text = String(raw === undefined || raw === null ? "" : raw).replace(/^\s+|\s+$/g, "")
+    if (text.length === 0) return ""
+    var parsed
+    try {
+        parsed = JSON.parse(text)
+    } catch (e) {
+        // The engine's message carries the line and column, which is the useful part; the
+        // "JSON.parse:" prefix is not. notifyLua truncates whatever survives.
+        var why = String((e && e.message) || "").replace(/^JSON\.parse:\s*/, "")
+        return why.length > 0 ? why : "invalid JSON"
+    }
+    if (parsed === null) return "the file contains null, not an object"
+    if (Array.isArray(parsed)) return "the file contains a JSON array, not an object"
+    if (typeof parsed !== "object") return "the file contains a " + typeof parsed + ", not an object"
+    return ""
+}
+
 function parseConfig(raw) {
     var o = {}
     try { o = JSON.parse(String(raw || "")) || {} } catch (e) { o = {} }

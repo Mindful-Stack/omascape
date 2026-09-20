@@ -1399,6 +1399,32 @@ TestCase {
         compare(none.r, 0, "no background at all yields black, never undefined")
     }
 
+    // A malformed config is currently SILENT: parseConfig is total, so every setting reverts to
+    // its default and nothing says why. This is what lets the user be told. The locks file has
+    // had this treatment since it shipped; the config file never adopted it.
+    function test_a_broken_config_reports_why() {
+        // The cases that must stay quiet. Empty is what a MISSING file looks like by the time
+        // apply("") runs, and an empty file legitimately means "use every default" -- reporting
+        // either would put a notification in front of most users, who have no config at all.
+        compare(Logic.configParseError(""), "", "no file")
+        compare(Logic.configParseError("   \n  "), "", "an empty file")
+        compare(Logic.configParseError('{}'), "", "an empty object")
+        compare(Logic.configParseError('{"scrim":false}'), "", "a valid file")
+        compare(Logic.configParseError(undefined), "", "never loaded")
+
+        // ...and the cases that must speak up.
+        verify(Logic.configParseError('{"scrim":false,}').length > 0, "a trailing comma")
+        verify(Logic.configParseError("not json at all").length > 0, "not JSON")
+        verify(Logic.configParseError('{"anchor": "bar"').length > 0, "an unclosed brace")
+        // THE cases a truthiness check would miss: these all PARSE, and parseConfig then reads
+        // no properties off them and returns every default -- silently, and indistinguishably
+        // from an empty file. A user who wrote a JSON array would get no hint at all.
+        verify(Logic.configParseError('[1,2,3]').length > 0, "an array parses but is unusable")
+        verify(Logic.configParseError('"a string"').length > 0, "so does a bare string")
+        verify(Logic.configParseError('42').length > 0, "and a bare number")
+        verify(Logic.configParseError('null').length > 0, "and null")
+    }
+
     // The wallpaper path comes from `readlink -f`, so it arrives with a trailing newline and
     // may contain spaces. Everything that is not an absolute path must yield "" -- the view
     // reads that as "no wallpaper" and falls back to a painted colour, which is what it did
