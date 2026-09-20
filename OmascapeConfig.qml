@@ -123,6 +123,21 @@ QtObject {
         atomicWrites: true
         printErrors: false
         onLoaded: { cfg.apply(text()); cfg.readableForSave = true }
+        // Our OWN write reaches the properties from here, not from the watcher. Verified
+        // against Quickshell 0.3.1 on the live engine: the inotify event for an atomic write
+        // lands while the writer is still FileView::liveOperation, so the `reload()` below runs
+        // `loadAsync`, hits its `if (!liveOperation || pathInFlight != targetPath)` guard
+        // (src/io/fileview.cpp:302) and starts no read at all. `operationFinished` then emits
+        // `saved` -- never `loaded` -- and marks the view prepared again, so even a later
+        // `text()` finds the cache fresh and never reloads either. Without this line a setting
+        // changed from the panel is written to disk and NEVER reaches config.*: the picker keeps
+        // the old value until an external edit or a shell restart. Observed as "changing a
+        // setting doesn't work... or maybe it did after a while".
+        //
+        // text() here is the data the writer just committed (operationFinished calls
+        // updateState with the writer's state before emitting), so this applies what is on
+        // disk, not a guess -- and does it without a second read.
+        onSaved: cfg.apply(text())
         onFileChanged: reload()
         // FileViewError distinguishes "no such file" (first run: text() == "" is genuinely the
         // whole file) from every other failure (permission, a directory in its place, ...): those
