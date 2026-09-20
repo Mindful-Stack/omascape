@@ -2184,6 +2184,14 @@ Item {
                             dimmed: root.query.length > 0 && !model.matched && root.dropTargetAddress !== model.address
                             accent: root.accent
                             dragging: root.draggingAddress === model.address
+                            // The lift waits for real movement. `dragging` arms on press, but a
+                            // press is not a carry: under the "select" policy the overview stays
+                            // open after a click, so a lift taken on press would be a 60% shrink
+                            // and spring-back on every click that picked nothing up. `dragArea.moved`
+                            // only turns true once Qt's drag threshold is crossed. The shrink
+                            // scales about the grab point, so starting it a few pixels late lands
+                            // that point under the cursor just the same.
+                            lifted: root.draggingAddress === model.address && dragArea.moved
                             handle: root.handleByAddress[model.address] || null
                             // Kept loaded while hidden (keepLoaded): captures run only while the
                             // surface is mapped. An armed box always falls back to its icon, share
