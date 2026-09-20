@@ -10,6 +10,64 @@ TestCase {
         rowSpacing: 12, headerH: 22, groupInset: 6, minTileW: 8, minTileH: 6, slotGapTolerance: 24
     })
 
+    // The production spacing params after docs/specs/2026-09-20-proportional-spacing-design.md:
+    // the gap is 8% of the cell, both edges carry one gap, and maxCellW is only a sanity cap.
+    // `params` above stays on the pixel model on purpose — every fixture in this file pins
+    // absolute x/y literals against it, and the ratio must not move them.
+    readonly property var ratioParams: ({
+        maxCols: 5, minCellW: 140, maxCellW: 800, cellInset: 3, cellSpacing: 4,
+        rowSpacing: 8, headerH: 22, groupInset: 6, minTileW: 8, minTileH: 6, slotGapTolerance: 24,
+        gapRatio: 0.08
+    })
+
+    // One monitor (eDP-1, aspect 1.6), five empty workspaces, no windows: the smallest input
+    // that exercises every column. `availW` may be anything, including undefined.
+    function fiveOn(availW, p) {
+        var wss = []
+        for (var i = 1; i <= 5; i++)
+            wss.push({ id: i, monitorName: "eDP-1", focused: i === 1, occupied: false })
+        return Logic.layout({ monitors: [edp()], workspaces: wss, windows: [],
+                              focusedMonitorName: "eDP-1", availW: availW,
+                              params: p === undefined ? ratioParams : p })
+    }
+
+    function withRatio(base, value) {
+        var p = {}
+        for (var k in base) p[k] = base[k]
+        p.gapRatio = value
+        return p
+    }
+
+    // Every box and group finite — the NaN floor (lore/knowledge/general/layout-and-sizing.md).
+    function assertFinite(r, label) {
+        verify(isFinite(r.canvasSize.w) && isFinite(r.canvasSize.h), label + ": canvas " + JSON.stringify(r.canvasSize))
+        for (var i = 0; i < r.boxes.length; i++) {
+            var b = r.boxes[i]
+            verify(isFinite(b.x) && isFinite(b.y) && isFinite(b.w) && isFinite(b.h) && b.w > 0 && b.h > 0,
+                   label + ": box " + b.workspaceId + " " + JSON.stringify([b.x, b.y, b.w, b.h]))
+        }
+        for (var g = 0; g < r.groups.length; g++) {
+            var gr = r.groups[g]
+            verify(isFinite(gr.x) && isFinite(gr.y) && isFinite(gr.w) && isFinite(gr.h),
+                   label + ": group " + gr.monitorName + " " + JSON.stringify([gr.x, gr.y, gr.w, gr.h]))
+        }
+    }
+
+    // ---- proportional spacing (docs/specs/2026-09-20-proportional-spacing-design.md) ----
+
+    // Distinguishes: an implementation that reads `gapRatio` unguarded — Number(undefined) is
+    // NaN and would poison every width — or one that lets 0, a negative, Infinity, a numeric
+    // STRING or `true` switch the ratio model on. Green before the feature exists, on purpose:
+    // it is the regression guard for the pixel model every other fixture in this file pins.
+    function test_an_invalid_ratio_leaves_the_pixel_model_untouched() {
+        var base = JSON.stringify(fiveOn(1632, params))
+        var invalid = [undefined, null, 0, -0.1, NaN, Infinity, -Infinity, "0.08", true, {}]
+        for (var i = 0; i < invalid.length; i++) {
+            var out = JSON.stringify(fiveOn(1632, withRatio(params, invalid[i])))
+            compare(out, base, "gapRatio = " + String(invalid[i]) + " must not change the layout")
+        }
+    }
+
     // eDP-1: 2560x1600 @1.25 => 2048x1280 logical; 26px top bar reserved.
     function edp() {
         return { name: "eDP-1", x: 0, y: 0, width: 2560, height: 1600,
