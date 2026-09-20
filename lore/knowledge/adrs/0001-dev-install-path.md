@@ -100,4 +100,6 @@ The rules this implies:
 - [[learnings/quickshell-list-is-display-scoped]] — why the restart check filters by config path.
 - `docs/specs/2026-09-19-dev-link-design.md` — findings 1–12, the design, the failure table and
   the full measurement. Implementation: `scripts/dev-link.sh`; tests `tests/dev-link.sh`
-  (95 assertions, Tier 1).
+  (95 assertions when this record was written; 112 on `7200771`, Tier 1).
+- [[languages/bash/test-harnesses]] — how that suite is written, and the stub-and-sandbox idiom.
+- [[languages/bash/script-conventions]] — the conventions `scripts/dev-link.sh` follows.

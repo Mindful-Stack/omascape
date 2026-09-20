@@ -20,7 +20,7 @@ sequence, and "Tier 1 passed" means all four:
 | `tests/tst_*.qml` | Pure `logic.js` behaviour — geometry, reconcile, ranking, config parsing | `qmltestrunner -input tests/`, auto-discovered |
 | `tests/ui/*.qml` | Anything needing real bindings, timers, `MouseArea` or a scene | `tests/ui/run.sh` → offscreen fixture built by `tests/ui/prepare.py` |
 | `tests/lua/tst_chunks.lua` | A generated Lua chunk's behaviour | `tests/lua-check.sh`, real interpreter — see [[languages/lua/testing]] |
-| `tests/dev-link.sh` | `scripts/dev-link.sh` behaviour | stub-driven bash, 117 assertion call sites |
+| `tests/dev-link.sh` | `scripts/dev-link.sh` behaviour | stub-driven bash, 112 assertions — see [[languages/bash/test-harnesses]] |
 | `tests/integration/` | Only a real compositor can show it | `mise run test-integration`, **not in CI** |
 
 If it can be answered by calling a `Logic.*` function, it belongs in `tests/tst_*.qml` — that
@@ -86,6 +86,10 @@ skip into a failure under that variable. **It is the only place that does.** Eve
 `lock-probe.sh:22`, `peek-probe.sh:117,158` — so an integration run can report success having
 tested almost nothing. When reading a Tier 2 result, read the output, not the exit code.
 
+**A new Tier 1 gate must carry that `CI:` guard**, or it is a check that passes when its runtime
+is missing. The shape, and the two shell harness idioms to copy from, are in
+[[languages/bash/test-harnesses]].
+
 ## Before opening a PR
 
 `README.md` § Testing carries the checklist and it is the repo-local standard: `mise run test`
@@ -97,3 +101,5 @@ Say in the PR which of them you ran — see [[general/release-and-distribution]]
 - [[general/architecture]] — why the logic tier can be this large.
 - [[frameworks/quickshell/review-checklist]] — what to check in the QML itself.
 - [[languages/lua/testing]] — the parse-and-behave pair for generated chunks.
+- [[languages/bash/test-harnesses]] — how the two bash suites assert, and what a `SKIP:` owes you.
+- [[languages/bash/script-conventions]] — every runner here is a bash entry point.
