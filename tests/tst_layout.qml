@@ -410,6 +410,36 @@ TestCase {
         verify(t.w > 100)
     }
 
+    // Distinguishes: a placement that conflates `layer` with `fullscreen`, or that loses one of
+    // the three fullscreen slot branches. One workspace, three windows: a tiled fullscreen one
+    // whose slot is recoverable from its neighbour, that neighbour, and a floating window. Every
+    // row must keep its own pair of values — no fixture before this one had all three at once.
+    function test_placement_keeps_layer_and_fullscreen_independent() {
+        var r = Logic.layout({ monitors: [edp()],
+            workspaces: [{ id: 1, monitorName: "eDP-1", focused: true, occupied: true }],
+            windows: [
+                // fullscreen, tiled: recoverSlot must find the left half from the right-half neighbour
+                { address: "0xF", workspaceId: 1, ax: 0, ay: 26, sw: 2048, sh: 1254,
+                  floating: false, fullscreen: 2, cls: "full", title: "full" },
+                { address: "0xR", workspaceId: 1, ax: 1024, ay: 26, sw: 1024, sh: 1254,
+                  floating: false, fullscreen: 0, cls: "right", title: "right" },
+                { address: "0xFloat", workspaceId: 1, ax: 400, ay: 300, sw: 300, sh: 200,
+                  floating: true, fullscreen: 0, cls: "floaty", title: "floaty" }
+            ],
+            focusedMonitorName: "eDP-1", availW: 1632, params: params })
+        function row(a) {
+            for (var i = 0; i < r.tiles.length; i++) if (r.tiles[i].address === a) return r.tiles[i]
+            fail("no tile row for " + a); return null
+        }
+        var f = row("0xF"), rt = row("0xR"), fl = row("0xFloat")
+        compare(f.fullscreen, 2, "fullscreen mode survives")
+        compare(f.layer, 1, "a RECOVERABLE fullscreen window stays on the tiled layer, not the backdrop")
+        compare(rt.fullscreen, 0); compare(rt.layer, 1)
+        compare(fl.fullscreen, 0); compare(fl.layer, 2, "floating stays layer 2")
+        // The recovered slot is the LEFT half: the fullscreen tile must not cover its neighbour.
+        verify(f.x + f.w <= rt.x + 1, "recovered slot must not overlap the neighbour it was recovered from")
+    }
+
     // Pins the min-size clamp's position clamp: a hairline window near the far edge of the
     // usable area, once widened to minTileW, must not spill past the cell's mini-map inset.
     function test_min_clamp_stays_within_minimap_at_edge() {
@@ -1159,5 +1189,176 @@ TestCase {
         compare(box(2).active, false)
         compare(box(3).synthetic, true, "workspace 3 exists only as a pad slot")
         compare(box(3).active, false, "a workspace Hyprland never created cannot be active")
+    }
+
+    // ---- peek (docs/specs/2026-09-18-peek-design.md) ------------------------------------
+
+    // Distinguishes: a peekTiles that calls _tileRect directly instead of the shared placement,
+    // which is exactly the defect the spec's "Workspace target" section forbids. The fullscreen
+    // window must land in its recovered slot (the left half) and leave its neighbour visible; a
+    // bare _tileRect call places it across the whole box and swallows 0xR.
+    function test_peekTiles_recovers_a_fullscreen_slot_like_the_grid() {
+        var mon = edp()
+        var wins = [
+            { address: "0xF", workspaceId: 1, ax: 0, ay: 26, sw: 2048, sh: 1254,
+              floating: false, fullscreen: 2, cls: "full", title: "full" },
+            { address: "0xR", workspaceId: 1, ax: 1024, ay: 26, sw: 1024, sh: 1254,
+              floating: false, fullscreen: 0, cls: "right", title: "right" }
+        ]
+        var rows = Logic.peekTiles(wins, mon, 1200, 750, params)
+        compare(rows.length, 2)
+        var f = rows[0].address === "0xF" ? rows[0] : rows[1]
+        var rt = rows[0].address === "0xF" ? rows[1] : rows[0]
+        compare(f.fullscreen, 2); compare(f.layer, 1)
+        verify(f.x + f.w <= rt.x + 1, "the fullscreen peek tile must not cover its neighbour")
+        verify(rt.w > 0 && rt.h > 0, "the neighbour must still be drawn")
+    }
+
+    // Distinguishes: a peek that re-derives geometry instead of sharing the grid's. This
+    // compares peekTiles against `layout`'s OWN output for the same workspace — the grid cell at
+    // one size, the peek box at another — which is what the spec asks for. The fixed-px
+    // `cellInset` changes the INNER box's aspect by a different amount at each scale (6px is
+    // 1.6% of a 380px-wide grid cell and 0.5% of a 1200px peek box), so the grid cell and the
+    // peek box are not similarly constrained even though they share a monitor — a small residual
+    // drift between them is expected, and that is exactly why the comparison below is normalised
+    // against each box's own INNER rect (box minus 2*cellInset) rather than its outer one.
+    function test_peekTiles_geometry_matches_the_grid() {
+        var mon = edp()
+        // Asymmetric split (70/30, not 50/50): a symmetric fixture makes the width-ratio check
+        // below compare 1.0 against 1.0 no matter what breaks, so nothing could ever move it.
+        var wins = [
+            { address: "0xA", workspaceId: 1, ax: 0, ay: 26, sw: 1434, sh: 1254,
+              floating: false, fullscreen: 0, cls: "a", title: "a" },
+            { address: "0xB", workspaceId: 1, ax: 1434, ay: 26, sw: 614, sh: 1254,
+              floating: false, fullscreen: 0, cls: "b", title: "b" }
+        ]
+        var r = Logic.layout({ monitors: [mon],
+            workspaces: [{ id: 1, monitorName: "eDP-1", focused: true, occupied: true }],
+            windows: wins, focusedMonitorName: "eDP-1", availW: 1632, params: params })
+        var b = boxById(r, 1)
+        verify(b !== null, "the grid must have a box for workspace 1")
+        var pk = Logic.peekTiles(wins, mon, 1200, 750, params)
+        compare(pk.length, 2)
+        function gridRow(a) {
+            for (var i = 0; i < r.tiles.length; i++) if (r.tiles[i].address === a) return r.tiles[i]
+            fail("no grid row for " + a); return null
+        }
+        var ci = params.cellInset
+        for (var i = 0; i < pk.length; i++) {
+            var g = gridRow(pk[i].address)
+            // Each tile's centre as a fraction of its box's INNER rect — scale-invariant, so
+            // this compares the arrangement and not raw pixels, and isolates the residual
+            // cellInset drift described above instead of the (larger, and here irrelevant)
+            // difference between a box's outer and inner aspect. Both axes matter: `reserved`
+            // ([0,26,0,0], eDP-1 above) is purely vertical, so a peek that ignores it drifts on y
+            // while leaving x untouched, and a fraction-of-x-only comparison is blind to it by
+            // construction.
+            //
+            // Measured on this fixture (the 70/30 split above): correct code drifts 1.09e-3 on x
+            // and 0.00000 on y. A peek that ignores `reserved` drifts 1.03e-3 on x (untouched,
+            // as expected — x alone cannot see it) and 1.02e-2 on y; one that drops `cellInset`
+            // drifts 4.63e-3 on x; one with no letterbox centring drifts 1.09e-3 on x and
+            // 7.17e-3 on y. So the x threshold's real headroom over correct code is 0.002 /
+            // 1.09e-3 ≈ 1.8x, not the wider margin a rounder number would suggest — worth
+            // knowing before tightening it further. Both thresholds clear correct code with that
+            // margin and catch all three defects. The x threshold of 0.002 is calibrated to
+            // `params.cellInset: 6` above; a future change to that shared value (many other
+            // tests use it) would raise correct code's own x drift and should be read as a
+            // calibration question for this comment, not as new geometry drift.
+            var gfX = (g.x - b.x - ci + g.w / 2) / (b.w - 2 * ci)
+            var gfY = (g.y - b.y - ci + g.h / 2) / (b.h - 2 * ci)
+            var pfX = (pk[i].x - ci + pk[i].w / 2) / (1200 - 2 * ci)
+            var pfY = (pk[i].y - ci + pk[i].h / 2) / (750 - 2 * ci)
+            verify(Math.abs(gfX - pfX) < 0.002,
+                   pk[i].address + " x centre drifted from the grid: " + gfX + " vs " + pfX)
+            verify(Math.abs(gfY - pfY) < 0.005,
+                   pk[i].address + " y centre drifted from the grid: " + gfY + " vs " + pfY)
+        }
+        // The ratio BETWEEN the two tiles' widths, which carries no inset at all and so needs no
+        // tolerance beyond rounding. Hoisted out of the loop above: it does not depend on `i`, and
+        // inside the loop it silently repeated the same comparison twice.
+        verify(Math.abs((pk[0].w / pk[1].w) - (gridRow(pk[0].address).w / gridRow(pk[1].address).w)) < 0.05,
+               "tile width ratio must hold across sizes")
+    }
+
+    // Distinguishes: an empty workspace returning null/undefined instead of an empty array, which
+    // a Repeater turns into a binding error rather than an empty mini-map. The spec makes an
+    // empty workspace a legal peek target, so this is a real state, not a defensive check.
+    function test_peekTiles_on_an_empty_workspace_returns_an_empty_array() {
+        var rows = Logic.peekTiles([], edp(), 1200, 750, params)
+        verify(Array.isArray(rows), "must be an array, got " + typeof rows)
+        compare(rows.length, 0)
+    }
+
+    // Distinguishes: min-clamping dropped at peek scale. A sliver window is widened to minTileW
+    // in the grid; at peek size the same clamp must still apply, and the clamped tile must stay
+    // inside the box's inset rather than spilling past its right edge.
+    function test_peekTiles_clamps_slivers_to_the_minimum_tile_size() {
+        var mon = edp()
+        var wins = [{ address: "0xS", workspaceId: 1, ax: 2040, ay: 26, sw: 8, sh: 1254,
+                      floating: false, fullscreen: 0, cls: "sliver", title: "s" }]
+        var rows = Logic.peekTiles(wins, mon, 1200, 750, params)
+        compare(rows.length, 1)
+        verify(rows[0].w >= params.minTileW, "sliver widened to minTileW")
+        verify(rows[0].x + rows[0].w <= 1200 - params.cellInset + 0.01,
+               "the widened tile must stay inside the box inset")
+    }
+
+    // Distinguishes: a fit that stretches. A 16:9 source in a 16:10 box must letterbox
+    // vertically — full width, short of full height — never fill both.
+    function test_peekFit_letterboxes_instead_of_stretching() {
+        var f = Logic.peekFit(1920, 1080, 1600, 1000)     // 16:9 into 16:10
+        compare(Math.round(f.w), 1600, "the constraining axis is filled")
+        verify(f.h < 1000, "the other axis is short: " + f.h)
+        // The load-bearing assertion: the OUTPUT aspect equals the INPUT aspect. Comparing
+        // against the box would pass for a stretch.
+        verify(Math.abs((f.w / f.h) - (1920 / 1080)) < 0.001, "aspect preserved, got " + (f.w / f.h))
+    }
+
+    // Distinguishes: a fit that upscales past the box on the other axis. Portrait into landscape
+    // is the mirror case, and an implementation using max() instead of min() passes the previous
+    // test and fails this one.
+    function test_peekFit_fits_a_portrait_source_inside_a_landscape_box() {
+        var f = Logic.peekFit(1080, 1920, 1600, 1000)
+        verify(f.w <= 1600 + 0.001 && f.h <= 1000 + 0.001, "never exceeds the box")
+        compare(Math.round(f.h), 1000, "height is the constraining axis")
+        verify(Math.abs((f.w / f.h) - (1080 / 1920)) < 0.001, "aspect preserved")
+    }
+
+    // Distinguishes: a degenerate monitor (the "?" phantom, scale 0) producing NaN in the peek,
+    // the same class of bug that once blanked the whole card (see the phantom test above).
+    function test_peekFit_never_yields_NaN() {
+        var f = Logic.peekFit(0, 0, 1600, 1000)
+        verify(isFinite(f.w) && isFinite(f.h), "got " + f.w + "x" + f.h)
+        verify(f.w >= 0 && f.h >= 0)
+    }
+
+    // ---- Screen margin (docs/specs/2026-09-18-card-presence-design.md) --------------------
+    // Breathing room between the picker and the screen edge. A FRACTION, because the two
+    // absolute constants this replaces were sized for a ~1600-logical card and left 10 px on
+    // a 1920-logical one (a 4K panel at 2x — the commonest laptop logical width there is).
+    function test_screen_margin_is_five_percent_with_a_floor() {
+        compare(Logic.screenMargin(1920), 96, "4K at 2x: the reported case")
+        compare(Logic.screenMargin(2048), 102, "2560 at 1.25x: 102.4 rounds down")
+        compare(Logic.screenMargin(1080), 54, "the vertical axis uses the same function")
+        // THE case that discriminates Math.round from Math.floor. Every other width above is
+        // either exact (1920 x 0.05 = 96) or rounds the same way under both (102.4, 54.0), so
+        // without this line a floor() implementation passes the whole function.
+        compare(Logic.screenMargin(1919), 96, "95.95 rounds UP; flooring would give 95")
+    }
+    // The floor is what keeps a genuinely narrow screen behaving as it does today rather than
+    // losing its margin entirely: 5% of 200 is 10, less than the 16 the old constants used.
+    function test_screen_margin_floors_at_sixteen() {
+        compare(Logic.screenMargin(200), 16, "the floor binds below 320")
+        compare(Logic.screenMargin(320), 16, "exactly at the floor's crossover")
+    }
+    // panel.width is 0 until the surface maps, and a NaN would flow into availW, cell width,
+    // every box, the canvas and finally the card — which a Rectangle paints as nothing at all.
+    // The same failure mode as the phantom-monitor guard above.
+    function test_screen_margin_never_yields_a_non_number() {
+        compare(Logic.screenMargin(0), 16, "unmapped surface")
+        compare(Logic.screenMargin(-5), 16, "nonsense width")
+        compare(Logic.screenMargin(NaN), 16, "NaN must not propagate")
+        compare(Logic.screenMargin(undefined), 16, "missing argument")
     }
 }

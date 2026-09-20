@@ -138,12 +138,16 @@ TestCase {
         compare(view.compositor.commands.length, 0)
         compare(view.opened, true)
     }
-    // Distinguishes: a space starting a query (would set query " " and dim everything).
-    function test_space_does_not_start_a_query() {
+    // Distinguishes: a space starting a query (would set query " " and dim everything) — and,
+    // since Task 7, a space extending one already active. Both would once have happened (a bare
+    // Space used to fall through to appendQueryText); now Space is intercepted before that
+    // function is ever reached — it opens a peek instead — so the query is untouched either way,
+    // empty or not (spec: "`Space`, any state — never extends the find query").
+    function test_space_does_not_touch_the_query() {
         keyClick(Qt.Key_Space)
         compare(view.query, "")
         type("sl"); keyClick(Qt.Key_Space)
-        compare(view.query, "sl ")
+        compare(view.query, "sl")
     }
     // Distinguishes: bare-letter handling swallowing chords. Ctrl+K is reserved: it must
     // neither type nor act.
@@ -522,8 +526,24 @@ TestCase {
     // that is what the production code actually and correctly does; the layout assertions
     // (the actual point of this test, per its comment) are unaffected by match count.
     function test_long_query_stays_inside_the_card() {
+        // ✎ 2026-09-18 (card presence): widen the panel for THIS test so the card stays sized by
+        // its own content rather than clamped by `maxCardW`. The fixture's 1200x800 default used
+        // to leave the card unclamped on every font; with the screen margin now taking 2 x 5% of
+        // the panel, a font whose hint row is wide (CI's fallback is wider than a dev box's)
+        // pushes the card onto the cap, and the query area then lands within a fraction of a
+        // pixel of `q.contentWidth == q.width`. Qt's elided contentWidth rounds either side of
+        // the box width (measured: +0.3 at one width, -0.7 at the next), so the assertion below
+        // became font-metric luck rather than a statement about the layout. Restoring the wide,
+        // unclamped card restores what this test was written to exercise -- `bar.width > 200`
+        // below is the same premise, spelled as an assertion.
+        view.testPanel.width = 1600
         var query200 = ""; for (var i = 0; i < 40; i++) query200 += "slack"   // 200 characters
         type(query200)
+        // The premise, asserted rather than assumed: screenMargin(1600) is 80, so the cap is
+        // 1440. A card AT the cap means this test is back in the clamped regime and the elide
+        // assertion below is luck again — fail here, naming the number, rather than there.
+        verify(view.testCard.width < 1440,
+               "card is " + view.testCard.width + ", clamped at the 1440 cap: widen the panel")
         var bar = view.testBar, q = childNamed(bar, "findQuery"), c = childNamed(bar, "findCount")
         verify(bar.width <= view.testCard.width, "bar never wider than the card")
         verify(bar.width > 200, "fixture must be wide enough that the count could drift")

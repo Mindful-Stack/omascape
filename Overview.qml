@@ -254,8 +254,12 @@ Item {
     // the scratchpad group is extra and always carries its own chip.
     readonly property bool multiMonitor: groups.filter(function (g) { return !g.special }).length > 1
     // Card interior logical width available to the canvas: panel.width (logical, not
-    // screen.width*dpr) minus the card's own padding and a little breathing room.
-    readonly property real availCanvasW: panel.width > 0 ? panel.width - 2 * card.pad - 16 : 1600
+    // screen.width*dpr) minus the card's own padding and the screen margin. Shares
+    // Logic.screenMargin with the card's own caps below so the two cannot drift apart — they
+    // previously disagreed by 2 * card.pad, which is how the grid came to sit 10 px from the
+    // edge of a 1920-logical screen (a 4K panel at 2x).
+    readonly property real availCanvasW:
+        panel.width > 0 ? panel.width - 2 * card.pad - 2 * Logic.screenMargin(panel.width) : 1600
     onAvailCanvasWChanged: if (opened) rebuild()
 
     function focusedScreen() {
@@ -470,6 +474,144 @@ Item {
     // that reaches the handler — but NOT by pointer movement, which changes nothing in select
     // mode. Click-to-select clears it too: selectTile and selectWorkspaceBox both zero it first.
     property int digitLatch: 0
+    // ---- Peek (docs/specs/2026-09-18-peek-design.md) --------------------------------------
+    // The hold carries exactly three pieces of state and no more. `peeking` is "the key is down
+    // and the hold is live"; `peekedKey` is the identity currently on screen, read by the
+    // disappearance check in rebuild() (see `peekedAtEntry` there); `peekCancelled` suppresses the
+    // layer for the REST of the hold once the target vanished or a modal took over. None of the
+    // three is a copy of the target's geometry or contents — following the target is the absence
+    // of a snapshot.
+    property bool peeking: false
+    property string peekedKey: ""
+    property bool peekCancelled: false
+    // Whether the physical Space key is currently down, independent of whether a hold is live —
+    // set at the top of the Space press branch, cleared in `Keys.onReleased`. `peekAbort()` reads
+    // this to decide whether there is a key to suppress at all (review fix: it used to latch
+    // `peekCancelled` unconditionally, so a modal that opened and closed with Space never pressed
+    // — a plain right-click dismissed by Escape, say — still left the cancel set, and only a
+    // stray press+release cycle the user never asked for would clear it before the NEXT real
+    // press could open anything).
+    property bool peekKeyDown: false
+    // "w:<address>" for a window, "s:<id>" for a workspace. A single namespaced string so the
+    // two kinds can never collide in the model test (a workspace id is a number, an address a
+    // string, and JS would happily compare them across kinds).
+    function peekKeyOf(t) {
+        if (!t) return ""
+        return t.kind === "window" ? "w:" + t.address : "s:" + t.id
+    }
+    // Three named exits, not one function with a boolean: `cancel` true/false looked like a
+    // simple inverse pair, but it is not — a release must clear `peekCancelled` and an abort must
+    // SET it, and mutation testing showed a bare boolean argument gives no signal, offscreen or
+    // otherwise, when a call site passes the wrong one. Naming the three cases instead makes a
+    // wrong call site a readable diff instead of a silent behavioural swap, which matters now that
+    // more call sites exist than the original two (the press branch and the key catcher's release
+    // handler): `openMenu()`, `openCloseAllConfirm()`, the key catcher's focus-loss handler and
+    // `close()` all call `peekAbort()` too.
+    //
+    // These three functions are the ONLY sanctioned mutators of `peeking`/`peekCancelled` (the
+    // press branch below also sets `peeking = true`, but only immediately after confirming
+    // `peekCancelled` is false — see its own comment). That closes an invariant worth writing
+    // down: `peekCancelled` implies `!peeking`, always. Only `peekAbort()` ever sets
+    // `peekCancelled = true`, and it sets `peeking = false` in that SAME call — so the two can
+    // never both be true. `shown` below relies on this to skip a redundant `&& !peekCancelled`
+    // clause; if a future change adds a fourth mutator, or moves the cancel and the clear apart,
+    // re-check that binding. A second invariant, added by the review fix below:
+    // `peekCancelled` also implies `peekKeyDown` was true at the moment it was set — `peekAbort()`
+    // only latches the cancel while there is a physically-held key to suppress it for, so a modal
+    // that opens with Space never pressed leaves `peekCancelled` untouched.
+    //
+    // A normal release: the key came up, the hold ends, and the key is free to open a new one on
+    // its very next press — so the cancel clears too.
+    //
+    // `peekRelease()` and `peekReset()` below now diverge by exactly one line (`peekReset()` also
+    // clears `peekKeyDown`) — the two do NOT need to stay identical, and this is the first case of
+    // them actually differing. `peekRelease()` doesn't need to touch `peekKeyDown` because its own
+    // call site (`Keys.onReleased`) already clears it in the same breath, from the real key-up
+    // event. `peekReset()` has no such event to piggyback on — a fresh summon has no "the key just
+    // came up" moment — so it must clear the flag itself, or a `peekKeyDown` left stale from a
+    // still-unreleased key at the previous close (see `close()`'s own `peekAbort()` call) would
+    // carry into the new session and let an unrelated modal there wrongly latch a cancel again.
+    // They still say different things at their call sites (a real key-up vs. a fresh summon owing
+    // nothing to the last one), and are free to diverge further later. Nothing here catches an
+    // edit that changes one body without checking whether the other needs the same change — that
+    // is a known gap, not an oversight, and is the cost of keeping the names distinct. Resist
+    // "simplifying" by having one call the other (that would make the intent at one of the two
+    // call sites a lie); if you change what either function does, re-read this comment and check
+    // whether the other one needs the same fix.
+    function peekRelease() {
+        peeking = false
+        peekedKey = ""
+        peekCancelled = false
+    }
+    // An abort: the target vanished, a modal took over, or the overview is closing under a still
+    // -held key whose release will never arrive. The hold ends; the cancel is left SET so the key
+    // stays inert for the rest of this physical press — only `peekRelease()` (the real key-up)
+    // clears it — but ONLY when there is a physical key down to suppress in the first place
+    // (`peekKeyDown`). Without that guard, a modal that opens with Space never pressed (a plain
+    // right-click, dismissed by Escape, with no hold ever started) would still set the cancel, and
+    // since nothing but a real Space release clears it, the very next — unrelated — Space press
+    // would be silently swallowed until one stray press+release cycle happened to clear it first.
+    // Review fix; see the property's own comment and `test_a_menu_opened_and_dismissed_without_space_does_not_dead_the_next_press`.
+    function peekAbort() {
+        peeking = false
+        peekedKey = ""
+        if (peekKeyDown) peekCancelled = true
+    }
+    // A fresh summon: nothing carries over from whatever the key was doing at the previous close,
+    // cancelled or not — a stale `peekCancelled` here would leave the very first Space of a new
+    // session silently inert. `peekKeyDown` must reset too, for the same reason one level down:
+    // `close()` calls `peekAbort()` under a still-held key whose release will never arrive (the
+    // surface is unfocused/gone), so `peekKeyDown` is left true across the close. Without clearing
+    // it here, the NEXT summon starts with a stale "key is down" belief, and a modal opened with
+    // no Space actually held in the new session (a plain right-click) would incorrectly latch
+    // `peekCancelled` via that stale flag — reintroducing the exact bug this property exists to
+    // fix, one summon later. See the note above `peekRelease()`: identical to it today, kept
+    // separate on purpose.
+    function peekReset() {
+        peeking = false
+        peekedKey = ""
+        peekCancelled = false
+        peekKeyDown = false
+    }
+    // The mini-map's window list, reconciled by identity (Task 7 review, item 2). `rebuild()`
+    // reassigns `_windows` to a brand-new array on every `onWorkspacesChanged` — i.e. on ANY
+    // title change anywhere, not just on the peeked workspace — so a naive `_windows.filter(...)`
+    // in the PeekLayer binding below hands it a fresh array every time, even when nothing about
+    // the peeked workspace changed. PeekLayer's own Repeater keys its model on that array's
+    // IDENTITY, not its content, so a fresh-but-equal array reassigns the model, which destroys
+    // and recreates every WindowTile delegate underneath it — and with it, every live
+    // ScreencopyView capture mid-hold. That is invisible offscreen (no captures exist in this
+    // tier) but real on a live desktop: a held workspace peek would restart all its captures on
+    // compositor traffic that has nothing to do with it. The fix mirrors the grid's own
+    // `tilesModel` reconciliation (`rowDiffers`, above): build the candidate list, fold a cheap
+    // signature over exactly the fields `_placeWindows`/`peekTiles` (logic.js) actually consume,
+    // and hand back the PREVIOUS array — same object, same identity — whenever the signature
+    // still matches. A workspace switch mid-hold (a new `wsId`) always misses the cache, so the
+    // mini-map still repaints immediately when the peek re-targets to a different workspace.
+    //
+    // ONE property holding a mutable object, not three scalar properties: `workspaceWindows`'s own
+    // binding calls this function, so on a cache HIT this function both reads and (on a miss)
+    // writes the cache in the same pass. Reassigning a `property var` from inside another
+    // property's binding evaluation trips QML's binding-loop detector (`Binding loop detected for
+    // property "workspaceWindows"` — seen and removed while writing this), even though the
+    // read/write here is safe and terminates. Mutating this object's OWN fields in place, instead
+    // of reassigning the property that holds it, changes nothing QML's property system can see
+    // (no assignment, no change notification) and avoids the false loop entirely.
+    property var _peekWsWinCache: ({ id: -1, sig: "", list: [] })
+    function peekWorkspaceWindowsFor(wsId) {
+        var out = [], sig = ""
+        for (var i = 0; i < root._windows.length; i++) {
+            var w = root._windows[i]
+            if (w.workspaceId !== wsId) continue
+            out.push(w)
+            sig += w.address + "|" + w.ax + "|" + w.ay + "|" + w.sw + "|" + w.sh + "|" +
+                   w.floating + "|" + w.fullscreen + "|" + w.workspaceId + ";"
+        }
+        var c = _peekWsWinCache
+        if (wsId === c.id && sig === c.sig) return c.list
+        c.id = wsId; c.sig = sig; c.list = out
+        return out
+    }
     // ---- Actions: the arrow-key window cursor ----------------------------------------------
     // The keyboard's window target inside the selected workspace. "" = none. Mirrored into the
     // tiles model as the `cursor` role so the ring is a binding, not an imperative repaint.
@@ -618,8 +760,16 @@ Item {
     function closeTarget() {
         if (dragTile !== null) return          // a drag owns the pointer; actions wait
         var t = resolveTarget()
-        if (!t || t.kind !== "window") return
-        closeWindow(t.address, t.address === cursorAddress)
+        if (!t) return
+        // ✎ 2026-09-18 A workspace is not a closable thing — EXCEPT when it names exactly one
+        // window, which close and close-all would treat identically anyway (Logic.loneWindow, and
+        // the `windowCount > 1` gate the menu's Close all already carries). Resolved here rather
+        // than in Logic.target so the carve-out belongs to close alone: widening the shared target
+        // rule would also turn Enter on such a workspace from a jump into a focus.
+        var addr = t.kind === "window" ? t.address
+                                       : Logic.loneWindow(tileRows(), t.id, closeSkipSet())
+        if (!addr) return
+        closeWindow(addr, addr === cursorAddress)
     }
     // As conservative as reconcileMoves: absence from `windows` alone never clears an entry. A
     // window on a workspace that just became a lock placeholder is ALSO absent (find/drag never
@@ -696,7 +846,8 @@ Item {
         menuIndex = -1
         menuDismissKey = 0
         refreshMenuItems()
-        if (!menuItems.length) { menuTarget = null; return }
+        if (!menuItems.length) { menuTarget = null; return }   // nothing modal appeared: nothing to cancel
+        peekAbort()                                     // a modal and a peek are never both up
         menuOpen = true
         menuRawX = p.x
         menuRawY = p.y
@@ -784,6 +935,7 @@ Item {
         if (!Logic.hasWs(wsId)) return
         confirmCloseAllWs = wsId
         confirmDialog.selectedIndex = 0   // default to Cancel: this is the destructive path
+        peekAbort()                                     // a modal and a peek are never both up
         confirmOpen = true
     }
     function cancelCloseAllConfirm() {
@@ -1194,6 +1346,22 @@ Item {
 
     function rebuild() {
         var keepId = root.selectedId   // the workspace the user has selected, before layout
+        // Snapshotted before anything below runs a fresh resolveTarget(): this is fundamental to
+        // how the disappearance check works, not a workaround for the order operations happen to
+        // run in. `Logic.target` falls THROUGH on disappearance rather than going null — a closed
+        // window's cursor lands on the selected workspace, a destroyed workspace's selection lands
+        // on its neighbour — and that fall-through is the CORRECT, permanent answer for what the
+        // peek should show next, exactly like every other live retarget (Tab, an arrow, a hover).
+        // `PeekLayer.peekTarget` is a plain binding on `resolveTarget()`, so the moment this
+        // function reassigns the `boxes`/`_windowByAddress` it depends on, that binding re-
+        // resolves to the survivor — synchronously, before this function reaches the check below —
+        // and `onPeekTargetChanged` (Task 8, on PeekLayer) writes that survivor's identity into
+        // `root.peekedKey`. By the time the check runs, `root.peekedKey` no longer names what was
+        // on screen when this rebuild started; it already names what replaces it. The check needs
+        // the identity from BEFORE that re-resolve — the only way to tell "this vanished and fell
+        // through to a valid neighbour" apart from "this is still here and I'm looking at it
+        // normally" — so it must be captured here, at entry, not read live at the check site.
+        var peekedAtEntry = root.peekedKey
         buildHandles()
         var input = buildInput()
         // A box that just became a placeholder must not keep an optimistic tile (it would be a
@@ -1254,6 +1422,21 @@ Item {
             if (!cw || cw.workspaceId !== root.selectedId) cursorAddress = ""
         }
         applyCursorRole()
+        // Peek: the target's DISAPPEARANCE cancels the hold (spec: "A disappearing target cancels
+        // the hold"). Tested against the model, never against resolveTarget(): that falls THROUGH
+        // on disappearance — a cleared cursor lands on the selected workspace, a find match on its
+        // successor — so a null test would never fire and the peek would silently slide to a
+        // target the user never chose. Navigation needs no case here: it changes what resolves
+        // while the old identity is still in the model. Checked against `peekedAtEntry`, the
+        // identity captured BEFORE this rebuild's own resolveTarget() re-resolved — `root.peekedKey`
+        // itself already names the fall-through survivor by this point (see that snapshot's own
+        // comment), which is the right target for the NEXT peek but the wrong one to test here.
+        if (peeking && peekedAtEntry) {
+            var pk = peekedAtEntry.slice(2), gone = false
+            if (peekedAtEntry.charAt(0) === "w") gone = !wmap[pk]
+            else gone = Logic.indexOfWorkspace(res.boxes, parseInt(pk, 10)) < 0
+            if (gone) peekAbort()
+        }
         // An open menu follows fresh data: it dismisses when its target is gone (menuItems returns
         // an empty list for a missing window or box) and relabels in place otherwise, keeping the
         // highlight on the same item id — or, for a toggle row whose id itself is the thing that
@@ -1320,6 +1503,7 @@ Item {
         lockInstall(); lockSync(); locks.refresh()
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
         digitLatch = 0
+        peekReset()                                 // nothing carries over from the previous summon
         // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
         // "most recent input device wins" means the device that summoned the overview, not
@@ -1341,6 +1525,7 @@ Item {
     function close() {
         if (!opened) return                        // a click on the scrim mid-fade is not a second close
         endDrag(); menuDismiss(); cancelCloseAllConfirm()
+        peekAbort()                                 // the release will never arrive at an unfocused surface
         // settleTimer is open-only; reconcileTimer keeps running (bounded by the 1.8 s
         // deadlines): it clears optimistic display state (pendingMoves / fsPending / pendingCloses)
         // so a re-summon inside that window shows authoritative state, and with keepLoaded the
@@ -1538,6 +1723,11 @@ Item {
 
         // A 28% shadow reads on light themes but vanishes on dark ones (Tokyo Night sweep),
         // so the alpha follows the card's luminance.
+        // SoftShadow's own defaults (blur 28, offset 0,6). A deeper shadow was tried on this
+        // branch — blur 48, offset (0,12), alpha 0.65/0.38 — on the reasoning that the card must
+        // lift off the desktop now that there is real air around it. Reverted after looking at
+        // it: raising blur, offset and alpha together was too much, and the border added below
+        // already does the lifting the deeper shadow was for. Doing both was double.
         SoftShadow { target: card; scale: card.scale; opacity: card.opacity
                      color: Qt.rgba(0, 0, 0, root.darkTheme ? 0.55 : 0.28) }
         Rectangle {
@@ -1545,6 +1735,13 @@ Item {
             anchors.centerIn: parent
             radius: root.cardRadius
             color: root.background
+            // With real air around the card it must read as elevated rather than as a lighter
+            // rectangle. Accent-derived rather than a fixed neutral: a black hairline looks like
+            // a bug on a light card and a white one vanishes on it. `accent` is already
+            // `selText` and already tracks the theme, so this needs no new colour. One logical
+            // px is two device px at 2x — crisp at exactly the scale that reported the problem.
+            border.width: 1
+            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
             opacity: 0        // the entrance brings it in; panel.visible follows this
             readonly property int pad: Math.round(Style.space(12))
             // Space under the grid for the key hints or, while a query is active, the find
@@ -1566,9 +1763,13 @@ Item {
             }
             // Cap the card to the screen so the Flickable viewport can be smaller than the
             // content (`availCanvasW` already keeps canvas width <= this, minus the degenerate
-            // narrow-screen case, which is expected to 2-D scroll per the spec).
-            readonly property real maxCardW: panel.width > 0 ? panel.width - 16 : 1616
-            readonly property real maxCardH: panel.height > 0 ? panel.height - 64 : 900
+            // narrow-screen case, which is expected to 2-D scroll per the spec). Because
+            // availCanvasW is exactly this minus 2 * pad, the WIDTH cap never binds on grid
+            // width — the only thing that reaches it is the hint row, which is deliberately
+            // allowed to widen a narrow card so the key hints are not clipped. The HEIGHT cap
+            // does real work whenever there are enough monitor groups to overflow.
+            readonly property real maxCardW: panel.width  > 0 ? panel.width  - 2 * Logic.screenMargin(panel.width)  : 1616
+            readonly property real maxCardH: panel.height > 0 ? panel.height - 2 * Logic.screenMargin(panel.height) : 900
             // The hint row never widens past the screen (maxCardW still caps it), but it does
             // widen a narrow card: a layout with few/narrow workspaces must not clip the eight
             // key hints against the card edge.
@@ -1586,6 +1787,31 @@ Item {
                 id: keyCatcher
                 anchors.fill: parent
                 focus: true
+                // The release never arrives at a surface that has lost keyboard focus, so a held
+                // peek would stick open forever — the bug the spec calls out explicitly. This is
+                // the primary clear; Keys.onReleased below is a second path to the same place,
+                // never the only one. Attached here, not to `panel`: prepare.py rewrites `panel`
+                // to a plain Item in the offscreen fixture, so its activeFocus is not guaranteed
+                // to behave as it does in the real shell, whereas `keyCatcher` is the actual focus
+                // item in both.
+                //
+                // The RETURN half exists for the same reason (review fix, round 2): the release
+                // that never arrived while unfocused still never arrives once focus comes back —
+                // it was lost, not merely delayed — so `peekKeyDown` and `peekCancelled` are stuck
+                // exactly as `peekAbort()` above left them (key "down", cancel latched) unless
+                // something clears them. Nothing else does: `peekAbort()` only runs on the loss,
+                // and the physical key may genuinely still be held, so there is no key-up event to
+                // wait for. Focus RETURNING is the one moment this code can know the surface is
+                // live again, so it is the one moment safe to stop believing the stale "key down"
+                // state and let a fresh press through. Residual and accepted, not engineered
+                // around: if Space is still physically held when focus returns, the key's own next
+                // auto-repeat can re-open the peek — the release was lost, so nothing here can be
+                // honest about the key's real state, and re-opening under a genuinely-held key is
+                // the better of the two wrong answers versus leaving the hold dead forever.
+                onActiveFocusChanged: {
+                    if (!activeFocus) root.peekAbort()
+                    else { root.peekKeyDown = false; root.peekCancelled = false }
+                }
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function (e) {
                     e.accepted = true
@@ -1608,7 +1834,42 @@ Item {
                     // branch: this plugin has exactly one focus item, so everything is routed
                     // through here. `handleKey`'s own return is not consulted — while the dialog
                     // is open nothing else may act on the key, consumed or not.
-                    if (root.confirmOpen) { confirmDialog.handleKey(e); return }
+                    //
+                    // Bare Space needs one more thing done to it than "route to the dialog and
+                    // return", or it reopens the peek the instant the dialog closes (review find):
+                    // ConfirmDialog.handleKey() does not consume Space at all, so nothing above
+                    // ever recorded that it was physically down. Dismiss the dialog with Escape
+                    // while Space is still held (auto-repeating) and the very next repeat reaches
+                    // the Space branch below with `peeking` and `peekCancelled` both still false —
+                    // a hold this key never legitimately started, opened by a press the dialog
+                    // already swallowed. The menu branch below doesn't need this: `menuDismissKey`
+                    // (below) already latches the dismissing key's own repeats until release; the
+                    // dialog has no such latch, so it has to build one here instead.
+                    //
+                    // Read directly off e.modifiers rather than `chord`: `chord` is computed
+                    // further down, below every early return in this function, so it does not
+                    // exist yet at this point in the branch — this dialog handler is one of those
+                    // early returns.
+                    //
+                    // Order matters and is NOT swappable: `peekAbort()` only latches
+                    // `peekCancelled` while `peekKeyDown` is already true (see both properties'
+                    // own comments, and the review fix that put that guard there) — it exists
+                    // specifically so a modal that opens and closes with Space never pressed does
+                    // not falsely latch a cancel that only a real Space release would ever clear.
+                    // Setting `peekKeyDown` first is what makes this a case `peekAbort()` is
+                    // WILLING to latch: the key really is down right now, physically, so recording
+                    // that before aborting is honest, not a workaround. Every later repeat of this
+                    // same held Space runs this same pair again — harmless, since both are already
+                    // set — right up until the real key-up, which is what finally clears them
+                    // (`Keys.onReleased` below) and frees a genuinely fresh press to open normally.
+                    if (root.confirmOpen) {
+                        if (!(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+                                && e.key === Qt.Key_Space) {
+                            root.peekKeyDown = true
+                            root.peekAbort()
+                        }
+                        confirmDialog.handleKey(e); return
+                    }
                     // The menu owns every key while it is open — checked before `finding`, so a
                     // letter dismisses instead of extending the query.
                     if (root.menuOpen) { root.menuKey(e); return }
@@ -1617,6 +1878,37 @@ Item {
 
                     var chord = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
                     var finding = root.query.length > 0
+                    // Peek: hold Space to preview the target. Placed after the menuDismissKey
+                    // swallow (so a Space that dismissed a menu does not also peek) and before
+                    // the chord branch (a chorded Space is not a peek and falls through to it).
+                    // Also placed before the pointerLive reset below: resolveTarget() must see
+                    // pointer liveness exactly as the pointer left it. Task 3 already keeps Space
+                    // out of that reset (it is an action key), so this ordering is belt and
+                    // braces — but a future reordering that moved the reset above this branch
+                    // would silently break pointer targeting, and this is what protects against
+                    // it. Guarded on STATE, not on e.isAutoRepeat: a held key repeats, and the
+                    // open decision must be made once. QtTest cannot synthesize isAutoRepeat, so
+                    // a flag-only guard would have no offscreen test at all.
+                    if (!chord && e.key === Qt.Key_Space) {
+                        // Physical key state, set before anything else below can return early —
+                        // peekAbort()'s no-target branch two lines down must see it as already
+                        // down (that press legitimately latches the cancel for the rest of this
+                        // hold), and every other peekAbort() call site needs to tell "a key is
+                        // down right now" from "nothing is held" (see peekKeyDown's own comment).
+                        root.peekKeyDown = true
+                        if (root.peeking || root.peekCancelled) return
+                        var pt = root.resolveTarget()
+                        if (!pt) { root.peekAbort(); return }   // no target: nothing, all hold
+                        // No `peekedKey = peekKeyOf(pt)` here: PeekLayer's `onPeekTargetChanged`
+                        // (below, on the PeekLayer instantiation) already sets it the instant
+                        // `peeking` flips true and its `peekTarget` binding re-evaluates — a
+                        // duplicate write here was proven genuinely redundant (review, round 2:
+                        // deleting it changes nothing, 29/29 still green), and two writers of the
+                        // same property is exactly the shape that let the earlier confusion in
+                        // this file happen once already. One writer.
+                        root.peeking = true
+                        return
+                    }
                     // Action keys read pointer liveness; everything else is keyboard intent and
                     // clears it BEFORE any resolve below can see it.
                     if (!Logic.isActionKey(e.key, chord, Qt.ControlModifier)) root.pointerLive = false
@@ -1683,6 +1975,12 @@ Item {
                     e.accepted = true
                     if (root.menuDismissKey !== 0 && e.key === root.menuDismissKey && !e.isAutoRepeat)
                         root.menuDismissKey = 0
+                    // The release is the ONLY thing that clears the cancel: every other exit path
+                    // (a modal, focus loss, the target vanishing) leaves it set, which is what
+                    // stops the layer re-opening under a key that is merely still held. It is also
+                    // the only place `peekKeyDown` goes back to false, so `peekAbort()` stops
+                    // latching a fresh cancel the instant the physical key comes up.
+                    if (e.key === Qt.Key_Space && !e.isAutoRepeat) { root.peekKeyDown = false; root.peekRelease() }
                 }
             }
 
@@ -2137,6 +2435,7 @@ Item {
                                  { k: "tab", l: "workspace" }, { k: "↑ ↓ ← →", l: "window" },
                                  { k: "↵", l: config.activate === "select" ? "enter" : "select" },
                                  { k: "drag", l: "move window" }, { k: "type", l: "find" },
+                                 { k: "hold space", l: "peek" },
                                  { k: "esc", l: "close" },
                                  { k: "?", l: root.hintsExpanded ? "less" : "more" } ]
                         HintCap { foreground: root.foreground; fill: root.wellColor
@@ -2171,6 +2470,80 @@ Item {
                 fg: root.foreground; accent: root.accent
                 fontFamily: root.fontFamily; fontSize: root.captionSize
             }
+        }
+
+        // The peek (docs/specs/2026-09-18-peek-design.md, "The peek layer"): a sibling of `card`,
+        // stacked above it, needing no z-order arbitration against the menu or the confirmation
+        // dialog in either direction — `Keys.onPressed` returns early for both before the `Space`
+        // branch. `openMenu()` and `openCloseAllConfirm()` each force-clear the peek when they
+        // actually open (Task 8), so the two are never on screen together. Display only: every
+        // property below is a plain binding on root state, not a value copied at press time.
+        // `shown` follows `peeking` alone (see the invariant note on `peeking`/`peekCancelled`
+        // above); `peekTarget` is a binding on `resolveTarget()`, so a live Tab, arrow or hover
+        // re-targets the layer without a release — no imperative `onPeekingChanged` assignment
+        // anywhere in this block. PeekLayer anchors nothing itself, so this call site owns its
+        // sizing.
+        PeekLayer {
+            id: peekLayer
+            anchors.fill: parent
+            // Not `root.peeking && !root.peekCancelled`: the clause was proven unreachable dead
+            // code, not merely untested. `peekAbort()` is the ONLY place `peekCancelled` is ever
+            // set true, and it sets `peeking = false` in that same call (see the three named
+            // mutators above) — so `peeking && peekCancelled` can never both hold. A written-down
+            // invariant beats a defensive clause that implies a state the code cannot reach.
+            shown: root.peeking
+            peekTarget: root.peeking ? root.resolveTarget() : null
+            // Keeps peekedKey naming the identity CURRENTLY on screen, so the disappearance check
+            // in rebuild() compares against what the user is actually looking at. Without this,
+            // peekedKey would stay pinned to whatever was on screen at press time: after Tab
+            // retargets the layer to a new window, closing the ORIGINAL window would wrongly
+            // cancel (it is no longer shown) while closing the NEW one would not (rebuild() would
+            // still be checking the stale identity).
+            onPeekTargetChanged: if (root.peeking) root.peekedKey = root.peekKeyOf(peekTarget)
+            monForTarget: {
+                var t = peekTarget
+                if (!t) return null
+                if (t.kind === "window") {
+                    var w = root._windowByAddress[t.address]
+                    var b = w ? root.boxForWs(w.workspaceId) : null
+                    return b ? root._monByName[b.monitorName] : null
+                }
+                var wb = root.boxForWs(t.id)
+                return wb ? root._monByName[wb.monitorName] : null
+            }
+            // See peekWorkspaceWindowsFor's own comment: this hands back the SAME array when
+            // nothing that _placeWindows/peekTiles reads has changed, so an unrelated rebuild()
+            // does not reassign the Repeater's model and restart every capture underneath it.
+            workspaceWindows: {
+                var t = peekTarget
+                return (t && t.kind === "workspace") ? root.peekWorkspaceWindowsFor(t.id) : []
+            }
+            // The lock gate, mirroring the grid tile's `boxArmed`: an armed workspace's windows
+            // are under a `no_screen_share` rule and the compositor denies toplevel export, so
+            // capturing would fire a denied request per window and show nothing. Task 5 added the
+            // `armed` property for this; without this binding the gate is inert.
+            armed: {
+                var t = peekTarget
+                if (!t) return false
+                var wsId = t.kind === "workspace" ? t.id
+                         : (root._windowByAddress[t.address] || { workspaceId: -1 }).workspaceId
+                // Bare `locks`, not `root.locks`: it is an object id, and QML ids are not
+                // reachable as properties of root. This is how the grid tile does it too.
+                return Logic.hasWs(wsId) ? locks.isArmed(Logic.wsSelector(wsId)) : false
+            }
+            windowByAddress: root._windowByAddress
+            handleByAddress: root.handleByAddress
+            params: root.params
+            background: root.background; foreground: root.foreground
+            hairline: root.hairline; scrim: root.scrim
+            // config.scrim (root state, not target-dependent) is wired now, unlike the
+            // target-resolution properties above: a user who has turned the card's own scrim off
+            // must not get one reintroduced just by holding Space.
+            scrimVisible: config.scrim
+            cardRadius: root.cardRadius
+            fontFamily: root.fontFamily; captionSize: root.captionSize
+            darkTheme: root.darkTheme
+            motion: root.motion
         }
         // Swallows any press that is not on the menu itself. Panel-sized and above the card, so a
         // press on the scrim cannot both dismiss the menu and close the overview — one press, one

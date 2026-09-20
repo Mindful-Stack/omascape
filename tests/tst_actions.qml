@@ -33,6 +33,25 @@ TestCase {
                    "not a modifier: 0x" + others[j].toString(16))
     }
 
+    // Distinguishes: a Space that clears pointer liveness like an ordinary key. The key handler
+    // clears pointerLive for everything isActionKey rejects, BEFORE any resolve runs — so a Space
+    // outside this predicate means hovering one window and pressing Space previews the Tab cursor
+    // instead. Also pins the hex: logic.js is a .pragma library with no Qt.Key_* access, so 0x20
+    // is hand-written and a transposed digit would make Space an ordinary key silently.
+    function test_isActionKey_accepts_bare_space_only() {
+        verify(Logic.isActionKey(Qt.Key_Space, 0, Qt.ControlModifier), "bare Space is an action key")
+        var chords = [Qt.ControlModifier, Qt.AltModifier, Qt.MetaModifier,
+                      Qt.ControlModifier | Qt.AltModifier]
+        for (var i = 0; i < chords.length; i++)
+            verify(!Logic.isActionKey(Qt.Key_Space, chords[i], Qt.ControlModifier),
+                   "chorded Space is not an action key (chord " + chords[i] + ")")
+        // Positive control: the existing action keys must still qualify, so a regression that
+        // replaced the predicate's body rather than extending it cannot pass this test.
+        verify(Logic.isActionKey(Qt.Key_Return, 0, Qt.ControlModifier))
+        verify(Logic.isActionKey(Qt.Key_W, Qt.ControlModifier, Qt.ControlModifier))
+        verify(!Logic.isActionKey(Qt.Key_Tab, 0, Qt.ControlModifier), "Tab is keyboard intent")
+    }
+
     // Distinguishes: a hit test that returns the FIRST containing rect instead of the topmost.
     // Both tiles contain (15,15); only a z-aware implementation answers "b".
     function test_tileAt_picks_the_highest_z() {
@@ -388,6 +407,26 @@ TestCase {
     function test_cycleWindows_wrap_arithmetic_with_large_step() {
         compare(Logic.cycleWindows(rows, 1, "a", 5, null), "c")   // Forward wrap with large step
         compare(Logic.cycleWindows(rows, 1, "a", -5, null), "b")  // Backward wrap with large step
+    }
+
+    // ✎ 2026-09-18: a workspace target that names exactly one window IS that window, for Ctrl+W
+    // only (docs/specs/2026-09-15-actions-design.md, addendum).
+    // Distinguishes: a "lone window" that answers the first window of a busy workspace instead of
+    // refusing — the difference between closing the one window you can see and closing whichever
+    // of several happens to sort first.
+    function test_loneWindow_answers_only_when_the_workspace_names_one() {
+        compare(Logic.loneWindow(rows, 2, null), "z", "one window is unambiguous")
+        compare(Logic.loneWindow(rows, 1, null), "", "three windows name none of them")
+        compare(Logic.loneWindow(rows, 9, null), "", "an empty workspace")
+        compare(Logic.loneWindow(rows, -1, null), "", "no workspace at all")
+    }
+    // Distinguishes: a count that includes windows already asked to close. Those tiles are drawn
+    // dimmed and are not cycle stops, so "exactly one window" must mean exactly one the user has
+    // not already closed — the same set cycleWindows skips, so the rule matches the screen.
+    function test_loneWindow_skips_outstanding_closes() {
+        compare(Logic.loneWindow(rows, 1, { a: true, b: true }), "c")
+        compare(Logic.loneWindow(rows, 1, { a: true }), "", "b and c are both still live")
+        compare(Logic.loneWindow(rows, 2, { z: true }), "", "nothing left to close")
     }
 
     // Distinguishes: a focus-steal event dropped from the set, which would leave the picker deaf
