@@ -535,15 +535,17 @@ Append after Task 4's test:
 ```qml
     // Two monitors (so the group inset and header band are on), six workspaces on the first
     // so it wraps into a second sub-row, and the scratchpad shown: every vertical seam the
-    // layout has. availW 2024 less the 2*6 inset is 2012 — cw 367, gap 29, no fit step.
-    function multiWithScratchpad() {
+    // layout has. availW 2024 less the 2*6 inset is 2012 — cw 367, gap 29, no fit step with the default ratioParams; under the pixel `params`
+    // the same fixture is cw 380, gap 8, and the wrap still happens.
+    function multiWithScratchpad(p) {
         var wss = []
         for (var i = 1; i <= 6; i++) wss.push({ id: i, monitorName: "eDP-1", focused: i === 1, occupied: false })
         for (var j = 7; j <= 8; j++) wss.push({ id: j, monitorName: "HDMI-A-1", focused: false, occupied: false })
         wss.push({ id: Logic.SCRATCHPAD_ID, monitorName: "eDP-1", special: "scratchpad",
                    focused: false, occupied: true })
         return Logic.layout({ monitors: [edp(), hdmi()], workspaces: wss, windows: [],
-                              focusedMonitorName: "eDP-1", availW: 2024, params: ratioParams })
+                              focusedMonitorName: "eDP-1", availW: 2024,
+                              params: p === undefined ? ratioParams : p })
     }
 
     // Distinguishes: an implementation that widened the columns and left every row seam on
