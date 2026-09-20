@@ -86,6 +86,7 @@ what it needs.
 - [[adrs/0002-compositor-dispatch-errors]] — the Lua parse and behaviour suites inside Tier 1.
 - [[languages/bash/test-harnesses]] — the `CI:` guard that makes this decision enforceable, and
   the two harness idioms.
+- [[general/feature-workflow]] — the spec-and-plan pipeline these tiers are written against.
 - [[adrs/0004-qt-compatibility-floor]] — why Tier 1 passing locally is not the same as CI
   passing.
 - `README.md` § Testing, `DESIGN.md`, `ROADMAP.md` for the tier naming; `tests/run.sh`,

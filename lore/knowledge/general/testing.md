@@ -139,3 +139,5 @@ Say in the PR which of them you ran — see [[general/release-and-distribution]]
 - [[languages/bash/test-harnesses]] — how the two bash suites assert, and what a `SKIP:` owes you.
 - [[languages/bash/script-conventions]] — every runner here is a bash entry point.
 - [[domain/targeting-and-pointer-liveness]] — the rule the largest suites exist to pin.
+- [[general/feature-workflow]] — where a plan's tasks come from, and the gotcha list that
+  belongs here instead of in the next plan preamble.
