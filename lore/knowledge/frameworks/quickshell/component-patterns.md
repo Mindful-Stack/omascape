@@ -58,7 +58,7 @@ delegate, and the cross-component `motion` contract (see
 **Signal parameters are typed; function signatures are not.** All four parametered signals
 declare types — `signal activated(string id)`, `signal writeFailed(string why)` — while all 120
 function declarations use the untyped `function name(args)` form, with zero typed signatures
-anywhere. Keep both halves: the typed form on a function is a Qt 6.4 compatibility risk that
+anywhere. Keep both halves: the typed form on a function was a Qt 6.4 compatibility risk and still
 buys nothing here.
 
 Functions belong to the composite. `Overview.qml` holds 108 of the 120; the four display-only

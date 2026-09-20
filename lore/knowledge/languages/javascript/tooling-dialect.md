@@ -19,7 +19,7 @@ prevent.
 
 If the file is imported by a `.qml` file, it is the first column and
 [[adrs/0004-qt-compatibility-floor]] binds it. Otherwise it is the second, and the floor is
-irrelevant — Node is whatever the developer has installed, not Qt 6.4's parser.
+irrelevant — Node is whatever the developer has installed, not Qt's QML parser.
 
 Measured 2026-09-20 across all 18 tooling files (6244 lines).
 

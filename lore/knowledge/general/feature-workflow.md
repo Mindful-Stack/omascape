@@ -54,7 +54,7 @@ sections stay put with corrections noted beside them.
 
 `docs/plans/YYYY-MM-DD-<feature>.md`, numbered `## Task N: <imperative>` sections, each a
 TDD cycle. Before Task 1 comes a **`## Conventions (every task)`** preamble, and its most valuable
-part is a `**Gotchas (each has bitten this repo before)**` list — the Qt 6.4 reserved words,
+part is a `**Gotchas (each has bitten this repo before)**` list — the Qt reserved words,
 `Item` already owning `layer`, `ListModel` roles fixed at first `append`, `QtTest` being unable to
 synthesise `isAutoRepeat`.
 

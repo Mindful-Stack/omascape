@@ -25,13 +25,14 @@ act on here.
 
 These are the constraints that have cost the most time. Each links the record that explains why.
 
-- **Qt 6.4 is the compatibility floor** (`lore/knowledge/adrs/0004-qt-compatibility-floor.md`). Local is 6.11,
-  CI is 6.4, and in QML an unknown property is a *compile* error — so these pass locally and
-  break the build:
+- **Qt 6.9 is the compatibility floor, and CI pins it**
+  (`lore/knowledge/adrs/0004-qt-compatibility-floor.md`). Local is 6.11, CI installs 6.9, and in
+  QML an unknown property is a *compile* error — so these pass locally and break the build:
   - Never use a legacy reserved word as an identifier: `long`, `short`, `int`, `char`, `float`,
-    `double`, `byte`, `boolean`, `final`, `native`.
-  - Never use a property newer than 6.4. Per-corner radius (`topLeftRadius`) is 6.7+, and 6.4 has
-    no per-side borders either.
+    `double`, `byte`, `boolean`, `final`, `native`. Qt 6.9 rejects them in `.qml` files and 6.11
+    accepts them, so the mistake is invisible locally.
+  - Never use a property newer than 6.9 (check the docs' "Since:" line). Per-corner radius and
+    `RectangularShadow` are in; anything from 6.10 or 6.11 is out.
   - When CI fails on code that passed locally, suspect this first. `gh pr checks` is part of the
     loop, not an afterthought.
 - **Compositor operations are atomic Lua chunks that must surface their errors**
@@ -98,7 +99,8 @@ lore/_tools/, scripts/*.mjs                      KB + workspace tooling (Node) �
 - `logic.js` stays pure and unit-testable; `Overview.qml` wires Quickshell singletons to it.
   Layout maths belongs in `logic.js`, not in a QML binding.
 - **Two unrelated dialects of JavaScript live here.** `logic.js` loads into the QML engine and is
-  deliberately ES5 (`var`, no arrows, no template literals) because of the Qt 6.4 floor. The Node
+  deliberately ES5 (`var`, no arrows, no template literals) by convention, originally for the Qt
+  6.4 floor. The Node
   tooling under `lore/_tools/` and `scripts/*.mjs` is ordinary modern JavaScript with zero runtime
   dependencies. Neither one's rules apply to the other —
   `lore/knowledge/languages/javascript/tooling-dialect.md`.

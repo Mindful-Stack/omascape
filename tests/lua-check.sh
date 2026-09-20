@@ -9,8 +9,9 @@ src=$(cd "$(dirname "$0")/.." && pwd)
 # The chunks are rendered by the same Qt6 qmltestrunner tests/run.sh uses (a one-test
 # TestCase that console.logs them): one Qt tool for everything, and no dependence on the
 # `qml` runtime's per-version behaviour (Qt 6.4's refuses a non-visual root with exit 2).
-RUNNER=""
-if command -v qmltestrunner6 >/dev/null 2>&1; then RUNNER=qmltestrunner6
+RUNNER="${QMLTESTRUNNER:-}"   # pinned install (CI), see tests/run.sh
+if [ -n "$RUNNER" ]; then :
+elif command -v qmltestrunner6 >/dev/null 2>&1; then RUNNER=qmltestrunner6
 elif [ -x /usr/lib/qt6/bin/qmltestrunner ]; then RUNNER=/usr/lib/qt6/bin/qmltestrunner; fi
 LUA_BIN=""
 for c in lua5.4 lua luajit; do

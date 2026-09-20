@@ -1,13 +1,13 @@
 ---
 title: JavaScript code style (logic.js)
-description: logic.js is a dependency-free `.pragma library` holding the layout maths and reconcile diff; it is written in a deliberately conservative ES5-style dialect because Qt 6.4 is the compatibility floor, and it must never reference a QML or Quickshell type.
+description: logic.js is a dependency-free `.pragma library` holding the layout maths and reconcile diff; it is written in a deliberately conservative ES5-style dialect (set by the old Qt 6.4 floor, kept as convention), and it must never reference a QML or Quickshell type.
 tags: [languages, javascript, qml, testing]
 ---
 
 # JavaScript code style (`logic.js`)
 
 > **Scope: `logic.js` only — the JavaScript that loads into the QML engine.** Everything below
-> is a consequence of Qt 6.4 being the compatibility floor, and none of it applies to the Node
+> was set by Qt 6.4 being the compatibility floor and is kept as convention, and none of it applies to the Node
 > tooling under `lore/_tools/` and `scripts/*.mjs`, which is ordinary modern JavaScript. That
 > tree is 6244 lines against this file's 2048, so a search of this category will surface it —
 > see [[languages/javascript/tooling-dialect]] before applying any rule here to a file outside
@@ -63,11 +63,13 @@ Measured across the file:
 Use `var`. No arrow functions, no template literals, no classes. The 161 backticks in the file are
 all markdown prose inside comments, not template literals.
 
-This is not nostalgia: Qt 6.4 is the compatibility floor and its JS parser is what CI compiles
-against — see [[adrs/0004-qt-compatibility-floor]]. The same record carries the identifier rule
-that bites hardest here: never name a variable `long`, `short`, `int`, `char`, `float`, `double`,
-`byte`, `boolean`, `final` or `native`. The file currently has zero violations; each one is a
-green local run and a red build.
+This started as necessity — Qt 6.4 was the compatibility floor and its JS parser was what CI
+compiled against — and stays as convention now that the floor is 6.9
+([[adrs/0004-qt-compatibility-floor]]): one dialect, no per-feature version lookups. The same
+record carries the identifier rule: never name a variable `long`, `short`, `int`, `char`,
+`float`, `double`, `byte`, `boolean`, `final` or `native`. On 6.9 the lexer rejects them only in
+`.qml` files, and a `.pragma library` file would accept them — the rule is kept here anyway so
+nobody has to remember which file they are in. The file has zero violations.
 
 ## Naming
 

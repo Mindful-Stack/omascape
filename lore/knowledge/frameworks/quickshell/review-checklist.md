@@ -1,6 +1,6 @@
 ---
 title: Quickshell review checklist
-description: What to check on a QML change here — Qt 6.4 validity, leaf components that neither size nor theme themselves, no literal duration or colour at a use site, `visible:` rather than Loader, a UI suite registered in tests/ui/run.sh, and the manifest entry point still resolving.
+description: What to check on a QML change here — Qt 6.9 validity, leaf components that neither size nor theme themselves, no literal duration or colour at a use site, `visible:` rather than Loader, a UI suite registered in tests/ui/run.sh, and the manifest entry point still resolving.
 tags: [frameworks, quickshell, qml, review, testing]
 ---
 
@@ -15,10 +15,11 @@ later. Everything here is a rule the tree currently follows.
 CI's Qt is the authority and it is older than the local one — see
 [[adrs/0004-qt-compatibility-floor]]. A local pass is not evidence.
 
-- [ ] No legacy reserved word used as an identifier: `long`, `short`, `int`, `char`, `float`,
-      `double`, `byte`, `boolean`, `final`, `native`. Fine locally, a syntax error on CI.
-- [ ] No property newer than Qt 6.4. Per-corner radius (`topLeftRadius` and friends) and
-      per-side borders are 6.7+ — draw the effect another way.
+- [ ] No legacy reserved word used as an identifier in a `.qml` file: `long`, `short`, `int`,
+      `char`, `float`, `double`, `byte`, `boolean`, `final`, `native`. Fine on local 6.11, a
+      syntax error on CI's 6.9.
+- [ ] No property newer than Qt 6.9 (the docs' "Since:" line). Per-corner radius and
+      `RectangularShadow` are in; anything introduced in 6.10 or 6.11 is out.
 - [ ] No typed function signature (`function f(x: int): void`). Signals take types; functions
       do not.
 - [ ] `gh pr checks` after the push. An unknown property is a compile error, not a warning, and

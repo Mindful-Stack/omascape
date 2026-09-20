@@ -17,4 +17,5 @@ cp "$src/tests/ui/dropdown.qml" "$fixture/tst_dropdown_ui.qml"
 cp "$src/tests/ui/activate.qml" "$fixture/tst_activate_ui.qml"
 runner=/usr/lib/qt6/bin/qmltestrunner
 command -v qmltestrunner6 >/dev/null 2>&1 && runner=qmltestrunner6
+[[ -n ${QMLTESTRUNNER:-} ]] && runner=$QMLTESTRUNNER   # pinned install (CI), see tests/run.sh
 QT_QPA_PLATFORMTHEME=generic QT_QPA_PLATFORM=offscreen "$runner" -input "$fixture" "$@"
