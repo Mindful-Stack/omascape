@@ -1399,6 +1399,32 @@ TestCase {
         compare(none.r, 0, "no background at all yields black, never undefined")
     }
 
+    // A malformed config is currently SILENT: parseConfig is total, so every setting reverts to
+    // its default and nothing says why. This is what lets the user be told. The locks file has
+    // had this treatment since it shipped; the config file never adopted it.
+    function test_a_broken_config_reports_why() {
+        // The cases that must stay quiet. Empty is what a MISSING file looks like by the time
+        // apply("") runs, and an empty file legitimately means "use every default" -- reporting
+        // either would put a notification in front of most users, who have no config at all.
+        compare(Logic.configParseError(""), "", "no file")
+        compare(Logic.configParseError("   \n  "), "", "an empty file")
+        compare(Logic.configParseError('{}'), "", "an empty object")
+        compare(Logic.configParseError('{"scrim":false}'), "", "a valid file")
+        compare(Logic.configParseError(undefined), "", "never loaded")
+
+        // ...and the cases that must speak up.
+        verify(Logic.configParseError('{"scrim":false,}').length > 0, "a trailing comma")
+        verify(Logic.configParseError("not json at all").length > 0, "not JSON")
+        verify(Logic.configParseError('{"anchor": "bar"').length > 0, "an unclosed brace")
+        // THE cases a truthiness check would miss: these all PARSE, and parseConfig then reads
+        // no properties off them and returns every default -- silently, and indistinguishably
+        // from an empty file. A user who wrote a JSON array would get no hint at all.
+        verify(Logic.configParseError('[1,2,3]').length > 0, "an array parses but is unusable")
+        verify(Logic.configParseError('"a string"').length > 0, "so does a bare string")
+        verify(Logic.configParseError('42').length > 0, "and a bare number")
+        verify(Logic.configParseError('null').length > 0, "and null")
+    }
+
     // The wallpaper path comes from `readlink -f`, so it arrives with a trailing newline and
     // may contain spaces. Everything that is not an absolute path must yield "" -- the view
     // reads that as "no wallpaper" and falls back to a painted colour, which is what it did
@@ -1518,5 +1544,152 @@ TestCase {
         compare(Logic.rowPhase(0.5, NaN, 3), Logic.rowPhase(0.5, 0, 3), "NaN rank ranks first")
         compare(Logic.rowPhase(0.5, 0, NaN), 0.5, "NaN rowCount degrades to no stagger")
         compare(Logic.rowPhase(0.5, 99, 3), Logic.rowPhase(0.5, 2, 3), "rank clamps to the last row")
+    }
+
+    // The panel's model. SETTING_ORDER must cover the entire schema — this is the assertion
+    // that catches drift. The key-set comparison below documents the contract but cannot fail,
+    // because the fallback loop guarantees rows.keys == cfg.keys by construction. The fallback's
+    // job is to keep a drifted build honest to the user, not to catch drift in CI.
+    function test_settings_rows_cover_every_config_key() {
+        var cfg = Logic.parseConfig("{}")
+        var rows = Logic.settingsRows(cfg)
+        var keys = []
+        for (var i = 0; i < rows.length; i++) keys.push(rows[i].key)
+        var schema = []
+        for (var k in cfg) schema.push(k)
+        // SETTING_ORDER is the drift detector: it must name every schema key, no more, no less.
+        compare(Logic.SETTING_ORDER.slice().sort().join(","),
+                schema.slice().sort().join(","),
+                "SETTING_ORDER must name every schema key")
+        // The key-set assertion documents the contract — every parseConfig key gets exactly one row.
+        // It cannot fail because the fallback loop appends rows for any cfg key SETTING_ORDER omits.
+        compare(keys.slice().sort().join(","), schema.slice().sort().join(","),
+                "every parseConfig key needs a row, and no row may invent one")
+        // lockBorder is present but not editable: a colour needs a real picker.
+        for (var j = 0; j < rows.length; j++)
+            if (rows[j].key === "lockBorder")
+                compare(rows[j].editable, false, "lockBorder is shown, not edited")
+        // ...and everything else IS editable, or the panel is decorative.
+        var editable = rows.filter(function (r) { return r.editable }).length
+        compare(editable, rows.length - 1, "seven of the eight must be editable")
+    }
+
+    // Every row the panel can land on must be able to say what it is. The panel shows the
+    // selection's description with no key to press, so a setting that reached SETTING_ORDER
+    // without a SETTING_HELP entry would render as a blank line under a name like "lock frame"
+    // -- the exact confusion the description exists to answer. Asserted against SETTING_ORDER
+    // and against the built rows, so neither a missing map entry nor a row that drops `help`
+    // on the way through settingsRows() can pass.
+    function test_every_setting_has_a_description() {
+        var missing = []
+        for (var i = 0; i < Logic.SETTING_ORDER.length; i++) {
+            var k = Logic.SETTING_ORDER[i]
+            if (!Logic.SETTING_HELP[k] || String(Logic.SETTING_HELP[k]).length === 0) missing.push(k)
+        }
+        compare(missing.join(","), "", "every setting needs a description")
+        var rows = Logic.settingsRows(Logic.parseConfig("{}")), blank = []
+        for (var j = 0; j < rows.length; j++)
+            if (!rows[j].help || String(rows[j].help).length === 0) blank.push(rows[j].key)
+        compare(blank.join(","), "", "and settingsRows must carry it onto the row")
+        // Distinct text, not one string reused: a map built by copying an entry and forgetting
+        // to edit it passes every check above.
+        var seen = {}, dupes = []
+        for (var m = 0; m < rows.length; m++) {
+            if (seen[rows[m].help]) dupes.push(rows[m].key)
+            seen[rows[m].help] = true
+        }
+        compare(dupes.join(","), "", "and each description must describe its own setting")
+    }
+
+    function test_settings_rows_carry_the_current_values() {
+        var rows = Logic.settingsRows(Logic.parseConfig('{"anchor":"bar","scrim":false}'))
+        function row(k) { return rows.filter(function (r) { return r.key === k })[0] }
+        compare(row("anchor").value, "bar", "a set value is shown, not the default")
+        compare(row("scrim").value, false, "including a false boolean, which must not read as unset")
+        compare(row("motion").value, "auto", "and an unset one shows its default")
+    }
+
+    // Cycling. Every enum wraps in both directions and every stepper clamps -- and the function
+    // is TOTAL: anything it does not understand comes back unchanged, because a settings panel
+    // that silently rewrites a value it did not recognise is worse than one that does nothing.
+    function test_next_setting_value_cycles_and_clamps() {
+        compare(Logic.nextSettingValue("anchor", "center", 1), "bar", "two-state forward")
+        compare(Logic.nextSettingValue("anchor", "bar", 1), "center", "and wraps")
+        compare(Logic.nextSettingValue("anchor", "center", -1), "bar", "backwards wraps too")
+        compare(Logic.nextSettingValue("scrim", true, 1), false, "booleans toggle")
+        compare(Logic.nextSettingValue("scrim", false, -1), true, "in both directions")
+        // THE three-state case: a two-state implementation passes every line above.
+        compare(Logic.nextSettingValue("motion", "auto", 1), "full", "three-state steps")
+        compare(Logic.nextSettingValue("motion", "full", 1), "off", "through the middle")
+        compare(Logic.nextSettingValue("motion", "off", 1), "auto", "and wraps at the end")
+        // Steppers CLAMP rather than wrap: wrapping 0 -> 20 on a Left press would be startling.
+        compare(Logic.nextSettingValue("workspaces", 10, 1), 11, "steppers step")
+        compare(Logic.nextSettingValue("workspaces", 20, 1), 20, "and clamp at the top")
+        compare(Logic.nextSettingValue("workspaces", 0, -1), 0, "and at the bottom")
+        compare(Logic.nextSettingValue("lockBorderSize", 6, -1), 5, "the other stepper too")
+        // Every row the panel renders as EDITABLE must have somewhere to cycle to. Without this, a
+        // setting added to the schema and to SETTING_ORDER but forgotten here shows arrows that do
+        // nothing -- and `nextSettingValue` being TOTAL means it fails silently rather than throwing.
+        var rows = Logic.settingsRows(Logic.parseConfig("{}"))
+        var uncovered = []
+        for (var i = 0; i < rows.length; i++)
+            if (rows[i].editable && !Logic.SETTING_CYCLES[rows[i].key]
+                                 && !Logic.SETTING_RANGES[rows[i].key])
+                uncovered.push(rows[i].key)
+        compare(uncovered.join(","), "", "every editable row needs a cycle or a range")
+    }
+
+    function test_next_setting_value_is_total() {
+        compare(Logic.nextSettingValue("lockBorder", "rgb(ff4444)", 1), "rgb(ff4444)",
+                "a non-editable key is never rewritten")
+        compare(Logic.nextSettingValue("nosuchkey", "x", 1), "x", "nor is an unknown one")
+        compare(Logic.nextSettingValue("workspaces", NaN, 1), 0, "a non-finite number restarts at 0")
+        compare(Logic.nextSettingValue("anchor", "barr", 1), "center",
+                "an out-of-set value lands on the first valid one, not on itself")
+        compare(Logic.nextSettingValue("anchor", "barr", -1), "center",
+                "an out-of-set value recovers in BOTH directions, not just forward")
+    }
+
+    // The write payload. Four of these came out of a review that found the first design
+    // unsafe, and each one corresponds to a way a real file gets damaged.
+    function test_config_with_key_writes_without_losing_the_rest() {
+        // The ordinary case, and the one that stops defaults being pinned into the file: only
+        // what was there plus the change.
+        var out = Logic.configWithKey('{"scrim":false}', "anchor", "bar")
+        var back = JSON.parse(out)
+        compare(back.anchor, "bar", "the change lands")
+        compare(back.scrim, false, "and the existing key survives")
+        compare(Object.keys(back).length, 2, "nothing else is added — no pinned defaults")
+
+        // THE guarantee that matters across versions: a key this build has never heard of must
+        // not be deleted by it. An older panel must not eat a newer version's setting.
+        var future = JSON.parse(Logic.configWithKey('{"futureThing":42}', "anchor", "bar"))
+        compare(future.futureThing, 42, "an unknown key survives")
+
+        // A file that does not exist yet.
+        compare(JSON.parse(Logic.configWithKey("", "anchor", "bar")).anchor, "bar",
+                "an empty file becomes a file with just this key")
+        compare(JSON.parse(Logic.configWithKey("   \n ", "anchor", "bar")).anchor, "bar",
+                "and so does a whitespace-only one")
+    }
+
+    function test_config_with_key_refuses_what_it_cannot_safely_edit() {
+        // Verified behaviour, not theory: setting a property on a parsed array is DROPPED by
+        // stringify, on null it THROWS, and on a scalar it is dropped. Each would either lose
+        // the user's change silently or destroy a file they were mid-way through writing.
+        compare(Logic.configWithKey("[1,2]", "anchor", "bar"), "", "a JSON array root")
+        compare(Logic.configWithKey("null", "anchor", "bar"), "", "a null root")
+        compare(Logic.configWithKey("42", "anchor", "bar"), "", "a scalar root")
+        compare(Logic.configWithKey('"a string"', "anchor", "bar"), "", "a string root")
+        // ...and the obvious one.
+        compare(Logic.configWithKey('{"scrim":false,', "anchor", "bar"), "",
+                "a file that does not parse is never overwritten with a guess")
+
+        // A write that cannot be REPRESENTED must be refused, not reported as success. Both of
+        // these return a perfectly valid JSON document that simply does not contain the change.
+        compare(Logic.configWithKey('{"scrim":false}', "__proto__", "bar"), "",
+                "__proto__ sets no own property, so the write would vanish")
+        compare(Logic.configWithKey('{"scrim":false}', "anchor", undefined), "",
+                "an undefined value is dropped by stringify, so the write would vanish")
     }
 }

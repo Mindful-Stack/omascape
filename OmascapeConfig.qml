@@ -49,7 +49,31 @@ QtObject {
     property bool barTransparent: false
     readonly property string shellPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
 
+    // Emitted when the file exists but could not be used. The settings still resolve to their
+    // defaults -- parseConfig is total -- so this is purely how the user finds out.
+    signal invalidFile(string why)
+
+    // Emitted when the file could not be written. Mirrors OmascapeLocks: FileView raises
+    // `onSaveFailed`, and this is the component's own signal on top of it.
+    signal writeFailed(string why)
+
+    // Emitted at the end of apply(), i.e. every reload (initial load, watcher-triggered
+    // re-read, or a load failure). The settings panel's optimistic layer (Overview.qml's
+    // settingsPending) listens for this to stop guessing a key once the file agrees with it.
+    signal configChanged()
+
+    // True once `file.text()` is something save() can trust: either a successful load, or a
+    // load failure confirmed to be "no such file" (empty text is then the right starting point
+    // -- Logic.configWithKey treats "" as {} and creates the file). Any other load failure
+    // (permission denied, a directory sitting where the file should be, ...) leaves this false:
+    // text() may be stale or empty while the real file on disk is neither, and writing would
+    // destroy it. Same missing/error split as OmascapeLocks.qml:72-74, for the same reason --
+    // apply("") is still fine for display, since parseConfig is total either way.
+    property bool readableForSave: false
+
     function apply(raw) {
+        var why = Logic.configParseError(raw)
+        if (why.length > 0) cfg.invalidFile(why)
         var o = Logic.parseConfig(raw)
         cfg.scrim = o.scrim
         cfg.hint = o.hint
@@ -59,15 +83,71 @@ QtObject {
         cfg.anchor = o.anchor
         cfg.lockBorder = o.lockBorder
         cfg.lockBorderSize = o.lockBorderSize
+        cfg.configChanged()
+    }
+
+    // Persist every given setting in ONE write. Reads the file's CURRENT text rather than
+    // rebuilding from the parsed properties, so keys this build does not know about are carried
+    // through (see Logic.configWithKey). Refused, not overwritten, when the file is not known to
+    // be either loaded or missing (readableForSave) or when any key fails to apply
+    // (configWithKey returns ""): the user may be mid-edit, and replacing their work with a
+    // guessed object would be worse than doing nothing.
+    //
+    // Always the WHOLE set the caller still has unconfirmed, not just the newest key. See the
+    // caller's comment (Overview.qml applySettingChange): a second write cancels the first and
+    // builds its payload from stale cached text (FileView.text() only updates on
+    // operationFinished, and saveAsync captures its payload before cancelling an in-flight write
+    // -- verified in Quickshell 0.3.1's src/io/fileview.cpp:321-338). So each payload must carry
+    // every unconfirmed change rather than only the newest, making a cancelled write's payload a
+    // subset of the next one's.
+    function saveAll(values) {
+        if (!readableForSave) {
+            cfg.writeFailed("the file could not be read; fix that before changing settings here")
+            return false
+        }
+        var next = file.text()
+        for (var k in values) {
+            next = Logic.configWithKey(next, k, values[k])
+            if (next.length === 0) {
+                cfg.writeFailed("the file could not be parsed; fix it before changing settings here")
+                return false
+            }
+        }
+        file.setText(next)
+        return true
     }
 
     property FileView file: FileView {
         path: cfg.path
         watchChanges: true
+        atomicWrites: true
         printErrors: false
-        onLoaded: cfg.apply(text())
+        onLoaded: { cfg.apply(text()); cfg.readableForSave = true }
+        // Our OWN write reaches the properties from here, not from the watcher. Verified
+        // against Quickshell 0.3.1 on the live engine: the inotify event for an atomic write
+        // lands while the writer is still FileView::liveOperation, so the `reload()` below runs
+        // `loadAsync`, hits its `if (!liveOperation || pathInFlight != targetPath)` guard
+        // (src/io/fileview.cpp:302) and starts no read at all. `operationFinished` then emits
+        // `saved` -- never `loaded` -- and marks the view prepared again, so even a later
+        // `text()` finds the cache fresh and never reloads either. Without this line a setting
+        // changed from the panel is written to disk and NEVER reaches config.*: the picker keeps
+        // the old value until an external edit or a shell restart. Observed as "changing a
+        // setting doesn't work... or maybe it did after a while".
+        //
+        // text() here is the data the writer just committed (operationFinished calls
+        // updateState with the writer's state before emitting), so this applies what is on
+        // disk, not a guess -- and does it without a second read.
+        onSaved: cfg.apply(text())
         onFileChanged: reload()
-        onLoadFailed: cfg.apply("")
+        // FileViewError distinguishes "no such file" (first run: text() == "" is genuinely the
+        // whole file) from every other failure (permission, a directory in its place, ...): those
+        // must NOT be treated as readable, or save() would trust an empty/stale text() and
+        // silently replace content it never actually saw.
+        onLoadFailed: function (error) {
+            cfg.apply("")
+            cfg.readableForSave = (error === FileViewError.FileNotFound)
+        }
+        onSaveFailed: function (error) { cfg.writeFailed(FileViewError.toString(error)) }
     }
 
     property FileView shellFile: FileView {

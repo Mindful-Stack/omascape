@@ -82,6 +82,8 @@ qml = replaced(qml, '''    Variants {
 qml = replaced(qml, 'screens = Quickshell.screens || []', 'screens = root.testScreens || []',
                'focusedScreen screen list')
 qml = qml.replace('Quickshell.screens', '[]').replace('ToplevelManager.toplevels', 'null')
+qml = replaced(qml, 'Quickshell.execDetached(', 'root.testExecDetached(',
+               'the config-editor launch (Overview.openConfigFile)')
 qml = qml.replace('PanelWindow {', 'Item {')
 qml = re.sub(r'^\s*(screen: root\.targetScreen|screen: modelData|WlrLayershell\..*|exclusionMode:.*|color: "transparent"|mask: .*|Region \{ id: emptyRegion \})\n', '\n', qml, flags=re.M)
 qml = qml.replace('anchors { top: true; bottom: true; left: true; right: true }', 'width: 1200; height: 800')
@@ -112,6 +114,15 @@ qml = qml.replace('id: root', '''id: root
     // Compile-time dependency on the `peekLayer` id in Overview.qml: renaming or removing that
     // instance breaks every UI suite at once with "Invalid alias reference", not just Peek's.
     property alias testPeek: peekLayer
+    // Compile-time dependency on the `settingsPanel` id in Overview.qml: renaming or removing
+    // that instance breaks every UI suite at once with "Invalid alias reference", not just
+    // Settings's.
+    property alias testSettingsPanel: settingsPanel
+    // Stands in for Quickshell.execDetached: records the argv the picker would have launched.
+    // A `concat`, not a `push`: mutating a `var` array in place notifies nothing, so a test
+    // binding to testExec.length would never see it change.
+    property var testExec: []
+    function testExecDetached(cmd) { testExec = testExec.concat([cmd]) }
     property var testScreens: []
     property QtObject compositor: QtObject {
         property var monitors: ({values: []})
@@ -254,6 +265,7 @@ for edge in ('left', 'right'):
 (dest / 'FindBar.qml').write_text((source / 'FindBar.qml').read_text())   # no shell imports: verbatim
 (dest / 'HintCap.qml').write_text((source / 'HintCap.qml').read_text())   # no shell imports: verbatim
 (dest / 'ContextMenu.qml').write_text((source / 'ContextMenu.qml').read_text())  # no shell imports: verbatim
+(dest / 'SettingsPanel.qml').write_text((source / 'SettingsPanel.qml').read_text())  # no shell imports: verbatim
 # No shell imports, so almost verbatim — except the window-peek's own WindowTile carries no id in
 # production (nothing there needs one either), and the icon-flash grace suite (tests/ui/peek.qml)
 # needs a way to reach it. Same test-only-plumbing pattern as the WindowTile.qml block above: give
@@ -289,7 +301,45 @@ peeklayer = replaced(peeklayer, '    id: peek\n',
     '           function probeWallpaper() {}\n'
     '           property bool motionResolved: true\n'
     '           property string lockBorder: "rgb(ff4444)"; property int lockBorderSize: 6\n'
-    '           function probeMotion() {} }\n')
+    '           signal invalidFile(string why)\n'
+    '           function emitInvalid(why) { invalidFile(why) }\n'
+    '           function probeMotion() {}\n'
+    '           property var writes: []\n'
+    '           signal writeFailed(string why)\n'
+    # SettingsPanel.filePath binds to config.path (Overview.qml) rather than a hardcoded
+    # string, so it must exist here too or that binding evaluates to undefined.
+    '           property string path: "~/.config/omarchy/omascape.json"\n'
+    # Emits writeFailed asynchronously, standing in for a real save() that DISPATCHED
+    # successfully (saveAll returns true) and then failed later, off the return value
+    # applySettingChange actually checks. Only the signal can report that case.
+    '           function emitWriteFailed(why) { writeFailed(why) }\n'
+    # configChanged is emitted by the real apply() on every reload; Overview's settingsPending
+    # watcher listens for it. This stub never reloads a file, so it is declared (Connections
+    # would otherwise warn against a target with no such signal) but never emitted.
+    '           signal configChanged()\n'
+    # Records that a change was REQUESTED, and nothing more: the real saveAll() reads the file's
+    # current text, applies every key through Logic.configWithKey and writes atomically, none of
+    # which this wholesale-replaced stub can exercise. Preservation, atomicity and failure
+    # handling are covered elsewhere (Task 3's Tier 1 tests for configWithKey; the write path
+    # itself is a live check) -- same disclaimer as the OmascapeLocks stub above, same reason.
+    #
+    # Records the WHOLE map on each call, not one key=value pair: applySettingChange sends every
+    # unconfirmed change on every save (a real second write cancels the first and would otherwise
+    # lose it -- see Overview.qml's applySettingChange), so a test asserting on a single write's
+    # content must see every key that call carried, not just the newest one.
+    #
+    # `failSaves` lets a test exercise the refusal branch of applySettingChange (a real refusal
+    # is an unreadable/unparseable file, neither of which this stub can produce) while still
+    # recording the attempt, so a test can assert BOTH that the write was requested and that it
+    # was refused.
+    '           property bool failSaves: false\n'
+    '           function saveAll(values) {\n'
+    '               var parts = []\n'
+    '               for (var k in values) parts.push(k + "=" + values[k])\n'
+    '               writes = writes.concat([parts.join(",")])\n'
+    '               return !failSaves\n'
+    '           }\n'
+    '           }\n')
 # Lock state stub: the real OmascapeLocks.qml watches two files through Quickshell.Io. The stub
 # keeps the one property later tests depend on — `armed` is null until a load resolves — and
 # records writes instead of touching disk. Real file watching, atomic rename and load ordering

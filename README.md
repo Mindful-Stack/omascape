@@ -232,6 +232,7 @@ what commits, and `Ctrl+W` follows the selection rather than the pointer. See
 | **Enter / click the empty row** (scratchpad) | Bring the scratchpad up and close           |
 | **click a tile in the row** (scratchpad) | Focus that window, raised above its siblings   |
 | **Ctrl+L**               | Arm / disarm the selected workspace for screen sharing     |
+| **Ctrl+,**               | Open the settings panel (does not open while a search query is active) |
 | **Esc / click-out**      | Close (click-out includes a click on any other monitor)   |
 
 Digits jump to a workspace only while the query is empty; once you've typed a letter, digits
@@ -347,6 +348,31 @@ Optional user settings live in `~/.config/omarchy/omascape.json` (watched; edits
   out of the recording. On an exotic scale where no such size exists within 12 px, a single
   device-pixel hairline of the frame colour can show in a capture; it reveals that a frame is
   there, never what is behind it.)
+
+### Settings panel
+
+Press **Ctrl+,** to open the settings panel inside the picker (it is also listed in the second
+hint tier, under `?`). Up and Down move between the seven editable settings and wrap around at
+both ends, so one Up from the top reaches the last row. Left and Right cycle the focused row's
+value, and Space steps it forward like Right. Enter and Esc both leave the panel (the panel does
+not open while a search query is active, since the query has its own Esc behaviour).
+
+A line under the list describes whichever row is selected, so a name like "lock frame" explains
+itself without a trip to this file.
+
+The panel cycles five settings and steps two. `scrim` and `hint` toggle on or off; `anchor`
+(center/bar), `activate` (enter/select) offer two choices each; `motion` cycles auto, full, or off.
+`workspaces` and `lockBorderSize` step over `0`–`20`, and a larger `workspaces` value or a custom
+colour for the reminder frame (`lockBorder`) requires editing the JSON file directly.
+
+The last row is not a setting: **Enter** on it opens the config file in your editor (through
+Omarchy's own `omarchy-launch-config-editor`, so it follows whatever editor you have configured)
+and closes the picker, which would otherwise cover it.
+
+A change writes only the keys already in your file plus the changed one — it does not pin every
+default into the file. The file remains the source of truth: the only way to set a value the
+panel does not offer is to edit the JSON by hand. If the file cannot be parsed, a change is
+refused and the panel reports the error; the file is never overwritten.
 
 ### Blurred scrim (optional, Hyprland side)
 

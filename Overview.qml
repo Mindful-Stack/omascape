@@ -58,10 +58,18 @@ Item {
         // wait out with a refresh + settle.
         rebuild()
         if (scratchpadShown) {
-            // Showing the row can append it below the fold on an overflowing layout: scroll it
+            // Showing the row can append it below the fold on an OVERFLOWING layout: scroll it
             // fully into view without moving the keyboard selection (a different intent).
+            //
+            // Against `restingHeight`, never `flick.height`: the card's implicitHeight Behavior
+            // has only just started toward the taller value, so `flick.height` here is still
+            // the viewport as it was BEFORE the row was added. Measured against it, a row the
+            // card is about to grow to fit looks like it is below the fold -- so the grid
+            // scrolled down (242 px on a 1920x1080 bar-mode layout) and then slid back up over
+            // the next 160 ms as the viewport caught up, counter to the card's own growth.
             var b = boxForWs(Logic.SCRATCHPAD_ID)
-            if (b && b.y + b.h > flick.contentY + flick.height) flick.contentY = b.y + b.h - flick.height
+            var h = flick.restingHeight
+            if (b && b.y + b.h > flick.contentY + h) flick.contentY = b.y + b.h - h
         }
         // A mid-drag toggle changes what boxes/tiles exist under the pointer; without this the
         // drop preview would stay stale until the next pointer move.
@@ -128,6 +136,10 @@ Item {
     // (unlike the armed set, "still malformed" has no "unchanged" case to suppress it against).
     // Without this guard that would toast on every such echo, not just the first.
     property bool lockInvalidNotified: false
+    // Same one-shot rule as lockInvalidNotified. The config file is WATCHED, so notifying on
+    // every save would fire on each keystroke-save while the user is repairing it -- which is
+    // precisely when they least need it. Reset in open(), so each summon tells them once.
+    property bool configInvalidNotified: false
     // Bumped wherever the monitor snapshots are refreshed, purely so the reminder frame's
     // `Hyprland.monitorFor(screen)` binding re-resolves. That call is a C++ invokable returning a
     // one-shot value: nothing notifies QML when Hyprland REPLACES the HyprlandMonitor object for a
@@ -213,6 +225,17 @@ Item {
         clearPendingForWorkspace(wsId)
         Hyprland.dispatch(Logic.workspaceSwapLua(wsId, b.monitorName, monitorName))
         scheduleRebuild()
+    }
+    Connections {
+        target: config
+        function onInvalidFile(why) {
+            if (root.configInvalidNotified) return
+            root.configInvalidNotified = true
+            // Names the file, because "omascape.json" is not a path most people have memorised,
+            // and says the settings fell back -- the symptom they are actually looking at.
+            Hyprland.dispatch(Logic.notifyLua(
+                "omascape: ~/.config/omarchy/omascape.json ignored, using defaults — " + why))
+        }
     }
     Connections {
         target: locks
@@ -915,6 +938,111 @@ Item {
     // through a dismissal must not start a query with the repeats that follow.
     property int menuDismissKey: 0
 
+    // ---- Settings panel (docs/specs/2026-09-20-settings-panel-design.md) -------------------
+    property bool settingsOpen: false
+    // Swallows the auto-repeats of the key that closed the panel, so holding Esc cannot dismiss
+    // the panel and then the picker in one press. Same device as menuDismissKey above.
+    property int settingsDismissKey: 0
+    // The key currently being routed into the panel, live only for the duration of one
+    // handleKey() call. It exists so closeRequested can reuse the dismiss-key swallow without
+    // the panel needing to know that mechanism exists.
+    property int settingsKeyInFlight: 0
+    // A deliberate READ-BACK MIRROR, not a control: the panel owns its own `index` (see the
+    // SettingsPanel instance below), and nothing here ever assigns TO it except the seed in
+    // openSettings() and the panel's own onIndexChanged. It exists purely so tests -- which have
+    // no alias reaching `settingsPanel.index` directly -- can observe the panel's selection
+    // without Overview growing a second source of truth for it.
+    property int settingsIndex: 0
+
+    // The panel's last row. `omarchy-launch-config-editor` is the platform's own way to open a
+    // config file -- it resolves the user's chosen editor, launches a terminal for the TUI ones
+    // and raises a toast -- so omascape does not get its own opinion about what an editor is.
+    // The picker closes: the editor it opens would otherwise be behind a full-screen overlay.
+    function openConfigFile() {
+        Quickshell.execDetached(["omarchy-launch-config-editor", config.path])
+        close()
+    }
+
+    function openSettings() {
+        peekAbort()                                  // a modal and a peek are never both up
+        settingsDismissKey = 0
+        settingsPanel.index = 0                      // the panel OWNS its index; seed, never bind
+        settingsIndex = 0
+        settingsOpen = true
+    }
+
+    // Reads through settingValue(), so a change shows immediately and the NEXT press computes
+    // from it rather than from the not-yet-reloaded file.
+    readonly property var settingsRows: Logic.settingsRows({
+        scrim: settingValue("scrim"), hint: settingValue("hint"),
+        workspaces: settingValue("workspaces"), motion: settingValue("motion"),
+        anchor: settingValue("anchor"), activate: settingValue("activate"),
+        lockBorder: settingValue("lockBorder"), lockBorderSize: settingValue("lockBorderSize")
+    })
+    // Pending values, applied optimistically. WITHOUT this the panel would compute each change
+    // from `config.*`, which only updates once the watcher has re-read the file -- so two quick
+    // Right presses on `workspaces` would both read 10 and both request 11, and one increment
+    // would vanish. This is the defect the spec review caught in the design; reading the row's
+    // value straight off `config` reintroduces it.
+    //
+    // Cleared per key when the watcher's reload confirms that key, so the panel stops guessing
+    // as soon as the file agrees with it.
+    property var settingsPending: ({})
+    function settingValue(key) {
+        return (key in root.settingsPending) ? root.settingsPending[key] : config[key]
+    }
+    function applySettingChange(key, dir) {
+        var row = null
+        for (var i = 0; i < root.settingsRows.length; i++)
+            if (root.settingsRows[i].key === key) row = root.settingsRows[i]
+        if (!row || !row.editable) return
+        var current = root.settingValue(key)
+        var next = Logic.nextSettingValue(key, current, dir)
+        if (next === current) return                 // clamped: nothing to write
+        var pending = {}                             // a NEW object: mutating in place would
+        for (var k in root.settingsPending) pending[k] = root.settingsPending[k]
+        pending[key] = next                          // not re-evaluate the binding below
+        root.settingsPending = pending
+        // The WHOLE pending set, not just `key`: FileView.text() is a cache that does not
+        // update until a write completes, and a second save cancels the first while having
+        // built its payload from the pre-first-write text. Sending every unconfirmed change
+        // each time makes each payload a superset of the last, so a cancelled write loses
+        // nothing. Verified against fileview.cpp:321-338.
+        if (!config.saveAll(root.settingsPending)) {
+            // Refused (an unparseable file). Drop the optimistic value so the panel shows what
+            // the file still says rather than a change that never happened.
+            var revert = {}
+            for (var j in root.settingsPending) if (j !== key) revert[j] = root.settingsPending[j]
+            root.settingsPending = revert
+        }
+    }
+    Connections {
+        target: config
+        // The file agreed with us: stop guessing for the keys it now confirms.
+        function onConfigChanged() {
+            var still = {}
+            for (var k in root.settingsPending)
+                if (root.settingsPending[k] !== config[k]) still[k] = root.settingsPending[k]
+            root.settingsPending = still
+            // Every other config key reaches the view through a live binding (config.scrim on
+            // the scrim's visibility, config.anchor through barMode, config.lockBorderSize
+            // straight onto the frame) -- but `workspaces` is read only inside buildInput(),
+            // which nothing but rebuild() calls, and rebuild() is driven by COMPOSITOR events.
+            // So changing it from the panel wrote the file and left the grid exactly as it was
+            // until some unrelated Hyprland event happened along and rebuilt it, which reads as
+            // "the setting does nothing... and then later it did". A reload is a change to what
+            // the grid is built FROM, so it belongs on the same footing as a workspace event.
+        }
+        // saveAll returns true on DISPATCH, not completion, so applySettingChange's own revert
+        // cannot see a write that fails later. Without this the optimistic value sticks forever:
+        // the file never changed, so no reload arrives to clear it, and nothing tells the user.
+        // The write carried the WHOLE pending set, so a failure means none of it landed.
+        function onWriteFailed(why) {
+            root.settingsPending = ({})
+            Hyprland.dispatch(Logic.notifyLua("omascape: could not save settings: " + why))
+        }
+    }
+
     function monitorList() {
         var out = [], ms = Hyprland.monitors ? Hyprland.monitors.values : []
         for (var i = 0; i < ms.length; i++) if (ms[i] && ms[i].name) out.push({ name: ms[i].name })
@@ -1608,9 +1736,13 @@ Item {
         openAnim.stop()
         if (root.barMode && root.motion.enabled) { root.entranceOpen = 0; openAnim.start() }
         else root.entranceOpen = 1
-        lockUnresolvedNotified = false; lockInvalidNotified = false
+        lockUnresolvedNotified = false; lockInvalidNotified = false; configInvalidNotified = false
         lockInstall(); lockSync(); locks.refresh()
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
+        // Belt-and-braces, same as menuDismissKey just above: close() already clears this, but a
+        // fresh summon must never inherit a held-key swallow from whatever the previous session's
+        // panel dismissal left behind.
+        settingsDismissKey = 0
         digitLatch = 0
         peekReset()                                 // nothing carries over from the previous summon
         // A keyboard summon (SUPER+TAB is a compositor keybind the overview never sees as a key
@@ -1635,6 +1767,12 @@ Item {
         if (!opened) return                        // a click on the scrim mid-fade is not a second close
         endDrag(); menuDismiss(); cancelCloseAllConfirm()
         peekAbort()                                 // the release will never arrive at an unfocused surface
+        // Neither open() nor close() reset these anywhere else. Left set, the panel would survive
+        // a dismiss-and-resummon and keep intercepting every navigation key with nothing on screen
+        // explaining why -- and leaving it set here also means the panel stays visible through the
+        // exit fade, since its own visibility binds straight to settingsOpen.
+        settingsOpen = false
+        settingsDismissKey = 0
         // settleTimer is open-only; reconcileTimer keeps running (bounded by the 1.8 s
         // deadlines): it clears optimistic display state (pendingMoves / fsPending / pendingCloses)
         // so a re-summon inside that window shows authoritative state, and with keepLoaded the
@@ -2088,6 +2226,42 @@ Item {
                     // …and the key that dismissed it keeps swallowing its own repeats.
                     if (root.menuDismissKey !== 0 && e.key === root.menuDismissKey) return
 
+                    // The settings panel owns every key while it is open too, checked after the
+                    // menu and the confirmation dialog (a modal already up keeps its keys) and
+                    // before the chord/Esc branches below, or a chorded key would fall through
+                    // to them and Esc would clear the cursor/query instead of closing the panel.
+                    if (root.settingsOpen) {
+                        // Space must not start a peek on release just because it was pressed
+                        // while a modal was up -- the confirmation branch above does exactly
+                        // this, and the release handler (Keys.onReleased below) still needs to
+                        // run regardless of which modal owned the press.
+                        if (!(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+                                && e.key === Qt.Key_Space) {
+                            root.peekKeyDown = true
+                            root.peekAbort()
+                        }
+                        if (e.key === Qt.Key_Escape) {
+                            root.settingsDismissKey = e.key
+                            root.settingsOpen = false
+                            return
+                        }
+                        // The panel may ask to be closed (Enter). It is handed the key in
+                        // flight so that close can swallow its own repeats exactly as Esc does
+                        // -- and it MUST: the picker's own Enter activates the selection, so a
+                        // held Enter would otherwise close the panel and then jump somewhere.
+                        // Cleared straight after, so the property is never read stale.
+                        root.settingsKeyInFlight = e.key
+                        settingsPanel.handleKey(e)
+                        root.settingsKeyInFlight = 0
+                        return
+                    }
+                    // ...and the key that dismissed it keeps swallowing its own repeats. The clear
+                    // belongs in Keys.onReleased, not here: a key RELEASE never fires onPressed,
+                    // so clearing here would leave the flag set through the key-up and swallow
+                    // the next genuinely fresh press instead of just the repeats it is meant to
+                    // absorb.
+                    if (root.settingsDismissKey !== 0 && e.key === root.settingsDismissKey) return
+
                     var chord = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
                     var finding = root.query.length > 0
                     // Peek: hold Space to preview the target. Placed after the menuDismissKey
@@ -2130,6 +2304,10 @@ Item {
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_S) root.toggleScratchpad()
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_L) root.lockToggleSelected()
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_W && !e.isAutoRepeat) root.closeTarget()
+                        // !finding: a query is a transient mode with its own Esc semantics, and
+                        // stacking a modal on top of it would give Esc three meanings. Clear the
+                        // query first.
+                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_Comma && !finding && !e.isAutoRepeat) root.openSettings()
                         return
                     }
                     if (e.key === Qt.Key_Escape) {
@@ -2187,6 +2365,8 @@ Item {
                     e.accepted = true
                     if (root.menuDismissKey !== 0 && e.key === root.menuDismissKey && !e.isAutoRepeat)
                         root.menuDismissKey = 0
+                    if (root.settingsDismissKey !== 0 && e.key === root.settingsDismissKey && !e.isAutoRepeat)
+                        root.settingsDismissKey = 0
                     // The release is the ONLY thing that clears the cancel: every other exit path
                     // (a modal, focus loss, the target vanishing) leaves it set, which is what
                     // stops the layer re-opening under a key that is merely still held. It is also
@@ -2218,6 +2398,14 @@ Item {
                 // drive it toward zero -- onContentHeightChanged's clamp would then scroll the
                 // grid mid-animation and leave contentY wrong once it settled.
                 height: card.implicitHeight - card.pad * 2 - card.hintSpace
+                // The height this viewport is HEADING for. `card.implicitHeight` is itself the
+                // animated property (its Behavior animates implicitHeight, not height), so the
+                // line above reads a value in flight for the whole 160 ms after any layout
+                // change. Anything deciding "does this fit?" must ask about the resting size
+                // instead -- see toggleScratchpad, where reading the in-flight height scrolled
+                // the grid to reveal a row the card was already growing to fit.
+                readonly property real restingHeight:
+                    Math.min(canvas.implicitHeight, card.maxCardH - card.pad * 2 - card.hintSpace)
                 contentWidth: canvas.implicitWidth
                 contentHeight: canvas.implicitHeight
                 boundsBehavior: Flickable.StopAtBounds
@@ -2710,7 +2898,8 @@ Item {
                         id: hintKeys2
                         model: [ { k: "ctrl+w / mid-click", l: "close" },
                                  { k: "right-click", l: "menu" },
-                                 { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" } ]
+                                 { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" },
+                                 { k: "ctrl+,", l: "settings" } ]
                         HintCap { foreground: root.foreground; fill: root.wellColor
                                   fontFamily: root.fontFamily; fontSize: root.captionSize
                                   capOpacity: root.hintCapOpacity
@@ -2730,6 +2919,35 @@ Item {
                 index: root.matchIndex
                 fg: root.foreground; accent: root.accent
                 fontFamily: root.fontFamily; fontSize: root.captionSize
+            }
+
+            SettingsPanel {
+                id: settingsPanel
+                visible: root.settingsOpen
+                anchors.centerIn: parent
+                rows: root.settingsRows
+                // NO `index: root.settingsIndex` binding. handleKey assigns panel.index
+                // imperatively on Up/Down, and an imperative write to a property that carries a
+                // binding DESTROYS that binding permanently -- the same mechanism that cost this
+                // branch a Critical with the anchor ternaries. Verified on the engine: after one
+                // such write the caller can no longer drive the child at all. So the panel OWNS
+                // its index; Overview seeds it on open and mirrors it back for read-only use.
+                onIndexChanged: root.settingsIndex = index
+                background: root.background
+                foreground: root.foreground
+                accent: root.accent
+                rowFill: root.wellColor
+                fontFamily: root.fontFamily
+                fontSize: root.labelSize
+                // config.path, not a hardcoded string: the panel must show the path the
+                // component actually reads and writes, not a guess that could drift from it.
+                filePath: config.path
+                onChangeRequested: function (key, dir) { root.applySettingChange(key, dir) }
+                onOpenRequested: root.openConfigFile()
+                onCloseRequested: {
+                    root.settingsDismissKey = root.settingsKeyInFlight
+                    root.settingsOpen = false
+                }
             }
         }
 

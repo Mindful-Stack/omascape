@@ -1187,6 +1187,86 @@ function shellBarTransparent(raw) {
     return !!(o.bar && typeof o.bar === "object" && o.bar.transparent === true)
 }
 
+// Why a config file could not be used, or "" when it is fine.
+//
+// Separate from parseConfig because the two want opposite things: parseConfig must be TOTAL --
+// it always returns a usable settings object, so a broken file degrades to defaults rather
+// than breaking the picker -- and that totality is exactly what swallows the reason. This
+// recovers the reason so the user can be told, without making parseConfig fallible.
+//
+// An empty or whitespace-only file is NOT an error: that is what a missing file looks like by
+// the time apply("") is called, and an empty file is a legitimate "use every default".
+//
+// The settings panel's model: one row per key parseConfig returns, in display order.
+//
+// SETTING_ORDER controls display order and is the schema drift detector: the Tier 1 test
+// directly asserts it names every config key. Derived from the CONFIG OBJECT, so a key added to
+// parseConfig and forgotten from SETTING_ORDER fails that test in CI.
+//
+// `lockBorder` is deliberately not editable: it is an rgb(hhhhhh) string and wants a real colour
+// picker. It is still listed, because a setting you cannot see is worse than one you cannot
+// change from here.
+var SETTING_LABELS = {
+    anchor: "anchor", activate: "activate", scrim: "scrim", hint: "hints",
+    motion: "motion", workspaces: "workspaces", lockBorderSize: "lock frame",
+    lockBorder: "lock colour"
+}
+var SETTING_ORDER = ["anchor", "activate", "scrim", "hint", "motion",
+                     "workspaces", "lockBorderSize", "lockBorder"]
+// One sentence per setting, shown under the selection. The panel is the only place most users
+// ever meet these key names, and several of them do not explain themselves -- "lock frame" was
+// unreadable to the author of the feature on first sight. Every key in SETTING_ORDER must have
+// one (asserted in Tier 1), so a setting added later cannot ship as a bare name.
+var SETTING_HELP = {
+    anchor: "where the picker sits: centred on screen, or dropped from the top bar",
+    activate: "what a digit or a click does: jump straight there, or select and confirm with \u21b5",
+    scrim: "dim the desktop behind the picker",
+    hint: "show the key hints under the grid",
+    motion: "animations; auto follows Hyprland's own animation setting",
+    workspaces: "always show ids 1-N, empty ones included; 0 shows only the ones that exist",
+    lockBorderSize: "thickness in px of the frame marking a shared workspace; 0 turns it off",
+    lockBorder: "colour of that frame, as rgb(hhhhhh) -- edit the file to change it"
+}
+function settingsRows(cfg) {
+    if (!cfg) return []
+    var rows = [], seen = {}, i, k
+    for (i = 0; i < SETTING_ORDER.length; i++) {
+        k = SETTING_ORDER[i]
+        if (!(k in cfg)) continue
+        seen[k] = true
+        rows.push({ key: k, label: SETTING_LABELS[k] || k, value: cfg[k],
+                    help: SETTING_HELP[k] || "", editable: k !== "lockBorder" })
+    }
+    // Anything parseConfig returns that SETTING_ORDER has not been told about still gets a row,
+    // at the end, rather than vanishing. This keeps a drifted build honest to its user: they see
+    // the setting exists even if the panel was not wired to edit it. CI catches drift via the
+    // SETTING_ORDER assertion in the test, not via this fallback.
+    for (k in cfg)
+        if (!seen[k]) rows.push({ key: k, label: k, value: cfg[k], help: "", editable: false })
+    return rows
+}
+
+// A JSON array or scalar parses cleanly and is still unusable -- parseConfig reads properties
+// off it, finds none, and returns every default. Silent, and indistinguishable from an empty
+// file, so it is reported too.
+function configParseError(raw) {
+    var text = String(raw === undefined || raw === null ? "" : raw).replace(/^\s+|\s+$/g, "")
+    if (text.length === 0) return ""
+    var parsed
+    try {
+        parsed = JSON.parse(text)
+    } catch (e) {
+        // The engine's message carries the line and column, which is the useful part; the
+        // "JSON.parse:" prefix is not. notifyLua truncates whatever survives.
+        var why = String((e && e.message) || "").replace(/^JSON\.parse:\s*/, "")
+        return why.length > 0 ? why : "invalid JSON"
+    }
+    if (parsed === null) return "the file contains null, not an object"
+    if (Array.isArray(parsed)) return "the file contains a JSON array, not an object"
+    if (typeof parsed !== "object") return "the file contains a " + typeof parsed + ", not an object"
+    return ""
+}
+
 function parseConfig(raw) {
     var o = {}
     try { o = JSON.parse(String(raw || "")) || {} } catch (e) { o = {} }
@@ -1207,6 +1287,40 @@ function parseConfig(raw) {
         lockBorderSize: (typeof o.lockBorderSize === "number" && isFinite(o.lockBorderSize))
             ? Math.max(0, Math.min(20, Math.floor(o.lockBorderSize))) : 6
     }
+}
+
+// The next value for a setting, `dir` +1 or -1.
+//
+// TOTAL: an unknown key, a non-editable one, or a value outside the set comes back as something
+// valid rather than throwing or inventing. A panel that silently rewrote a value it did not
+// recognise would be worse than one that did nothing.
+//
+// Enums WRAP; the two numeric settings CLAMP. Wrapping a stepper from 0 round to 20 on a single
+// Left press would be startling, and there is no way to express "I meant the end" on a keyboard
+// row.
+var SETTING_CYCLES = {
+    anchor: ["center", "bar"],
+    activate: ["enter", "select"],
+    motion: ["auto", "full", "off"],
+    scrim: [true, false],
+    hint: [true, false]
+}
+var SETTING_RANGES = { workspaces: [0, 20], lockBorderSize: [0, 20] }
+function nextSettingValue(key, current, dir) {
+    var step = Number(dir) < 0 ? -1 : 1
+    var cycle = SETTING_CYCLES[key]
+    if (cycle) {
+        var at = cycle.indexOf(current)
+        if (at < 0) return cycle[0]                 // out of set: land somewhere valid
+        return cycle[(at + step + cycle.length) % cycle.length]
+    }
+    var range = SETTING_RANGES[key]
+    if (range) {
+        var n = Number(current)
+        if (!isFinite(n)) return range[0]
+        return Math.max(range[0], Math.min(range[1], Math.round(n) + step))
+    }
+    return current                                   // not ours to change
 }
 
 // ---- Find (docs/specs/2026-09-11-find-design.md) ----------------------------------------
@@ -2045,4 +2159,42 @@ function notifyLua(text) {
         '  pcall(function() hl.notification.create({ text = "' + t + '", duration = 4000, icon = "error" }) end)\n' +
         'end'
     ).replace(/\n\s*/g, ' ')
+}
+
+// The file's new text after setting one key, or "" when the existing text cannot be edited
+// safely. The caller writes nothing on "".
+//
+// An OBJECT root is required -- not merely parseable text, which was the first design and is
+// unsafe. Verified against the engine: setting a property on a parsed array is silently dropped
+// by stringify (the user presses a key, sees nothing change, and their file is rewritten without
+// the setting), on `null` the assignment throws, and on a scalar it is dropped the same way as
+// the array.
+//
+// What this preserves, precisely: unknown keys survive SEMANTICALLY and insertion order survives,
+// which is what stops an older build deleting a newer version's setting. It is not a lossless
+// editor -- a round trip normalises 9007199254740993 to ...992, 1e400 to null, and collapses
+// duplicate keys. That is acceptable for a file holding small numbers, short strings and
+// booleans, and is documented rather than hidden.
+function configWithKey(rawText, key, value) {
+    var text = String(rawText === undefined || rawText === null ? "" : rawText)
+                   .replace(/^\s+|\s+$/g, "")
+    var obj
+    if (text.length === 0) obj = {}
+    else {
+        try { obj = JSON.parse(text) } catch (e) { return "" }
+        if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return ""
+    }
+    // The contract above is "a non-empty result contains `key` at `value`". Three inputs break
+    // it without a naive implementation noticing: on THIS engine, `obj["__proto__"] = v` throws
+    // a TypeError outright (the assignment reassigns the prototype rather than setting an own
+    // property, and the engine rejects a non-object/non-null target); an `undefined` value is
+    // silently dropped by stringify; and a plain `key === "__proto__"` blacklist would still miss
+    // that second case. So the assignment is guarded here, and the round trip is checked below --
+    // both would otherwise return (or throw past) success-looking text with the change missing,
+    // and a caller that trusts a non-empty return would report success on a file that does not
+    // contain what the user asked for.
+    try { obj[key] = value } catch (e) { return "" }
+    var text2 = JSON.stringify(obj, null, 2)
+    if (!Object.prototype.hasOwnProperty.call(JSON.parse(text2), key)) return ""
+    return text2 + "\n"
 }

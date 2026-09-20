@@ -483,6 +483,44 @@ TestCase {
         compare(view.hintLabelOpacity, 0.45, "and the quieter label it was designed with")
     }
 
+    // A broken config file must SAY so. parseConfig is total, so every setting silently
+    // reverts to its default -- the user sees a picker that ignores their settings with no
+    // hint why. The locks file has notified on malformed content since it shipped; the config
+    // file never did.
+    function test_a_broken_config_notifies_once_per_open() {
+        seed(26, 10)
+        var before = view.compositor.commands.length
+        view.testConfig.emitInvalid("Unexpected token } at line 3")
+        var after = view.compositor.commands.length
+        compare(after, before + 1, "a malformed config must produce exactly one notification")
+        var sent = String(view.compositor.commands[after - 1])
+        verify(sent.indexOf("omascape.json") >= 0, "it names the file: " + sent)
+        verify(sent.indexOf("defaults") >= 0, "and says the settings fell back")
+        verify(sent.indexOf("line 3") >= 0, "and carries the reason through")
+
+        // THE discriminator. The file is WATCHED, so a user repairing it saves repeatedly --
+        // notifying on each save would fire exactly when they are already fixing it.
+        view.testConfig.emitInvalid("Unexpected token } at line 3")
+        view.testConfig.emitInvalid("still broken")
+        compare(view.compositor.commands.length, after, "and never again until the next open")
+    }
+
+    // ...but the next summon does tell them again, or a config broken before the session began
+    // would be reported once and then never mentioned.
+    function test_the_next_open_reports_a_still_broken_config() {
+        seed(26, 10)
+        view.testConfig.emitInvalid("broken")
+        view.close()
+        view.open()
+        wait(60)
+        // Counted AFTER the reopen: open() dispatches compositor commands of its own (the
+        // scratchpad hide, the focus regrab), so measuring across it would be counting those.
+        var settled = view.compositor.commands.length
+        view.testConfig.emitInvalid("broken")
+        compare(view.compositor.commands.length, settled + 1,
+                "a fresh open must be willing to report it again")
+    }
+
     // The card must not cast its shadow onto the bar it hangs from. This surface is
     // WlrLayer.Overlay and the bar is WlrLayer.Top, so a halo above the card's top edge is
     // painted straight onto the bar -- darkening it, and making the two read as different

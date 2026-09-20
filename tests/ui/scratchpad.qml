@@ -67,6 +67,46 @@ TestCase {
         fail("no scratchpad row in the seed")
     }
 
+    // Showing the row must not scroll the grid when the card is simply growing to fit it.
+    //
+    // The scroll-into-view in toggleScratchpad() asks "is the new row below the fold?" -- and
+    // the card's implicitHeight Behavior has only just started toward the taller value, so a
+    // check against `flick.height` measures the viewport as it was BEFORE the row existed. A
+    // row the card is about to grow around therefore looks out of view, the grid scrolls to
+    // reveal it, and then slides back over the next 160 ms as the viewport catches up. Measured
+    // at 242 px of counter-motion on a 1920x1080 bar-mode layout, against a card growing the
+    // other way -- the "glitchy" scratchpad animation.
+    //
+    // Motion must be ON: with motion off the viewport resizes instantly, the stale read cannot
+    // happen, and this passes against the defect. `init()` sets scale 0 for every other test
+    // here, so this turns it back on deliberately.
+    function test_showing_the_row_does_not_scroll_a_grid_the_card_will_grow_to_fit() {
+        view.motion.scale = 1
+        compare(view.testFlick.contentY, 0, "precondition: not scrolled")
+        verify(view.testCanvas.implicitHeight <= view.testFlick.restingHeight,
+               "precondition: the layout fits once the card has grown")
+        ctrlS()
+        compare(view.testFlick.contentY, 0,
+                "a grid the card is growing to fit must not scroll")
+    }
+
+    // ...and the companion, so the fix is not "never scroll". On a layout that genuinely
+    // overflows, the row must still be brought fully into view.
+    function test_showing_the_row_still_scrolls_an_overflowing_grid_into_view() {
+        view.motion.scale = 1
+        view.testPanel.height = 300          // forces maxCardH to bind, so the card cannot fit it
+        wait(50)
+        ctrlS()
+        var b = boxOf(-2)
+        verify(b !== null, "precondition: the row exists")
+        verify(view.testCanvas.implicitHeight > view.testFlick.restingHeight,
+               "precondition: this layout really does overflow")
+        verify(view.testFlick.contentY > 0, "an overflowing layout still scrolls")
+        verify(b.y + b.h <= view.testFlick.contentY + view.testFlick.restingHeight + 1,
+               "and far enough that the whole row is visible: row ends at " + (b.y + b.h)
+               + ", viewport ends at " + (view.testFlick.contentY + view.testFlick.restingHeight))
+    }
+
     // Distinguishes: the special workspace leaking into the layout by default (the pre-feature
     // exclusion broken), and a row keyed on Hyprland's id instead of the constant.
     function test_hidden_by_default_and_shown_by_ctrl_s_with_the_constant_id() {
