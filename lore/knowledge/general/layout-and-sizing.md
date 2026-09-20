@@ -46,7 +46,7 @@ The params are `maxCols: 5, minCellW: 140, maxCellW: 800, gapRatio: 0.08` (`Over
 when `gapRatio` is not set. The proportional branch, which is what production runs, follows
 below. The comment says it outright: *"maxCols is a CAP, not a floor."* A narrow screen gets
 fewer columns; it does not get five squeezed ones. Cell width is then clamped between
-`minCellW` and `maxCellW` — so `maxCellW` stops binding as soon as the margin takes its cut,
+`minCellW` and `maxCellW` — so `maxCellW` (then 380) stopped binding as soon as the margin took its cut,
 which is exactly why the margin change above shrank the author's cells from 380.
 
 Since 2026-09-20 the cell is no longer the thing that is capped in practice. With `gapRatio`
