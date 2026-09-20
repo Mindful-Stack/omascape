@@ -358,9 +358,11 @@ follow-up (issue #33), all in `tests/ui/activate.qml` under the `test_g_` prefix
 
 - **`Enter` commits**, on all three branches of the target rule — the selected workspace, the
   cursor's window, and a clicked match. Each presses `Enter` with the pointer parked on a tile on
-  another workspace, so a handler that resolved correctly and then acted on hover fails. What was
-  asserted before was `resolveTarget()` naming the right thing, which is the *input* to
-  `activateTarget()`.
+  another workspace, so a handler that resolved correctly and then acted on hover fails. In the
+  match test that hover must be placed deliberately: `mouseClick` leaves the pointer on the tile
+  it clicked, so without a move afterwards a pointer-targeting `Enter` would name the same window
+  and pass by coincidence. What was asserted before was `resolveTarget()` naming the right thing,
+  which is the *input* to `activateTarget()`.
 - **A double-click inside a live query, on a non-match and on a well** — the two branches that
   clear the query first. Both assert the query is gone as well as the dispatch: by the time
   `doubleClicked` arrives the first click has already cleared it, so every assertion about the

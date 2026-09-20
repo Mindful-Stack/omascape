@@ -575,11 +575,11 @@ TestCase {
     // Enter acts on it. A handler that resolved correctly and then did nothing, or that jumped
     // somewhere else, passed.
     //
-    // Distinguishes, in the workspace and window tests: an Enter that no longer reaches
-    // activateTarget (nothing dispatches, the overview stays open), one that closes without
-    // dispatching, and one that still consults the pointer — hence the hover onto a tile on a
-    // DIFFERENT workspace before each press, which is the sharp half. Under "enter" that same
-    // hover WOULD be the target (test_b asserts exactly that), so a policy leak cannot hide.
+    // Distinguishes, in all three: an Enter that no longer reaches activateTarget (nothing
+    // dispatches, the overview stays open), one that closes without dispatching, and one that
+    // still consults the pointer — hence the hover onto a tile on a DIFFERENT workspace before
+    // each press, which is the sharp half. Under "enter" that same hover WOULD be the target
+    // (test_b asserts exactly that), so a policy leak cannot hide.
     function test_g_enter_enters_the_selected_workspace() {
         keyClick(Qt.Key_2)
         compare(view.selectedId, 2)
@@ -615,12 +615,22 @@ TestCase {
     //
     // Distinguishes: an Enter that consults the cursor or the selected workspace while a query
     // is live — the precedence that makes the whole find × click rule necessary.
+    //
+    // The hover has to be placed deliberately here, unlike in the two tests above: mouseClick
+    // leaves the pointer ON the clicked tile, so without a move afterwards a pointer-targeting
+    // Enter would name 0xC too and pass by coincidence. 0xA is a match for this query as well
+    // as being on another workspace, so the hover cannot be waved away as targeting something
+    // find had already excluded.
     function test_g_enter_after_clicking_a_match_focuses_that_match() {
         type("a")
         var p = tileCentre("0xC")
         mouseClick(view, p.x, p.y)
         wait(30)
         compare(view.selectedMatchAddress, "0xC")
+
+        hoverTile("0xA")
+        compare(view.pointerLive, true, "the hover must be a REAL move, or this proves nothing")
+        compare(view.selectedMatchAddress, "0xC", "a mouse move never moves the match")
         keyClick(Qt.Key_Return)
         compare(view.opened, false)
         compare(view.compositor.commands.length, 1)
