@@ -935,6 +935,11 @@ Item {
     // Swallows the auto-repeats of the key that closed the panel, so holding Esc cannot dismiss
     // the panel and then the picker in one press. Same device as menuDismissKey above.
     property int settingsDismissKey: 0
+    // A deliberate READ-BACK MIRROR, not a control: the panel owns its own `index` (see the
+    // SettingsPanel instance below), and nothing here ever assigns TO it except the seed in
+    // openSettings() and the panel's own onIndexChanged. It exists purely so tests -- which have
+    // no alias reaching `settingsPanel.index` directly -- can observe the panel's selection
+    // without Overview growing a second source of truth for it.
     property int settingsIndex: 0
 
     function openSettings() {
@@ -998,6 +1003,14 @@ Item {
             for (var k in root.settingsPending)
                 if (root.settingsPending[k] !== config[k]) still[k] = root.settingsPending[k]
             root.settingsPending = still
+        }
+        // saveAll returns true on DISPATCH, not completion, so applySettingChange's own revert
+        // cannot see a write that fails later. Without this the optimistic value sticks forever:
+        // the file never changed, so no reload arrives to clear it, and nothing tells the user.
+        // The write carried the WHOLE pending set, so a failure means none of it landed.
+        function onWriteFailed(why) {
+            root.settingsPending = ({})
+            Hyprland.dispatch(Logic.notifyLua("omascape: could not save settings: " + why))
         }
     }
 
@@ -2248,7 +2261,7 @@ Item {
                         // !finding: a query is a transient mode with its own Esc semantics, and
                         // stacking a modal on top of it would give Esc three meanings. Clear the
                         // query first.
-                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_Comma && !finding) root.openSettings()
+                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_Comma && !finding && !e.isAutoRepeat) root.openSettings()
                         return
                     }
                     if (e.key === Qt.Key_Escape) {
@@ -2871,7 +2884,9 @@ Item {
                 rowFill: root.wellColor
                 fontFamily: root.fontFamily
                 fontSize: root.labelSize
-                filePath: "~/.config/omarchy/omascape.json"
+                // config.path, not a hardcoded string: the panel must show the path the
+                // component actually reads and writes, not a guess that could drift from it.
+                filePath: config.path
                 onChangeRequested: function (key, dir) { root.applySettingChange(key, dir) }
             }
         }

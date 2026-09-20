@@ -295,6 +295,13 @@ peeklayer = replaced(peeklayer, '    id: peek\n',
     '           function probeMotion() {}\n'
     '           property var writes: []\n'
     '           signal writeFailed(string why)\n'
+    # SettingsPanel.filePath binds to config.path (Overview.qml) rather than a hardcoded
+    # string, so it must exist here too or that binding evaluates to undefined.
+    '           property string path: "~/.config/omarchy/omascape.json"\n'
+    # Emits writeFailed asynchronously, standing in for a real save() that DISPATCHED
+    # successfully (saveAll returns true) and then failed later, off the return value
+    # applySettingChange actually checks. Only the signal can report that case.
+    '           function emitWriteFailed(why) { writeFailed(why) }\n'
     # configChanged is emitted by the real apply() on every reload; Overview's settingsPending
     # watcher listens for it. This stub never reloads a file, so it is declared (Connections
     # would otherwise warn against a target with no such signal) but never emitted.

@@ -223,4 +223,18 @@ TestCase {
         compare(wsRow.value, 0, "the refused key reverts to what the file says")
         compare(anchorRow.value, "bar", "but the earlier accepted change stays pending")
     }
+
+    // A write that fails AFTER dispatch must not leave the panel showing a value the file does
+    // not have. saveAll returns true on dispatch, so only the signal can report this.
+    function test_a_failed_write_reverts_and_notifies() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        keyClick(Qt.Key_Right)                        // anchor -> bar, dispatched
+        var before = view.compositor.commands.length
+        view.testConfig.emitWriteFailed("Permission denied")
+        var rows = view.settingsRows, anchorRow = null
+        for (var i = 0; i < rows.length; i++) if (rows[i].key === "anchor") anchorRow = rows[i]
+        compare(anchorRow.value, "center", "the row falls back to what the file still says")
+        compare(view.compositor.commands.length, before + 1, "and the user is told")
+    }
 }
