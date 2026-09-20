@@ -22,7 +22,7 @@ inert rather than escalating to Close all.
 
 ## Next steps
 
-### 1. Verify when docked (not yet tested — no external display at build time)
+### 1. Verify when docked (not yet tested — no external display at build time) — omascape#40
 - [ ] Overlay opens on the **focused** monitor, not always the primary
       (`focusedScreen()` matches `Hyprland.focusedMonitor.name` → `Quickshell.screens`).
 - [ ] Two-row layout renders: laptop `eDP-1` (1–5) and external `HDMI-A-1` (6–10),
@@ -125,7 +125,7 @@ Shift+arrow swaps workspace *contents* (accepted as the risky half although
 *lands*, never on which arrow was pressed, because direction-keyed rules are dead for
 single-monitor users.
 
-### 15. Unknown-monitor hotplug — deferred bug (2026-09-18)
+### 15. Unknown-monitor hotplug — deferred bug (2026-09-18) — capture alongside omascape#40
 Plugging in a monitor that has no entry in the user's Hyprland monitor config makes the overview
 misbehave. The symptom has not been captured and the cause not isolated; it may be that machine's
 monitor setup rather than an omascape bug, so it is parked, not triaged. When work next touches
