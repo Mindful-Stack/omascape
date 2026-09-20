@@ -30,4 +30,5 @@ present.
   placeholder monitor a padded workspace can produce.
 - [[adrs/0007-scratchpad-first-class-box]] — the other non-numbered box in the grid, and why
   `-1` is the only "none".
+- [[general/layout-and-sizing]] — how a box's size is decided once the count is settled.
 - `README.md` § Always 1–0 for the user-facing description.
