@@ -228,6 +228,7 @@ what commits, and `Ctrl+W` follows the selection rather than the pointer. See
 | **Enter / click the empty row** (scratchpad) | Bring the scratchpad up and close           |
 | **click a tile in the row** (scratchpad) | Focus that window, raised above its siblings   |
 | **Ctrl+L**               | Arm / disarm the selected workspace for screen sharing     |
+| **Ctrl+,**               | Open the settings panel (does not open while a search query is active) |
 | **Esc / click-out**      | Close (click-out includes a click on any other monitor)   |
 
 Digits jump to a workspace only while the query is empty; once you've typed a letter, digits
@@ -343,6 +344,23 @@ Optional user settings live in `~/.config/omarchy/omascape.json` (watched; edits
   out of the recording. On an exotic scale where no such size exists within 12 px, a single
   device-pixel hairline of the frame colour can show in a capture; it reveals that a frame is
   there, never what is behind it.)
+
+### Settings panel
+
+Press **Ctrl+,** to open the settings panel inside the picker. Up and Down move between the seven
+editable settings; Left and Right cycle the focused one's value. Esc closes the panel (the panel
+does not open while a search query is active, since the query has its own Esc behaviour).
+
+The panel edits six boolean settings and steps `workspaces` and `lockBorderSize` over `0`–`20`:
+- `scrim`, `hint`, `activate` (select/enter), `motion` (auto/full/off), `anchor` (center/bar)
+- `workspaces` — steps `0`–`20`; a larger value requires editing the JSON file directly
+- `lockBorderSize` — steps `0`–`20`; a custom colour for the reminder frame (`lockBorder`)
+  requires editing the JSON file directly
+
+A change writes only the keys already in your file plus the changed one — it does not pin every
+default into the file. The file remains the source of truth: the only way to set a value the
+panel does not offer is to edit the JSON by hand. If the file cannot be parsed, a change is
+refused and the panel reports the error; the file is never overwritten.
 
 ### Blurred scrim (optional, Hyprland side)
 
