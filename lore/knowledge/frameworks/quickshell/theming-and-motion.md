@@ -108,6 +108,8 @@ animation setting before the first frame.
 - [[learnings/shadow-alpha-switches-on-luminance]] — why the card shadow has two alphas.
 - [[learnings/a-behavior-cannot-share-x-with-drag-target]] — why the tile glide runs on `targetX`/`targetY`.
 - [[learnings/no-anim-layer-rule-stops-double-animation]] — the compositor's fade on top of ours.
+- [[learnings/animated-and-stepped-sizes-must-share-a-tense]] — what happens when one size in a
+  layout glides and another steps.
 
 - [[frameworks/quickshell/component-patterns]] — where these properties sit in a component.
 - [[general/architecture]] — why only the root resolves either contract.
