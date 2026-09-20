@@ -3,8 +3,38 @@ const path = require('path');
 
 const WIKILINK_PATTERN = /\[\[([^\]]+)\]\]/g;
 
+// A fence opens or closes only when ``` (or ~~~) starts the line. A stray ``` in
+// the middle of a sentence is prose and must not swallow the rest of the file.
+const FENCE_LINE = /^\s{0,3}(```|~~~)/;
+// An inline code span on a single line: `[[ -L $2 ]]`, `[[ ]]`.
+const INLINE_CODE = /`+[^`\n]*`+/g;
+
 /**
- * Extract all wikilinks from markdown content.
+ * Blank out fenced code blocks and inline code spans, preserving line structure.
+ *
+ * Knowledge nodes document bash, where `[[ $x == "$y" ]]` is a conditional and not
+ * a wikilink. Scanning raw content reports every such conditional as a broken link,
+ * which makes a shell standard impossible to write down.
+ *
+ * @param {string} content - Markdown file content
+ * @returns {string} content with code spans replaced by blanks
+ */
+function stripCode(content) {
+  let inFence = false;
+  return content
+    .split('\n')
+    .map((line) => {
+      if (FENCE_LINE.test(line)) {
+        inFence = !inFence;
+        return '';
+      }
+      return inFence ? '' : line.replace(INLINE_CODE, '');
+    })
+    .join('\n');
+}
+
+/**
+ * Extract all wikilinks from markdown content, ignoring anything inside code.
  *
  * @param {string} content - Markdown file content
  * @returns {string[]} Array of wikilink targets (text inside [[ ]])
@@ -12,7 +42,8 @@ const WIKILINK_PATTERN = /\[\[([^\]]+)\]\]/g;
 function extractLinks(content) {
   const matches = [];
   let match;
-  while ((match = WIKILINK_PATTERN.exec(content)) !== null) {
+  const prose = stripCode(content);
+  while ((match = WIKILINK_PATTERN.exec(prose)) !== null) {
     matches.push(match[1]);
   }
   // Reset lastIndex since the regex is global

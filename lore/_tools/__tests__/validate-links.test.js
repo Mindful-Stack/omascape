@@ -39,6 +39,38 @@ describe('extractLinks', () => {
     assert.deepEqual(extractLinks(content), ['repo:frontend/architecture']);
   });
 
+  // A knowledge base that documents bash cannot validate if it cannot quote bash:
+  // `[[ $x == y ]]` is a conditional, not a wikilink.
+  it('ignores bracket tests inside a fenced code block', () => {
+    const content = [
+      'Real link: [[node-a]]',
+      '',
+      '```bash',
+      'if [[ $2 == "$3" ]]; then ok "$1"; fi',
+      'for _ in $(seq 1 40); do [[ "$(wsof "$1")" == "$2" ]] && return; done',
+      '```',
+      '',
+      'Another real link: [[node-b]]',
+    ].join('\n');
+    assert.deepEqual(extractLinks(content), ['node-a', 'node-b']);
+  });
+
+  it('ignores a bracket test inside an inline code span', () => {
+    const content = 'Write `[[ ]]` for conditionals, then link [[node-a]].';
+    assert.deepEqual(extractLinks(content), ['node-a']);
+  });
+
+  it('ignores a fence whose info string is absent', () => {
+    const content = 'Link [[node-a]]\n\n```\n[[ -L $2 ]]\n```\n';
+    assert.deepEqual(extractLinks(content), ['node-a']);
+  });
+
+  it('still extracts a wikilink that follows an unterminated fence marker in prose', () => {
+    // ``` inside a sentence should not swallow the rest of the document
+    const content = 'Use the ``` fence marker.\n\nSee [[node-a]].\n';
+    assert.deepEqual(extractLinks(content), ['node-a']);
+  });
+
   it('returns empty array when no wikilinks', () => {
     const content = '# Just a heading\nNo links here.';
     assert.deepEqual(extractLinks(content), []);
