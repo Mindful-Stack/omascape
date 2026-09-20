@@ -25,3 +25,8 @@ jobs:
             qt6-declarative-dev-tools libqt6quick6 libgl1 lua5.4
       - name: Run Tier 1 logic tests (offscreen) + Lua chunk suite
         run: bash tests/run.sh
+      # The knowledge base has its own gates: frontmatter, wikilinks, orphans, and the
+      # validators' unit tests. Nothing in tests/run.sh checks them, so a broken wikilink
+      # or a block-scalar frontmatter value would otherwise land silently.
+      - name: Validate the knowledge base and run the KB tooling tests
+        run: make validate && make test
