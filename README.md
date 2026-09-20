@@ -185,7 +185,8 @@ o.bind("SUPER + TAB", "Workspace overview", "omarchy-shell shell toggle se.mindf
 If you use plain Hyprland config (`~/.config/hypr/bindings.conf` or `hyprland.conf`):
 
 ```ini
-bind = SUPER, A, exec, omarchy-shell shell toggle se.mindfulstack.omascape
+unbind = SUPER, TAB
+bind = SUPER, TAB, exec, omarchy-shell shell toggle se.mindfulstack.omascape
 ```
 
 Then reload Hyprland so the bind takes effect:

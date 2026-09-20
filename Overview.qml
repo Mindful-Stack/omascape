@@ -1613,7 +1613,7 @@ Item {
         resetFind(); setCursor(""); menuDismiss(); menuDismissKey = 0; cancelCloseAllConfirm()
         digitLatch = 0
         peekReset()                                 // nothing carries over from the previous summon
-        // A keyboard summon (SUPER+P is a compositor keybind the overview never sees as a key
+        // A keyboard summon (SUPER+TAB is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
         // "most recent input device wins" means the device that summoned the overview, not
         // wherever the mouse was left resting the last time it closed. Only the flags reset:
