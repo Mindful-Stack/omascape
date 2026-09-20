@@ -1773,4 +1773,56 @@ TestCase {
             assertFinite(r, at)
         }
     }
+
+    // Boxes sharing the first row's y ARE the first row; with five workspaces that is `cols`
+    // whenever cols <= 5.
+    function firstRowCount(r) {
+        var y0 = r.boxes[0].y, n = 0
+        for (var i = 0; i < r.boxes.length; i++) if (r.boxes[i].y === y0) n++
+        return n
+    }
+
+    // Distinguishes: a column test that forgets the outer gaps — `(availW + gapMin) /
+    // (minCellW + gapMin)`, the pixel formula — which gives five columns at 765 and then a row
+    // 766 px wide in a 765 px canvas. The integer rule is the largest n with
+    // n*140 + (n+1)*11 <= availW: 766 is the first width that seats five.
+    function test_column_count_counts_both_outer_gaps() {
+        var below = fiveOn(765), at = fiveOn(766)
+        compare(firstRowCount(below), 4, "765: four columns")
+        compare(boxById(below, 1).w, 173, "765: cells widen to fill four columns")
+        compare(below.canvasSize.w, 762, "765: 4*173 + 5*14")
+        compare(firstRowCount(at), 5, "766: five columns of the minimum cell")
+        compare(boxById(at, 1).w, 140, "766: minCellW")
+        compare(at.canvasSize.w, 766, "766: 5*140 + 6*11, exactly the width")
+        assertFinite(below, "765"); assertFinite(at, "766")
+    }
+
+    // Distinguishes: a fallback that omits the outer gaps (744, the first draft's) — step 2 then
+    // resolves FOUR columns at 169 wide instead of five at the minimum — and a fallback that
+    // takes 0, a negative or NaN as a width. The output must be the same for every shape of
+    // "no width", and it must be the five-column minimum grid the pixel model also falls to.
+    function test_a_missing_width_falls_back_to_five_minimum_columns() {
+        var shapes = [undefined, 0, -5, NaN, null, "2024"]
+        for (var i = 0; i < shapes.length; i++) {
+            var r = fiveOn(shapes[i]), at = "availW " + String(shapes[i]) + ": "
+            compare(firstRowCount(r), 5, at + "five columns")
+            compare(boxById(r, 1).w, 140, at + "minCellW")
+            compare(boxById(r, 1).x, 11, at + "one minimum gap in")
+            compare(r.canvasSize.w, 766, at + "5*140 + 6*11")
+            assertFinite(r, at)
+        }
+    }
+
+    // Distinguishes: a column floor that lets cols reach 0 (a division by zero in cw) and a fit
+    // step that shrinks BELOW minCellW to satisfy a width nothing legal fits — at 100 the row
+    // is 162 wide and that overflow is the documented behaviour, not a bug to fit away.
+    function test_a_width_below_one_minimum_cell_still_lays_out_one_column() {
+        var r = fiveOn(100)
+        compare(firstRowCount(r), 1, "one column")
+        compare(boxById(r, 1).w, 140, "the cell does not go below minCellW")
+        compare(boxById(r, 1).x, 11, "one gap in")
+        compare(r.canvasSize.w, 162, "140 + 2*11: wider than the 100 it was given, by design")
+        compare(r.boxes.length, 5, "all five workspaces are laid out, one per row")
+        assertFinite(r, "100")
+    }
 }
