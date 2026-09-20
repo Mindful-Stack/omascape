@@ -1197,6 +1197,40 @@ function shellBarTransparent(raw) {
 // An empty or whitespace-only file is NOT an error: that is what a missing file looks like by
 // the time apply("") is called, and an empty file is a legitimate "use every default".
 //
+// The settings panel's model: one row per key parseConfig returns, in display order.
+//
+// Derived from the CONFIG OBJECT rather than a hand-written list, so a key added to parseConfig
+// and forgotten here shows up as a missing row in the Tier 1 test rather than as a setting the
+// panel silently cannot see.
+//
+// `lockBorder` is deliberately not editable: it is an rgb(hhhhhh) string and wants a real colour
+// picker. It is still listed, because a setting you cannot see is worse than one you cannot
+// change from here.
+var SETTING_LABELS = {
+    anchor: "anchor", activate: "activate", scrim: "scrim", hint: "hints",
+    motion: "motion", workspaces: "workspaces", lockBorderSize: "lock frame",
+    lockBorder: "lock colour"
+}
+var SETTING_ORDER = ["anchor", "activate", "scrim", "hint", "motion",
+                     "workspaces", "lockBorderSize", "lockBorder"]
+function settingsRows(cfg) {
+    if (!cfg) return []
+    var rows = [], seen = {}, i, k
+    for (i = 0; i < SETTING_ORDER.length; i++) {
+        k = SETTING_ORDER[i]
+        if (!(k in cfg)) continue
+        seen[k] = true
+        rows.push({ key: k, label: SETTING_LABELS[k] || k, value: cfg[k],
+                    editable: k !== "lockBorder" })
+    }
+    // Anything parseConfig returns that SETTING_ORDER has not been told about still gets a row,
+    // at the end, rather than vanishing. The Tier 1 test fails on it, which is the point -- but
+    // a user on a build where that slipped through still sees the setting exists.
+    for (k in cfg)
+        if (!seen[k]) rows.push({ key: k, label: k, value: cfg[k], editable: false })
+    return rows
+}
+
 // A JSON array or scalar parses cleanly and is still unusable -- parseConfig reads properties
 // off it, finds none, and returns every default. Silent, and indistinguishable from an empty
 // file, so it is reported too.

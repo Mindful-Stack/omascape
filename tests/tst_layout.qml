@@ -1545,4 +1545,33 @@ TestCase {
         compare(Logic.rowPhase(0.5, 0, NaN), 0.5, "NaN rowCount degrades to no stagger")
         compare(Logic.rowPhase(0.5, 99, 3), Logic.rowPhase(0.5, 2, 3), "rank clamps to the last row")
     }
+
+    // The panel's model. The FIRST assertion is the one that matters long-term: every key
+    // parseConfig returns must appear exactly once. Without it, a future setting gets added to
+    // the schema and simply never shows up in the panel — silently, with every test still green.
+    function test_settings_rows_cover_every_config_key() {
+        var cfg = Logic.parseConfig("{}")
+        var rows = Logic.settingsRows(cfg)
+        var keys = []
+        for (var i = 0; i < rows.length; i++) keys.push(rows[i].key)
+        var schema = []
+        for (var k in cfg) schema.push(k)
+        compare(keys.slice().sort().join(","), schema.slice().sort().join(","),
+                "every parseConfig key needs a row, and no row may invent one")
+        // lockBorder is present but not editable: a colour needs a real picker.
+        for (var j = 0; j < rows.length; j++)
+            if (rows[j].key === "lockBorder")
+                compare(rows[j].editable, false, "lockBorder is shown, not edited")
+        // ...and everything else IS editable, or the panel is decorative.
+        var editable = rows.filter(function (r) { return r.editable }).length
+        compare(editable, rows.length - 1, "seven of the eight must be editable")
+    }
+
+    function test_settings_rows_carry_the_current_values() {
+        var rows = Logic.settingsRows(Logic.parseConfig('{"anchor":"bar","scrim":false}'))
+        function row(k) { return rows.filter(function (r) { return r.key === k })[0] }
+        compare(row("anchor").value, "bar", "a set value is shown, not the default")
+        compare(row("scrim").value, false, "including a false boolean, which must not read as unset")
+        compare(row("motion").value, "auto", "and an unset one shows its default")
+    }
 }
