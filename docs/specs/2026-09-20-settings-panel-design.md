@@ -66,9 +66,11 @@ persistence; the pure functions behind all of it.
   - **Space pressed while the panel is open must not start a peek on release.** The confirmation
     branch already tracks exactly this (`Overview.qml:2093`), and Space-release cleanup
     (`:2210`) must keep running even while the panel owns key *presses*.
-  - **An explicit `!finding` guard.** Find-as-you-type does not own the ctrl chords — the
-    existing `ctrl+S`/`ctrl+L`/`ctrl+W` all fire during a query (`:2143-2147`) — so the panel
-    must decide deliberately whether it opens mid-search rather than inheriting an accident.
+  - **It does not open mid-search** (`!finding`). Find-as-you-type does not own the ctrl chords —
+    the existing `ctrl+S`/`ctrl+L`/`ctrl+W` all fire during a query (`:2143-2147`) — so without an
+    explicit guard the panel would open there by inheritance rather than by choice. ✎ *(decided
+    while planning, 2026-09-20: it does not.* A query is a transient mode with its own Esc
+    semantics, and a modal stacked on it gives Esc three meanings. Clear the query first.*)*
 
 - **Esc is a sequence here, not a single action.** ✎ *(corrected after review.)* Today Esc clears
   the window cursor, then the query, and only then closes the picker (`Overview.qml:2150-2153`),
