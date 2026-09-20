@@ -930,6 +930,21 @@ Item {
     // through a dismissal must not start a query with the repeats that follow.
     property int menuDismissKey: 0
 
+    // ---- Settings panel (docs/specs/2026-09-20-settings-panel-design.md) -------------------
+    property bool settingsOpen: false
+    // Swallows the auto-repeats of the key that closed the panel, so holding Esc cannot dismiss
+    // the panel and then the picker in one press. Same device as menuDismissKey above.
+    property int settingsDismissKey: 0
+    property int settingsIndex: 0
+
+    function openSettings() {
+        peekAbort()                                  // a modal and a peek are never both up
+        settingsDismissKey = 0
+        settingsPanel.index = 0                      // the panel OWNS its index; seed, never bind
+        settingsIndex = 0
+        settingsOpen = true
+    }
+
     function monitorList() {
         var out = [], ms = Hyprland.monitors ? Hyprland.monitors.values : []
         for (var i = 0; i < ms.length; i++) if (ms[i] && ms[i].name) out.push({ name: ms[i].name })
@@ -2103,6 +2118,34 @@ Item {
                     // …and the key that dismissed it keeps swallowing its own repeats.
                     if (root.menuDismissKey !== 0 && e.key === root.menuDismissKey) return
 
+                    // The settings panel owns every key while it is open too, checked after the
+                    // menu and the confirmation dialog (a modal already up keeps its keys) and
+                    // before the chord/Esc branches below, or a chorded key would fall through
+                    // to them and Esc would clear the cursor/query instead of closing the panel.
+                    if (root.settingsOpen) {
+                        // Space must not start a peek on release just because it was pressed
+                        // while a modal was up -- the confirmation branch above does exactly
+                        // this, and the release handler (Keys.onReleased below) still needs to
+                        // run regardless of which modal owned the press.
+                        if (!(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+                                && e.key === Qt.Key_Space) {
+                            root.peekKeyDown = true
+                            root.peekAbort()
+                        }
+                        if (e.key === Qt.Key_Escape) {
+                            root.settingsDismissKey = e.key
+                            root.settingsOpen = false
+                            return
+                        }
+                        settingsPanel.handleKey(e)
+                        return
+                    }
+                    // ...and the key that dismissed it keeps swallowing its own repeats.
+                    if (root.settingsDismissKey !== 0 && e.key === root.settingsDismissKey) {
+                        if (!e.isAutoRepeat) root.settingsDismissKey = 0
+                        return
+                    }
+
                     var chord = e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
                     var finding = root.query.length > 0
                     // Peek: hold Space to preview the target. Placed after the menuDismissKey
@@ -2145,6 +2188,10 @@ Item {
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_S) root.toggleScratchpad()
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_L) root.lockToggleSelected()
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_W && !e.isAutoRepeat) root.closeTarget()
+                        // !finding: a query is a transient mode with its own Esc semantics, and
+                        // stacking a modal on top of it would give Esc three meanings. Clear the
+                        // query first.
+                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_Comma && !finding) root.openSettings()
                         return
                     }
                     if (e.key === Qt.Key_Escape) {
@@ -2745,6 +2792,15 @@ Item {
                 index: root.matchIndex
                 fg: root.foreground; accent: root.accent
                 fontFamily: root.fontFamily; fontSize: root.captionSize
+            }
+
+            // Routing only, this task: rows, theming and onChangeRequested are wired in the
+            // follow-up that connects the panel to config (Task 7). This instance exists so
+            // openSettings() and the key handler above have something to address.
+            SettingsPanel {
+                id: settingsPanel
+                visible: root.settingsOpen
+                anchors.centerIn: parent
             }
         }
 
