@@ -2402,8 +2402,9 @@ Item {
                 // layout() lays boxes out from x = 0 and the canvas is exactly the grid's
                 // width, edges included. In centred mode the card shrinks to the grid, so there
                 // is never any slack; a full-width bar-mode card leaves the fit step's few
-                // pixels (at most 2*cols), and real slack only where maxCellW binds -- a
-                // canvas past 4384 logical. Either way the remainder must not sit on one side.
+                // pixels (at most 2*cols), and real slack only where maxCellW binds -- more
+                // than 4384 logical px of interior width, where the canvas freezes at 4384.
+                // Either way the remainder must not sit on one side.
                 //
                 // It is the FLICKABLE that moves, not the canvas: pointerPoint() maps the
                 // pointer through `flick` and then calls the result canvas coordinates, which

@@ -72,14 +72,12 @@ the middle of it, which reads as cramped precisely because the room is there and
      then it overflows exactly as the pixel model already does.
 
   The canvas is therefore **never wider than `availW`** (bar the `minCellW` case) and at most
-  The canvas is therefore **never wider than `availW`** (bar the `minCellW` case) and at most
   `2·cols` px narrower when the cap does not bind. The fit condition is strict, so a step only
   runs on an overshoot of at least 1 px, and it removes at most `cols + (cols+1)` px — the
   overshoot it removed plus what it over-removed, less the pixel that triggered it. Widths that
   take no step leave less: at most `cols + (cols+1)·(r + ½)`, which ties `2·cols` only at one
   column. Measured: exactly 2, 4, 6, 8, 10 for one to five columns. That remainder is centred
   by the Flickable, as slack is today.
-  what the step over-removed. That remainder is centred by the Flickable, as slack is today.
 
   | screen (bar mode, `availW`) | today `cw` / gap | **new `cw` / gap** | canvas | row height (16:10) |
   |---|---|---|---|---|
@@ -148,7 +146,7 @@ Tier 1, `tests/tst_layout.qml`, ratio on:
 - the four rows of the table above, pinned: `cw`, `gap`, canvas width, box `x` for the first two
   columns (`gap` and `gap + cw + gap`). The two one-fit-step rows (2024 and 1820) are the ones
   the review found overflowing, so they are the ones that prove the fit step
-- a sweep: for every integer `availW` from 162 to 4384 (the cap's threshold), the canvas is
+- a sweep: for every integer `availW` from 162 to 4384 (the last width before the cap binds; from 4385 the cell pins at 800), the canvas is
   `≤ availW` and `≥ availW − 2·cols`, plus a finiteness check per width; a single loop, one assertion each way, stated as the
   property it is
 - `availW` missing (absent, `0`, negative, `NaN`): `cols` = 5, `cw` = 140, `gap` = 11, canvas 766
