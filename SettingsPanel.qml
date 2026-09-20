@@ -143,9 +143,11 @@ Rectangle {
     // Key handling lives here so Overview routes ONE call rather than reimplementing the rows'
     // semantics. Returns true when the key was consumed.
     function handleKey(e) {
-        if (e.key === Qt.Key_Up)   { panel.index = Math.max(0, panel.index - 1); return true }
-        // actionIndex, not rows.length - 1: Down must be able to reach the action row.
-        if (e.key === Qt.Key_Down) { panel.index = Math.min(panel.actionIndex, panel.index + 1); return true }
+        // Wraps in both directions: the list is short and closed, and the row people reach for
+        // most (edit the file) is the LAST one -- so one Up from the top is the fast way to it.
+        // actionIndex, not rows.length - 1, is the bottom: Down must be able to reach it.
+        if (e.key === Qt.Key_Up)   { panel.index = panel.index <= 0 ? panel.actionIndex : panel.index - 1; return true }
+        if (e.key === Qt.Key_Down) { panel.index = panel.index >= panel.actionIndex ? 0 : panel.index + 1; return true }
         if (panel.index >= panel.actionIndex) {
             // The action row has no value to step through, so Left/Right are consumed and do
             // nothing rather than editing whatever row happens to be above it.

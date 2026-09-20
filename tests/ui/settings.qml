@@ -285,16 +285,32 @@ TestCase {
         }
     }
 
-    // Down must REACH the action row (a `rows.length - 1` ceiling stops one short of it) and
-    // must not run past it.
-    function test_down_reaches_the_open_row_and_stops() {
+    // Down must REACH the action row -- a `rows.length - 1` ceiling stops one short of it.
+    function test_down_reaches_the_open_row() {
         seed()
         keyClick(Qt.Key_Comma, Qt.ControlModifier)
         var panel = view.testSettingsPanel
         compare(panel.actionIndex, view.settingsRows.length, "the action row is one past the settings")
-        for (var d = 0; d < panel.actionIndex + 5; d++) keyClick(Qt.Key_Down)
-        compare(view.settingsIndex, panel.actionIndex, "Down lands on it and stops there")
+        for (var d = 0; d < panel.actionIndex; d++) keyClick(Qt.Key_Down)
+        compare(view.settingsIndex, panel.actionIndex, "Down lands on it")
         verify(panel.currentHelp.length > 0, "and it describes itself like any other row")
+    }
+
+    // The selection wraps. Up from the top is the short way to `edit the file`, which is the
+    // bottom row and the one most often wanted -- a clamped list makes it the longest trip.
+    function test_the_selection_wraps_in_both_directions() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        var panel = view.testSettingsPanel
+        compare(view.settingsIndex, 0, "precondition: at the top")
+        keyClick(Qt.Key_Up)
+        compare(view.settingsIndex, panel.actionIndex, "Up from the top lands on the last row")
+        keyClick(Qt.Key_Down)
+        compare(view.settingsIndex, 0, "and Down from the last row comes back to the top")
+        // ...and the wrap is a single step, not a slide through every row in between: a loop
+        // that clamped and then jumped would pass the two checks above while firing every row's
+        // change handler on the way. Asserted by the writes it must NOT have requested.
+        compare(view.testConfig.writes.length, 0, "wrapping changes no setting")
     }
 
     // The action row launches the editor on the file the panel has been writing -- config.path,

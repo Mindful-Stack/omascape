@@ -348,8 +348,9 @@ Optional user settings live in `~/.config/omarchy/omascape.json` (watched; edits
 ### Settings panel
 
 Press **Ctrl+,** to open the settings panel inside the picker (it is also listed in the second
-hint tier, under `?`). Up and Down move between the seven editable settings; Left and Right cycle
-the focused one's value. Esc closes the panel (the panel does not open while a search query is
+hint tier, under `?`). Up and Down move between the seven editable settings and wrap around at
+both ends, so one Up from the top reaches the last row; Left and Right cycle the focused one's
+value. Esc closes the panel (the panel does not open while a search query is
 active, since the query has its own Esc behaviour).
 
 A line under the list describes whichever row is selected, so a name like "lock frame" explains
