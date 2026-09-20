@@ -46,6 +46,25 @@ not get five squeezed ones. Cell width is then clamped between `minCellW` and `m
 `maxCellW` stops binding as soon as the margin takes its cut, which is exactly why the margin
 change above shrank the author's cells from 380.
 
+Since 2026-09-20 the cell is no longer the thing that is capped in practice. With `gapRatio`
+set (0.08 in production) the gap is that fraction of the cell width, both edges of the canvas
+carry one gap, and the cell takes what is left — fitted to whole pixels so the canvas is never
+wider than `availW`:
+
+```js
+cw = clamp(floor(availW / (cols + (cols + 1) * ratio)), minCellW, maxCellW)
+gap = round(cw * ratio)
+while (cols * cw + (cols + 1) * gap > availW && cw > minCellW) { cw--; gap = round(cw * ratio) }
+```
+
+`maxCellW` is 800 now and only binds once the card offers more than 4384 logical px of
+interior width; below that it is a sanity cap that never fires. The
+row spacing between sub-rows, monitor groups and the scratchpad follows the same gap. Without
+`gapRatio` — absent, or anything but a positive finite number — the pixel `cellSpacing` and
+`rowSpacing` apply exactly as before, which is the fallback rule below applied to a new input.
+The derivation, the fit step's proof and the measured table are in
+`docs/specs/2026-09-20-proportional-spacing-design.md`.
+
 ## Every layout input has a finite fallback
 
 **15 `isFinite` guards** in `logic.js`, and they exist for one failure:

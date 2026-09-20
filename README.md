@@ -396,8 +396,10 @@ layerrule = ignorealpha 0.3, omascape
 
 Colours follow the active Omarchy theme (`menu` surface roles and the shared fill alphas), so
 the picker re-themes with everything else. Layout constants live in the `params` object near
-the top of `Overview.qml` (cell size caps, `cellInset`, `cellSpacing`, `rowSpacing`, the
-`minTileW`/`minTileH` clamps). After editing QML, run `omarchy restart shell` (see the note in
+the top of `Overview.qml`: `gapRatio` (the gap between tiles as a fraction of the tile width,
+also the padding at each edge — tiles take whatever width is left), the cell size caps,
+`cellInset`, the `minTileW`/`minTileH` clamps, and the fixed-pixel `cellSpacing`/`rowSpacing`
+that apply only when `gapRatio` is removed. After editing QML, run `omarchy restart shell` (see the note in
 Contributing about why a plain rescan isn't enough).
 
 ### Let the picker animate itself (Hyprland side)
