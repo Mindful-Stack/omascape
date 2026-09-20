@@ -14,6 +14,11 @@ TestCase {
     width: 1200; height: 800; visible: true
     property var view
     property var mon
+    // Hyprland allocates the special workspace's id dynamically and it is NOT -2 — the layout
+    // remaps it (buildInput, Overview.qml:425). Seeding a different number here, as
+    // tests/ui/scratchpad.qml does, keeps every -2 assertion below a proof of the remap rather
+    // than a coincidence.
+    readonly property int scratchHyprId: -73
 
     Component { id: overview; Overview {} }
 
@@ -21,12 +26,14 @@ TestCase {
         return { address: addr, at: [x, 1500], size: [400, 400], floating: false,
                  title: cls, "class": cls, fullscreen: 0 }
     }
-    function wsRow(id, clients) {
-        return { id: id, monitor: mon,
+    function wsRow(id, clients, name) {
+        return { id: id, name: name === undefined ? String(id) : name, monitor: mon,
                  toplevels: { values: clients.map(function (c) { return { lastIpcObject: c } }) } }
     }
     // Workspace 1: two tiled windows side by side. Workspace 2: one. Workspace 3: empty, so a
-    // well click has a box with no tiles in it.
+    // well click has a box with no tiles in it. Plus a scratchpad row holding one window, which
+    // open() hides and Ctrl+S reveals — so it changes nothing for any test that does not ask for
+    // it, and `test_a_the_seed_is_what_the_later_tests_assume` pins both halves of that.
     function seed(v) {
         mon = { name: "TEST", x: 0, y: 1440, width: 1920, height: 1080, scale: 1,
                 lastIpcObject: { reserved: [0, 26, 0, 0], transform: 0,
@@ -37,7 +44,11 @@ TestCase {
         v.compositor.workspaces = { values: [
             wsRow(1, [client("0xA", "alpha", 100), client("0xB", "bravo", 900)]),
             wsRow(2, [client("0xC", "charlie", 100)]),
-            wsRow(3, [])
+            wsRow(3, []),
+            // "syncthing" is deliberately free of every letter this suite ever types into the
+            // query ("a", "b", "bravo"), so revealing the row can never change a match set and
+            // the find tests keep meaning what they say.
+            wsRow(scratchHyprId, [client("0xS", "syncthing", 900)], "special:scratchpad")
         ] }
     }
     // The compositor acknowledging a drop of 0xA onto workspace 3: the stub records dispatches
@@ -76,9 +87,16 @@ TestCase {
     }
     function hoverTile(addr) { var p = tileCentre(addr); mouseMove(view, p.x, p.y); wait(30) }
     function boxOf(wsId) {
+        var b = boxOrNull(wsId)
+        if (b === null) fail("no box for workspace " + wsId)
+        return b
+    }
+    // The same lookup for tests that assert a box is ABSENT — boxOf's own failure is what makes
+    // it useless for that.
+    function boxOrNull(wsId) {
         for (var i = 0; i < view.boxes.length; i++)
             if (view.boxes[i].workspaceId === wsId) return view.boxes[i]
-        fail("no box for workspace " + wsId)
+        return null
     }
     // A point inside a box but on NO tile: the well. Only valid for an unoccupied workspace — a
     // box with even one tiled window leaves a few px of bare well at the inset, so the centre is
@@ -116,10 +134,21 @@ TestCase {
         verify(!boxOf(3).occupied, "workspace 3 must stay empty; the well tests need it")
         for (var i = 0; i < view.boxes.length; i++)
             verify(view.boxes[i].workspaceId !== 7, "workspace 7 must not have a box")
+
+        // The scratchpad row, guarded in both directions. Hidden, or the two counts above are
+        // wrong and every other test in this file shifts with them; and revealed by Ctrl+S into
+        // a real -2 box with its tile in the model, or the scratchpad tests below would be
+        // asserting over a layout that never grew one.
+        compare(boxOrNull(-2), null, "the seeded scratchpad row stays hidden until Ctrl+S")
+        compare(boxOrNull(scratchHyprId), null, "Hyprland's own special id never reaches the layout")
+        ctrlS()
+        verify(boxOrNull(-2) !== null, "Ctrl+S must reveal the seeded scratchpad row")
+        compare(view.testModel.count, 4, "and bring 0xS into the layout with it")
     }
 
     // ---- select-mode targeting -------------------------------------------------------------
     function ctrlW() { keyClick(Qt.Key_W, Qt.ControlModifier) }
+    function ctrlS() { keyClick(Qt.Key_S, Qt.ControlModifier) }
 
     // This is the behavioural proof `test_a_the_fixture_carries_the_activate_policy` defers to:
     // flipping the policy flips the answer, which only production actually reading the key can
@@ -534,5 +563,250 @@ TestCase {
         view.testConfig.activate = "enter"
         compare(labelFor("1–0"), "jump", "the default policy's wording")
         compare(labelFor("↵"), "select")
+    }
+
+    // ---- the four untested Behaviour rows, plus the promised Tab assertion (issue #33) ------
+    // Everything below closes a row of the spec's Behaviour table that shipped with no Tier 2
+    // test. The code was right in each case; what was missing was the guard.
+
+    // ---- `Enter` commits ---------------------------------------------------------------------
+    // The half of the feature's name that the suite never pressed. What was asserted before was
+    // `resolveTarget()` naming the right thing — the INPUT to activateTarget(), not proof that
+    // Enter acts on it. A handler that resolved correctly and then did nothing, or that jumped
+    // somewhere else, passed.
+    //
+    // Distinguishes, in all three: an Enter that no longer reaches activateTarget (nothing
+    // dispatches, the overview stays open), one that closes without dispatching, and one that
+    // still consults the pointer — hence the hover onto a tile on a DIFFERENT workspace before
+    // each press, which is the sharp half. Under "enter" that same hover WOULD be the target
+    // (test_b asserts exactly that), so a policy leak cannot hide.
+    function test_g_enter_enters_the_selected_workspace() {
+        keyClick(Qt.Key_2)
+        compare(view.selectedId, 2)
+        hoverTile("0xA")                          // workspace 1, and pointerLive goes true
+        compare(view.pointerLive, true, "the hover must be a REAL move, or this proves nothing")
+        keyClick(Qt.Key_Return)
+        compare(view.opened, false, "Enter commits the selection")
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf('workspace = "2"') >= 0,
+               "dispatched: " + view.compositor.commands[0])
+    }
+    // The cursor half of the same rule: with a window selected, Enter focuses that window rather
+    // than entering its workspace.
+    function test_g_enter_enters_the_selected_window() {
+        var p = tileCentre("0xC")
+        mouseClick(view, p.x, p.y)                // select 0xC on workspace 2
+        wait(30)
+        compare(view.cursorAddress, "0xC")
+        compare(view.compositor.commands.length, 0, "the click itself dispatches nothing")
+
+        hoverTile("0xA")
+        keyClick(Qt.Key_Return)
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf("address:0xC") >= 0,
+               "dispatched: " + view.compositor.commands[0])
+        verify(view.compositor.commands[0].indexOf('workspace = "2"') < 0,
+               "a window selection must focus, not enter its workspace")
+    }
+    // The third branch of the target rule, and the assertion
+    // test_e_clicking_a_match_moves_the_selected_match stops one step short of: it proves
+    // resolveTarget() names the clicked match, this proves Enter acts on it.
+    //
+    // Distinguishes: an Enter that consults the cursor or the selected workspace while a query
+    // is live — the precedence that makes the whole find × click rule necessary.
+    //
+    // The hover has to be placed deliberately here, unlike in the two tests above: mouseClick
+    // leaves the pointer ON the clicked tile, so without a move afterwards a pointer-targeting
+    // Enter would name 0xC too and pass by coincidence. 0xA is a match for this query as well
+    // as being on another workspace, so the hover cannot be waved away as targeting something
+    // find had already excluded.
+    function test_g_enter_after_clicking_a_match_focuses_that_match() {
+        type("a")
+        var p = tileCentre("0xC")
+        mouseClick(view, p.x, p.y)
+        wait(30)
+        compare(view.selectedMatchAddress, "0xC")
+
+        hoverTile("0xA")
+        compare(view.pointerLive, true, "the hover must be a REAL move, or this proves nothing")
+        compare(view.selectedMatchAddress, "0xC", "a mouse move never moves the match")
+        keyClick(Qt.Key_Return)
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf("address:0xC") >= 0,
+               "dispatched: " + view.compositor.commands[0])
+    }
+
+    // ---- a click moves the find selection, it does not merely look as though it did ----------
+    // The spec's own Tier 2 plan promised this one and it never landed. `selectedMatchAddress`
+    // alone cannot tell a click that moved `matchIndex` from one that repainted the ring: the
+    // cheapest proof is to keep cycling and watch the SAME set come round.
+    //
+    // Distinguishes: a click that rebuilt `matches` from the clicked tile (Tab would then have
+    // one entry to cycle, or a different set), and one that left matchIndex where find had put
+    // it (the first Tab would step off 0xA, not off the clicked 0xC).
+    //
+    // "a" is a subsequence of all three class names; the ranking is alpha, bravo, charlie —
+    // 'a' at a word start in "alpha" outscores the mid-word 'a' in the other two, and "bravo"
+    // outscores the longer "charlie" on the length penalty.
+    function test_g_tab_still_cycles_the_same_match_set_after_a_click() {
+        type("a")
+        compare(view.matches.length, 3, "alpha, bravo and charlie all match 'a'")
+        compare(view.selectedMatchAddress, "0xA", "find's own pick, the best-ranked match")
+
+        var p = tileCentre("0xC")
+        mouseClick(view, p.x, p.y)
+        wait(30)
+        compare(view.selectedMatchAddress, "0xC")
+
+        keyClick(Qt.Key_Tab)
+        compare(view.query, "a", "Tab inside a query cycles matches; it never steps workspaces")
+        compare(view.matches.length, 3, "the same set, untouched by the click")
+        compare(view.selectedMatchAddress, "0xA", "one step on from the CLICKED match, wrapping")
+        keyClick(Qt.Key_Tab)
+        compare(view.selectedMatchAddress, "0xB")
+    }
+
+    // ---- a double-click inside a live query, on the two branches that clear it ---------------
+    // Only the match branch was covered. The spec promises all three compose the same way — "a
+    // click plus an enter of what that click selected" — and these two are where the query is
+    // CLEARED first, which is a different code path (selectMatchOrClearQuery's tail, and
+    // selectWorkspaceBox) reached twice in quick succession.
+    //
+    // Distinguishes, in both: a second step that re-resolves instead of entering what the first
+    // step selected — it would enter the match the query had named rather than what was clicked
+    // — and a double-click that dispatches twice, since Qt delivers `released` around
+    // `doubleClicked` and both paths run.
+    //
+    // The `query` compare is load-bearing and not decoration. By the time `doubleClicked`
+    // arrives the first click has already cleared the filter, so every assertion about the
+    // DISPATCH is satisfied by a double-click that entered the right thing without the clearing
+    // step ever having run — verified by mutation: make a click inside a live query inert
+    // (`selectTile`'s query branch returning early, or `selectWorkspaceBox` keeping the query)
+    // and the count, the address and `opened` all still pass. Only the surviving query fails,
+    // which is what makes these tests of the COMPOSITION rather than of the second click alone.
+    // close() does not reset find — open() does — so the query is still readable afterwards.
+    function test_g_double_clicking_a_non_match_clears_the_query_then_enters_it() {
+        type("bravo")                             // matches 0xB only; 0xA and 0xC have no 'b'
+        compare(view.selectedMatchAddress, "0xB")
+        var p = tileCentre("0xC")                 // charlie: dimmed
+        mouseDoubleClickSequence(view, p.x, p.y)
+        wait(30)
+        compare(view.query, "", "the click half must still have ended the filter")
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1, "exactly one focus dispatch")
+        verify(view.compositor.commands[0].indexOf("address:0xC") >= 0,
+               "entered " + view.compositor.commands[0] + ", expected the clicked 0xC")
+        verify(view.compositor.commands[0].indexOf("address:0xB") < 0,
+               "never the match the query had named")
+    }
+    function test_g_double_clicking_a_well_inside_a_query_enters_the_workspace() {
+        type("bravo")
+        compare(view.selectedMatchAddress, "0xB")
+        var w = wellCentre(3)                     // workspace 3 is empty, and holds no match
+        mouseDoubleClickSequence(view, w.x, w.y)
+        wait(30)
+        compare(view.query, "", "the click half must still have ended the filter")
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf('workspace = "3"') >= 0,
+               "entered " + view.compositor.commands[0] + ", expected workspace 3")
+        verify(view.compositor.commands[0].indexOf("address:0xB") < 0,
+               "a well enters its workspace, never the query's match")
+    }
+
+    // ---- middle-click is direct manipulation, in both policies -------------------------------
+    // The spec's Decisions bullet is explicit that middle-click and right-click never resolve a
+    // target and are identical under both policies. No middle button appeared in this suite at
+    // all, so that claim rested entirely on the Close suite — which only ever runs under
+    // "enter". (Right-click has a witness here already:
+    // test_c_a_key_swallowed_by_the_menu_still_clears_the_latch opens the menu with one.)
+    //
+    // Distinguishes: a middle click made select-aware — routed through closeTarget, it would
+    // close 0xC via the lone-window carve-out on the SELECTED workspace 2 while the pointer sat
+    // on 0xA. The two addresses can never coincide, so either half of that mistake shows.
+    function test_g_middle_click_closes_the_pointed_window_not_the_selection() {
+        keyClick(Qt.Key_2)                        // select workspace 2, whose lone window is 0xC
+        compare(view.selectedId, 2)
+        compare(view.cursorAddress, "", "a digit clears the cursor: the target is the workspace")
+
+        var p = tileCentre("0xA")
+        mouseClick(view, p.x, p.y, Qt.MiddleButton)
+        wait(30)
+        compare(view.opened, true, "a middle click never leaves the overview")
+        compare(view.compositor.commands.length, 1)
+        verify(view.compositor.commands[0].indexOf("window.close") >= 0,
+               "dispatched: " + view.compositor.commands[0])
+        verify(view.compositor.commands[0].indexOf("address:0xA") >= 0,
+               "closed " + view.compositor.commands[0] + ", expected the pointed 0xA")
+        verify(view.compositor.commands[0].indexOf("address:0xC") < 0,
+               "never the selection's lone window")
+        compare(view.selectedId, 2, "and the selection is not moved by a middle click")
+    }
+
+    // ---- the scratchpad row is an ordinary box -----------------------------------------------
+    // The spec says the scratchpad follows the same rules "because it IS one" — a box in
+    // `boxes` with `workspaceId: -2`. Nothing in this suite mentioned it, so that reasoning was
+    // untested, and the negative id is exactly where a selection path can go wrong: it reaches
+    // the layout through `indexOfWorkspace(boxes, -2)` and leaves it through `jump(-2)`, which
+    // must take Logic.isScratchpad's branch rather than dispatching a workspace Hyprland has
+    // never heard of. `digitActivate` is NOT part of this: it maps the ten digit keys onto ids
+    // 1–10 and can never name -2, so the row is reached by click or by Tab, like any other box
+    // without a digit of its own.
+    //
+    // Distinguishes: a click path that resolves the box by anything but the row's own id, and
+    // one that special-cases the scratchpad into the enter-policy jump. The rebuild is the same
+    // applyTiles trap test_d_a_tile_click_selects_and_survives_a_rebuild pins on workspace 2 —
+    // a cursor whose box selection did not follow it is dropped at the next rebuild.
+    function test_g_the_scratchpad_tile_selects_like_any_other_box() {
+        ctrlS()
+        verify(boxOrNull(-2) !== null, "the scratchpad row must be in the layout")
+        var p = tileCentre("0xS")
+        mouseClick(view, p.x, p.y)
+        wait(30)
+        compare(view.opened, true, "a single click must not leave")
+        compare(view.compositor.commands.length, 0, "nothing dispatched on a select")
+        compare(view.cursorAddress, "0xS")
+        compare(view.selectedId, -2, "the box selection follows the tile, negative id and all")
+
+        view.rebuild()
+        compare(view.cursorAddress, "0xS", "the cursor must survive applyTiles")
+        compare(view.selectedId, -2)
+    }
+    // Distinguishes: a double-click on a scratchpad tile that selects twice instead of
+    // committing, and one that dispatches the bare focus rather than the guarded scratchpad
+    // chunk — a scratchpad window focused without being raised stays behind whatever is on top
+    // of it (focusWindow, Overview.qml:757).
+    function test_g_a_double_click_on_the_scratchpad_tile_enters_it() {
+        ctrlS()
+        var p = tileCentre("0xS")
+        mouseDoubleClickSequence(view, p.x, p.y)
+        wait(30)
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1, "exactly one dispatch")
+        var cmd = view.compositor.commands[0]
+        verify(cmd.indexOf("address:0xS") >= 0, "dispatched: " + cmd)
+        verify(cmd.indexOf("alter_zorder") >= 0, "the scratchpad chunk, which also raises it")
+    }
+    // The workspace half, and the one place `jump(-2)` is reached under this policy. Tab is how
+    // the row is selected without a cursor: it has no digit, and its only tile would set one.
+    //
+    // Distinguishes: an Enter that dispatches a numeric workspace focus for -2 — a workspace
+    // Hyprland does not have, so nothing would happen and the overview would close anyway,
+    // which is why the negative assertion is here rather than left to the command count.
+    function test_g_enter_on_the_selected_scratchpad_row_shows_the_scratchpad() {
+        ctrlS()
+        keyClick(Qt.Key_Backtab)                  // back from ws 1 wraps to the scratchpad, last
+        compare(view.selectedId, -2)
+        compare(view.cursorAddress, "", "Tab clears the cursor: the target is the row itself")
+
+        keyClick(Qt.Key_Return)
+        compare(view.opened, false)
+        compare(view.compositor.commands.length, 1)
+        var cmd = view.compositor.commands[0]
+        verify(cmd.indexOf('workspace.toggle_special("scratchpad")') >= 0, "show chunk, got: " + cmd)
+        verify(cmd.indexOf("get_active_special_workspace") >= 0, "guarded against hiding one already up")
+        verify(cmd.indexOf('workspace = "-2"') < 0, "never a numeric jump to the remapped id")
     }
 }
