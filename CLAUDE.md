@@ -12,7 +12,7 @@ act on here.
 
 | Command | What it runs |
 | --- | --- |
-| `mise run test` | **The project suite.** Tier 1: `tests/run.sh` — logic suites, offscreen UI fixture, real-Lua parse and behaviour, dev-link stubs. This is what CI runs. |
+| `mise run test` | **The project suite.** Tier 1: `tests/run.sh` — logic suites, offscreen UI fixture, real-Lua parse and behaviour, dev-link stubs, split-lore git surgery. This is what CI runs. |
 | `mise run test-integration` | Tier 2: nested-Hyprland integration. Needs a real compositor, so it is not in CI. |
 | `mise run link` / `unlink` | Point the live Omarchy plugin dir at this worktree, and back. |
 | `make validate` | Knowledge-base validators (frontmatter, wikilinks, orphans, tag health). |

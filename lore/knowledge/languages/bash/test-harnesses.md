@@ -6,8 +6,9 @@ tags: [languages, bash, testing, ci]
 
 # Bash test harnesses — the two idioms, and the SKIP contract
 
-All four Tier 1 runners are launched from bash, and two of them — `tests/lua-check.sh` and
-`tests/dev-link.sh` — are bash test suites in their own right. All of Tier 2 is. They do not share a harness, and
+All five Tier 1 runners are launched from bash, and three of them — `tests/lua-check.sh`,
+`tests/dev-link.sh` and `tests/split-lore.sh` — are bash test suites in their own right. All of
+Tier 2 is. They do not share a harness, and
 copying the wrong one into a new test is the usual mistake. [[languages/bash/script-conventions]]
 covers how any script here is written; this node is which harness to copy and what a skip means.
 Measured 2026-09-20 against `origin/main` (`7200771`).
@@ -133,7 +134,8 @@ not in CI, and skipping on a developer machine without Hyprland is their intende
 ## Registering a bash suite
 
 `tests/run.sh` is a flat, ordered list under `set -e`: the resolved `qmltestrunner` invocation,
-then `bash ui/run.sh`, `bash lua-check.sh`, `bash dev-link.sh`. A new bash suite is a line
+then `bash ui/run.sh`, `bash lua-check.sh`, `bash dev-link.sh`, `bash split-lore.sh`. A new
+bash suite is a line
 appended there — nothing auto-discovers it — and because of `set -e`, **the first failing runner
 stops the ones after it**. Put a fast, hermetic suite ahead of a slow one.
 

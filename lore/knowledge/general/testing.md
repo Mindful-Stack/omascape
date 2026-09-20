@@ -1,6 +1,6 @@
 ---
 title: Testing — which tier a test belongs in, and how to write it
-description: Tier 1 (`mise run test`) gates every merge and holds 542 test functions across four runners; a logic test is auto-discovered, a UI suite must be registered in tests/ui/run.sh by hand, and the offscreen fixture fails loudly rather than silently only where prepare.py guards it.
+description: Tier 1 (`mise run test`) gates every merge and holds 542 test functions across five runners; a logic test is auto-discovered, a UI suite must be registered in tests/ui/run.sh by hand, and the offscreen fixture fails loudly rather than silently only where prepare.py guards it.
 tags: [testing, ci, qml, javascript, tooling]
 ---
 
@@ -12,8 +12,8 @@ run at all. Counts taken 2026-09-20 against `origin/main` (`7200771`).
 
 ## Pick the tier, then pick the runner
 
-`mise run test` → `tests/run.sh` is Tier 1 and is the only thing CI runs. It is four runners in
-sequence, and "Tier 1 passed" means all four:
+`mise run test` → `tests/run.sh` is Tier 1 and is the only thing CI runs. It is five runners in
+sequence, and "Tier 1 passed" means all five:
 
 | Put it here | When | How it runs |
 | --- | --- | --- |
@@ -21,6 +21,7 @@ sequence, and "Tier 1 passed" means all four:
 | `tests/ui/*.qml` | Anything needing real bindings, timers, `MouseArea` or a scene | `tests/ui/run.sh` → offscreen fixture built by `tests/ui/prepare.py` |
 | `tests/lua/tst_chunks.lua` | A generated Lua chunk's behaviour | `tests/lua-check.sh`, real interpreter — see [[languages/lua/testing]] |
 | `tests/dev-link.sh` | `scripts/dev-link.sh` behaviour | stub-driven bash, 112 assertions — see [[languages/bash/test-harnesses]] |
+| `tests/split-lore.sh` | `scripts/split-lore.sh` behaviour | throwaway git repos, 32 assertions |
 | `tests/integration/` | Only a real compositor can show it | `mise run test-integration`, **not in CI** |
 
 If it can be answered by calling a `Logic.*` function, it belongs in `tests/tst_*.qml` — that

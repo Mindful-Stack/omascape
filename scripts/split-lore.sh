@@ -55,11 +55,13 @@ fi
 # --- Confirm before destructive ops ---
 echo ""
 echo "About to:"
-echo "  1. Preserve lore content (cp -r lore lore.split-backup)"
-echo "  2. Remove inline lore from this workspace's git history"
-echo "  3. Restore lore as a fresh sibling repo"
+echo "  1. Copy lore/ to a temporary directory OUTSIDE this worktree"
+echo "  2. Stop tracking lore/ here, and add it to .gitignore (one commit)"
+echo "  3. Restore lore/ from the copy as its own git repo"
 [ -n "$REMOTE" ] && echo "  4. Set origin = $REMOTE and push"
-echo "  5. Update parent .gitignore and household.json"
+echo "  5. Point household.json at the remote"
+echo ""
+echo "This does NOT rewrite history: earlier commits still contain lore/."
 echo ""
 read -p "Proceed? [y/N]: " CONFIRM
 [ "$CONFIRM" = "y" ] || { echo "Aborted."; exit 1; }
@@ -67,17 +69,55 @@ read -p "Proceed? [y/N]: " CONFIRM
 # --- Execute ---
 cd "$WORKSPACE"
 
+# The backup lives outside the worktree on purpose. Kept inside it, any `git add`
+# wide enough to catch it commits the whole KB a second time under the backup's
+# path -- which is a rename, not a removal, so the split commit does the opposite
+# of what it says. The trap fires on failure too: an aborted run must not leave
+# the only copy of the KB in a temp directory nobody knows about.
+BACKUP_DIR="$(mktemp -d)"
+cleanup() {
+    # Only shout when the worktree copy is actually gone. A run interrupted during
+    # the copy itself leaves a partial backup AND the original, and pointing the
+    # user at the partial one would be the wrong advice.
+    if [ -d "$BACKUP_DIR/lore" ] && [ ! -d "$WORKSPACE/lore" ]; then
+        echo "" >&2
+        echo "Interrupted. Your lore/ content is safe at: $BACKUP_DIR/lore" >&2
+        echo "Move it back to $WORKSPACE/lore before re-running." >&2
+        return
+    fi
+    rm -rf "$BACKUP_DIR" 2>/dev/null || true
+}
+trap cleanup EXIT
+
 echo ""
-echo "[1/5] Preserving lore content..."
-cp -r lore lore.split-backup
+echo "[1/5] Copying lore/ to $BACKUP_DIR ..."
+cp -r lore "$BACKUP_DIR/lore"
 
-echo "[2/5] Removing from workspace history..."
+echo "[2/5] Untracking lore/ here and ignoring the path..."
 rm -rf lore
-git add -A
-git commit -m "split: remove inline lore (becomes a sibling repo)"
 
-echo "[3/5] Restoring as fresh sibling..."
-mv lore.split-backup lore
+# Three starting points, one end state: `lore/` must be ignored when this returns.
+# The template ships a catch-all `/*` plus a `!/lore/` allowlist, so dropping the
+# allowlist line is enough there. A repository that kept its own .gitignore (this
+# one does -- the catch-all would have silently ignored every new spec and test)
+# has no catch-all to fall back on and needs the rule written out.
+if grep -qx '!/lore/' .gitignore 2>/dev/null; then
+    grep -vx '!/lore/' .gitignore > .gitignore.tmp && mv .gitignore.tmp .gitignore
+fi
+# --no-index is load-bearing: without it `git check-ignore` reports any path still
+# in the index as NOT ignored, and lore/'s removal is not staged yet -- so the
+# template's catch-all would go unnoticed and a redundant rule be appended.
+if ! git check-ignore -q --no-index lore; then
+    printf '\n# lore/ is its own repo now (scripts/split-lore.sh)\n/lore/\n' >> .gitignore
+fi
+
+# Scoped pathspecs, never `git add -A`: this commit stages the removal of lore/
+# and the .gitignore rule, and nothing else a dirty worktree happens to contain.
+git add -A -- lore .gitignore
+git commit -m "split: lore becomes a sibling repo"
+
+echo "[3/5] Restoring as a sibling repo..."
+mv "$BACKUP_DIR/lore" lore
 cd lore
 git init -b main --quiet
 git add -A
@@ -90,12 +130,7 @@ if [ -n "$REMOTE" ]; then
     git -C lore push -u origin main --quiet
 fi
 
-echo "[5/5] Updating parent files..."
-
-# .gitignore: remove the `!/lore/` allowlist line (catch-all /* will gitignore lore now)
-if grep -q '^!/lore/$' .gitignore 2>/dev/null; then
-    grep -v '^!/lore/$' .gitignore > .gitignore.tmp && mv .gitignore.tmp .gitignore
-fi
+echo "[5/5] Updating household.json..."
 
 # household.json: if a remote was provided, set the lore entry's url
 if [ -n "$REMOTE" ]; then
@@ -110,8 +145,14 @@ if [ -n "$REMOTE" ]; then
     "
 fi
 
-git add .gitignore household.json
-git commit -m "split: lore is now a sibling repo"
+# Nothing to say when no remote was given -- an empty commit would fail the run
+# under `set -e` after every destructive step has already succeeded.
+git add -- household.json
+if git diff --cached --quiet; then
+    echo "      (no remote given; household.json unchanged)"
+else
+    git commit -m "split: point household.json at the lore remote"
+fi
 
 echo ""
 echo "Done. lore/ is now a sibling git repo."

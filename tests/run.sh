@@ -15,3 +15,4 @@ env QT_QPA_PLATFORMTHEME=generic QT_QPA_PLATFORM=offscreen "$RUNNER" -input "$(d
 bash "$(dirname "$0")/ui/run.sh"
 bash "$(dirname "$0")/lua-check.sh"
 bash "$(dirname "$0")/dev-link.sh"
+bash "$(dirname "$0")/split-lore.sh"

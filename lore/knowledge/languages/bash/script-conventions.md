@@ -11,8 +11,8 @@ point**: the CI workflow's only job runs `bash tests/run.sh`, and all four `mise
 (`test`, `test-integration`, `link`, `unlink`) are a single `bash …` line. Nothing else starts a
 test run.
 
-Measured 2026-09-20 against `origin/main` (`7200771`): **14 scripts, 1981 lines**, split
-`tests/` 12 and `scripts/` 2. [[languages/bash/test-harnesses]] covers how the test scripts
+Measured 2026-09-20 against `origin/main` (`7200771`) plus `tests/split-lore.sh` added on this
+branch: **15 scripts, 2111 lines**, split `tests/` 13 and `scripts/` 2. [[languages/bash/test-harnesses]] covers how the test scripts
 assert; this node is how any script here is written.
 
 > **Scope.** The household scaffold adds six more scripts under `scripts/` — `setup.sh`,
@@ -20,6 +20,13 @@ assert; this node is how any script here is written.
 > template-supplied workspace tooling, not Omascape's, and they are maintained upstream. They
 > happen to follow the same shebang and strict-mode rules, so nothing below conflicts, but do
 > not treat them as the reference when the template and this node disagree.
+>
+> **`split-lore.sh` has deliberately diverged from upstream** and is covered by
+> `tests/split-lore.sh`. The template's version assumes the template's `.gitignore` — a catch-all
+> `/*` plus a `!/lore/` allowlist — which this repository does not have and deliberately did not
+> adopt. Without it the upstream script commits its own backup, records the split as a *rename*
+> rather than a removal, and leaves an untracked nested repo. If you ever re-sync this file from
+> the template, run the suite before you keep the result.
 
 ## The header is not negotiable
 
@@ -28,16 +35,18 @@ Shebang follows the tree, and the split is total:
 | Tree | Shebang | Compliance |
 |---|---|---|
 | `scripts/` | `#!/bin/bash` | 2 of 2 (and 6 of 6 scaffold scripts) |
-| `tests/` | `#!/usr/bin/env bash` | 12 of 12 |
+| `tests/` | `#!/usr/bin/env bash` | 13 of 13 |
 
-Then `set -euo pipefail`, on its own line, before anything else runs — 12 of 14. **Both
-exceptions are deliberate and both say so in the file:**
+Then `set -euo pipefail`, on its own line, before anything else runs — 12 of 15. **All three
+exceptions are deliberate and every one says so in the file:**
 
 - `tests/dev-link.sh` uses `set -uo pipefail` with the trailing comment
   *"deliberately not -e: cases run failures"*. A test harness whose cases assert on non-zero exits
   cannot abort on the first one.
 - `tests/integration/lib.sh` sets nothing, because it is sourced. Its header says *"Source it
   after `set -euo pipefail`"* — the caller owns the shell options.
+- `tests/split-lore.sh` carries the same trailing comment as `tests/dev-link.sh`, for the same
+  reason: its cases assert on non-zero exits.
 
 If you write a third exception, put the reason on the `set` line the way these two do.
 
