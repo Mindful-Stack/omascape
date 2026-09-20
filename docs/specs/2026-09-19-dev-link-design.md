@@ -12,14 +12,14 @@ One command makes the worktree you are standing in the build the live Omarchy sh
 says so in a receipt you can trust:
 
 ```
-$ mise run link
+$ mise run dev:link
 linked   se.mindfulstack.omascape -> /home/daniel/Source/omascape
 branch   presence @ 40abb73 (dirty)
 session  …_1789641915_…  (from systemctl --user show-environment; answers hyprctl)
 restart  ok — instance mtsb1k5jllt (pid 2230186) replaced n8x2p0qr4ab (pid 2229103)
 ```
 
-`mise run unlink` puts the ordinary clone install back.
+`mise run dev:unlink` puts the ordinary clone install back.
 
 ## The problem
 
@@ -115,7 +115,7 @@ changes plugin *runtime* code.
     `localPluginReloadTimer` → `reloadPlugins`. (An earlier revision of this spec claimed the
     signal had no consumer — that was a case-sensitive `grep` missing `onLocalPluginChanged`.
     Corrected 2026-09-19 after the journal showed `Local plugin changed, reloading:
-    se.mindfulstack.omascape` during the first live `mise run link`.)
+    se.mindfulstack.omascape` during the first live link.)
 
     The consequence for this design is unchanged, and now measured rather than predicted:
     `inotifywait -r` does not descend symlinks, so **edits inside a linked worktree reach nothing**
@@ -149,7 +149,7 @@ changes plugin *runtime* code.
     **Also measured:** omascape itself survives the reload cycle. It was unloaded and re-created
     several times during this experiment, and toggling the overview open and closed afterwards
     produced no errors — captures and lock rules re-establish cleanly. That matters for the shipped
-    design, because `mise run link` writing the symlink triggers this same global reload before its
+    design, because `mise run dev:link` writing the symlink triggers this same global reload before its
     restart.
 12. **✎ The plugins directory is hardcoded, so `XDG_CONFIG_HOME` must be ignored.**
     `PluginRegistry.qml:11` is `home + "/.config/omarchy/plugins"` and the CLI catalog hardcodes
@@ -161,16 +161,20 @@ changes plugin *runtime* code.
 ### Targets
 
 ```toml
-[tasks.link]
-description = "Point the live Omarchy plugin dir at this worktree and restart the shell"
-run = "bash scripts/dev-link.sh"
-
-[tasks.unlink]
-description = "Restore the ordinary clone install and restart the shell"
-run = "bash scripts/dev-link.sh --unlink"
+[tasks."dev:link"]
+[tasks."dev:unlink"]
+[tasks."dev:status"]
 ```
 
-One script, two modes, so stash and restore stay in one place. Style follows
+✎ Named after Omarchy's own `omarchy dev link` / `dev unlink` / `dev status`, which do the same
+three things one level up (`/usr/share/omarchy/bin/omarchy-dev-{link,unlink,status}`). There are no
+short aliases: one name per task, matching the platform's. `dev:status` is read-only — it reports the link target, its
+branch/sha/dirty state, any stashed install, and whether the **running** shell is actually that
+build: a shell older than the link is still serving the previous checkout, because the engine
+caches compiled source per path (finding 11). It therefore runs before the session-identity block,
+which can refuse; a read-only command must never refuse.
+
+One script, three modes, so stash and restore stay in one place. Style follows
 `scripts/add-keybind.sh`: `#!/bin/bash`, a header comment that explains itself to a reader who is
 about to run it, `set -euo pipefail`, a `fail()` helper, refuse rather than clobber, and
 `PLUGIN_ID="se.mindfulstack.omascape"` hardcoded — CI installs no `jq`.
@@ -312,7 +316,7 @@ Cases:
 
 ## Docs
 
-Rewrite README § Local development loop (`README.md:396`) around `mise run link`, and state the
+Rewrite README § Local development loop (`README.md:396`) around `mise run dev:link`, and state the
 multi-worktree fact plainly: one global plugin id, several worktrees, `readlink` answers which one
 is live. Keep the existing warning that editing QML needs a restart rather than a rescan — finding
 11 confirms it is still true — and note that the target handles it.

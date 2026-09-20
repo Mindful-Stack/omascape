@@ -398,7 +398,7 @@ Contributions are welcome — bug reports, fixes, and the roadmap items in `ROAD
 | `SoftShadow.qml`    | Shadow under floating tiles.                                            |
 | `logic.js`          | Pure logic: geometry, reconcile, Lua chunk generation. Unit-tested.     |
 | `tests/`            | Tier 1 logic + UI tests (`mise run test`), Lua chunk suite, integration. |
-| `scripts/`          | `add-keybind.sh` (appends the toggle bind); `dev-link.sh` (`mise run link`). |
+| `scripts/`          | `add-keybind.sh` (appends the toggle bind); `dev-link.sh` (`mise run dev:link`). |
 | `DESIGN.md`         | What it does and why.                                                   |
 | `docs/specs/`       | One design doc per feature (find, scratchpad, lock, …).                 |
 | `ROADMAP.md`        | What's next.                                                            |
@@ -422,7 +422,7 @@ APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inli
 2. **Make this checkout the live one:**
 
    ```bash
-   mise run link
+   mise run dev:link
    ```
 
    It points `~/.config/omarchy/plugins/se.mindfulstack.omascape` at the worktree you ran it
@@ -438,21 +438,35 @@ APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inli
    restart  ok — new instance pid 2230186
    ```
 
-   `mise run unlink` puts the clone back. Running it from the installed clone itself is fine: it
-   is already the live checkout, so only the restart happens.
+   `mise run dev:unlink` puts the clone back. Running it from the installed clone itself is fine:
+   it is already the live checkout, so only the restart happens.
+
+   The names mirror Omarchy's own `omarchy dev link` / `dev unlink` / `dev status`, which do the
+   same three things for Omarchy itself.
 
    The plugin id is global, so **whichever worktree linked last is the one running.** To see
    which:
 
    ```bash
-   readlink ~/.config/omarchy/plugins/se.mindfulstack.omascape
+   mise run dev:status
    ```
 
-3. **Edit, then `mise run link` again** to pick the change up.
+   ```
+   linked   se.mindfulstack.omascape -> /home/you/Source/omascape
+   branch   my-feature @ 40abb73 (dirty)
+   shell    pid 2484468, started 2026-09-19T17:32:48
+   verdict  live — the running shell started after this link was written
+   ```
+
+   `STALE` there means the running shell predates the current link and is still serving the
+   previous checkout — the QML engine caches compiled source per path, so re-pointing the link
+   does not reach a shell that is already up. Run `mise run dev:link` to restart onto it.
+
+3. **Edit, then `mise run dev:link` again** to pick the change up.
 
    > ⚠️ **Editing QML requires a full shell restart, not just a rescan.**
    > `omarchy-shell shell rescanPlugins` reloads the manifest/registry but **not** the live
-   > QML component, so your code change won't show until the shell restarts. `mise run link`
+   > QML component, so your code change won't show until the shell restarts. `mise run dev:link`
    > does that for you — and it restarts only the compositor your session identifies, rather
    > than whichever one happens to answer.
 
