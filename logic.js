@@ -1092,6 +1092,28 @@ var LOCK_BORDER_RE = /^rgba?\([0-9a-fA-F]{6}([0-9a-fA-F]{2})?\)$/
 //
 // Anything that is not an absolute path yields "" -- the caller treats that as "no wallpaper"
 // and falls back to a painted colour, which is the behaviour from before this existed.
+// The tinted-glass mix used behind the wells and the bottom bar when the picker is showing the
+// wallpaper. Takes and returns components in 0..1; the view wraps the result with an alpha.
+//
+// 12% accent, 88% background -- deliberately NOT accent-dominant, though accent is what the
+// colour is FOR. Most themes' accents are light: rose-pine's #ebbcba is luminance 0.78 against
+// a background of 0.10. A light-dominant mix laid over a photograph washes it out instead of
+// darkening it, and the workspace numerals -- foreground at 0.10 alpha -- come out less
+// readable rather than more. 12% reads as a deliberate tint while the background still does
+// the darkening.
+var GLASS_ACCENT = 0.12
+function glassMix(bg, accent) {
+    if (!bg) return { r: 0, g: 0, b: 0 }
+    var tint = accent || bg
+    function ch(b, a) {
+        var bn = Number(b), an = Number(a)
+        if (!isFinite(bn)) bn = 0
+        if (!isFinite(an)) an = bn            // a broken accent degrades to plain background
+        return bn * (1 - GLASS_ACCENT) + an * GLASS_ACCENT
+    }
+    return { r: ch(bg.r, tint.r), g: ch(bg.g, tint.g), b: ch(bg.b, tint.b) }
+}
+
 function wallpaperUrl(raw) {
     var path = String(raw || "").replace(/^\s+|\s+$/g, "")
     if (path.length === 0 || path.charAt(0) !== "/") return ""

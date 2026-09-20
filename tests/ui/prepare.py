@@ -94,6 +94,7 @@ qml = qml.replace('id: root', '''id: root
     property alias testScrim: scrimRect
     property alias testShadow: cardShadow
     property alias testWallpaper: wallpaperBack
+    property alias testHintGlass: bottomBarGlass
     property alias testConfig: config
     property alias testLocks: locks
     property alias testEnterAnim: enterAnim

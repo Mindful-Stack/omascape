@@ -1177,6 +1177,43 @@ TestCase {
         compare(Logic.screenMargin(undefined), 16, "missing argument")
     }
 
+    // The glass mix behind the wells, checked with REAL theme colours -- which is why it lives
+    // here and not in the UI suite: that fixture rewrites every theme token to a flat grey, so
+    // "darkens rather than washes" cannot even be expressed there.
+    function test_glass_darkens_rather_than_washes() {
+        function rgb(h) { return { r: parseInt(h.substr(0,2),16)/255,
+                                   g: parseInt(h.substr(2,2),16)/255,
+                                   b: parseInt(h.substr(4,2),16)/255 } }
+        function lum(c) { return 0.2126*c.r + 0.7152*c.g + 0.0722*c.b }
+        var bg = rgb("191724"), accent = rgb("ebbcba")          // rose-pine dark
+        verify(lum(accent) > 0.7, "premise: this theme's accent is LIGHT, " + lum(accent))
+        verify(lum(bg) < 0.2, "premise: and its background is dark, " + lum(bg))
+
+        var g = Logic.glassMix(bg, accent)
+        // THE property. An accent-dominant mix would land near the accent's 0.78 and wash the
+        // photograph; this has to stay near the background so it darkens and the numerals read.
+        verify(lum(g) < 0.30, "the glass must stay dark, luminance is " + lum(g))
+        verify(lum(g) > lum(bg), "but carry a visible tint, not be the plain background")
+        verify(Math.abs(lum(g) - lum(bg)) < Math.abs(lum(g) - lum(accent)),
+               "and sit far closer to the background than to the accent")
+
+        // A light theme must not invert the logic: the mix follows whatever background it is
+        // given, so it darkens or lightens with the theme rather than assuming dark.
+        var lightBg = rgb("faf4ed")
+        var lg = Logic.glassMix(lightBg, accent)
+        verify(lum(lg) > 0.7, "on a light theme the glass stays light, " + lum(lg))
+    }
+
+    function test_glass_mix_survives_a_broken_palette() {
+        var bg = { r: 0.1, g: 0.1, b: 0.2 }
+        var same = Logic.glassMix(bg, null)
+        compare(same.r, bg.r, "a missing accent degrades to the plain background")
+        var nan = Logic.glassMix(bg, { r: NaN, g: NaN, b: NaN })
+        compare(nan.r, bg.r, "and so does a non-finite one, rather than propagating NaN")
+        var none = Logic.glassMix(null, null)
+        compare(none.r, 0, "no background at all yields black, never undefined")
+    }
+
     // The wallpaper path comes from `readlink -f`, so it arrives with a trailing newline and
     // may contain spaces. Everything that is not an absolute path must yield "" -- the view
     // reads that as "no wallpaper" and falls back to a painted colour, which is what it did

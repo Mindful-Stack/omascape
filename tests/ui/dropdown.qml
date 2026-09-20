@@ -392,6 +392,41 @@ TestCase {
         verify(view.testCard.color.a > 0, "so the card must paint an opaque ground instead")
     }
 
+    // Over a photograph the wells must become a real surface. tone() is foreground at 0.04 and
+    // 0.02 -- a lift that only reads against a flat card -- so on a wallpaper-backed card the
+    // empty workspaces would have no cue at all. The glass is also what carries the hint bar,
+    // which is otherwise bare text on a picture.
+    function test_a_wallpaper_backed_card_gives_the_wells_a_real_surface() {
+        seed(26, 10)
+        var flatEmpty = view.emptyWellColor.a
+        view.testConfig.wallpaperUrl = "file:///tmp/does-not-exist.png"
+        view.testConfig.barTransparent = true
+        wait(60)
+        verify(view.wallpaperBacked, "precondition: the card is wallpaper-backed")
+        // THE point: an empty well has to go from near-invisible to an actual surface.
+        verify(view.emptyWellColor.a > 0.25,
+               "an empty well must read over a photograph, alpha is " + view.emptyWellColor.a)
+        verify(view.emptyWellColor.a > flatEmpty * 5,
+               "and be far denser than the " + flatEmpty + " it uses on a flat card")
+        // The three wells must stay ordered, or a drop target stops reading as the strongest.
+        verify(view.wellColor.a > view.emptyWellColor.a, "occupied reads above empty")
+        verify(view.dropWellColor.a > view.wellColor.a, "and a drop target above both")
+        // The MIX itself is not asserted here on purpose: this fixture rewrites every theme
+        // token to a flat grey, so background and accent are the same colour and "darkens
+        // rather than washes" cannot be expressed. That property is covered with real theme
+        // colours in tst_layout.qml's test_glass_darkens_rather_than_washes.
+        compare(view.testHintGlass.visible, true, "and the bottom bar gets the same ground")
+    }
+
+    // ...and none of that may touch the flat card, which is the default every user is on.
+    function test_a_flat_card_keeps_its_original_well_tones() {
+        seed(26, 10, "center")
+        verify(!view.wallpaperBacked, "precondition: not wallpaper-backed")
+        verify(view.emptyWellColor.a < 0.1,
+               "the centred picker keeps its near-invisible lift, got " + view.emptyWellColor.a)
+        compare(view.testHintGlass.visible, false, "and the hints keep their bare ground")
+    }
+
     // The card must not cast its shadow onto the bar it hangs from. This surface is
     // WlrLayer.Overlay and the bar is WlrLayer.Top, so a halo above the card's top edge is
     // painted straight onto the bar -- darkening it, and making the two read as different

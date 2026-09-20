@@ -80,8 +80,23 @@ Item {
     property color selBackground: Color.menu.selectedBackground
     property color selText: Color.menu.selectedText
     function tone(a) { return Qt.rgba(foreground.r, foreground.g, foreground.b, a) }
-    readonly property color wellColor: tone(Style.normalFillAlpha)      // occupied workspace well
-    readonly property color emptyWellColor: tone(Style.normalFillAlpha / 2)   // one step lower
+    // Tinted glass, used for the wells and the hint ground while the card is wallpaper-backed.
+    // tone() is foreground at 0.04, and 0.02 for an empty well: a lift you can only see against
+    // a flat card. Over a photograph both vanish, and with them the only cue that an empty
+    // workspace is there at all.
+    //
+    // Built on `background` with the accent mixed in at 12%, rather than being accent. Most
+    // themes' accents are LIGHT -- rose-pine's is #ebbcba, luminance 0.78 against a background
+    // of 0.10 -- so an accent-dominant glass would wash the photograph instead of darkening it,
+    // and the numerals (foreground at 0.10 alpha) would come out harder to read, not easier.
+    // 12% is enough to read as a deliberate tint and not enough to stop it working.
+    function glass(a) {
+        var m = Logic.glassMix(background, accent)
+        return Qt.rgba(m.r, m.g, m.b, a)
+    }
+    readonly property color wellColor: wallpaperBacked ? glass(0.55) : tone(Style.normalFillAlpha)
+    readonly property color emptyWellColor: wallpaperBacked ? glass(0.40)
+                                                            : tone(Style.normalFillAlpha / 2)
     // Typography follows the shell: the menu family and the theme's size tokens, so the picker
     // tracks `omarchy display text size` like every other summoned surface.
     readonly property string fontFamily: Style.font.menuFamily
@@ -89,7 +104,7 @@ Item {
     readonly property int captionSize: Style.font.caption
     // Well under a drag: the only workspace-level drop cue (tiled drops also preview the
     // insertion half on the anchor tile), so it must read even on the focused workspace.
-    readonly property color dropWellColor: tone(Style.selectedFillAlpha)
+    readonly property color dropWellColor: wallpaperBacked ? glass(0.75) : tone(Style.selectedFillAlpha)
     readonly property color hairline: tone(0.12)                          // between previews
     readonly property color accent: selText
     readonly property bool darkTheme:
@@ -2208,6 +2223,20 @@ Item {
 
             // key hints: two tiers. The primary row is what a new user needs; `?` reveals the
             // advanced keys, which would otherwise crowd it past the card width on a laptop.
+            // A ground for whichever of the two bars is showing, while the card is
+            // wallpaper-backed. Both are bare text, and bare text on a photograph is not
+            // readable. Same glass as the wells, so the card reads as one material. Declared
+            // before them so it paints behind, and sized to whichever is visible.
+            Rectangle {
+                id: bottomBarGlass
+                visible: root.wallpaperBacked && (hintBox.visible || findBar.visible)
+                readonly property Item subject: hintBox.visible ? hintBox : findBar
+                x: subject.x - 14; y: subject.y - 7
+                width: subject.width + 28; height: subject.height + 14
+                radius: root.boxRadius
+                color: root.glass(0.55)
+            }
+
             Column {
                 id: hintBox
                 visible: config.hint && !card.findActive
