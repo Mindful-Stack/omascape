@@ -635,6 +635,7 @@ In `Overview.qml`, beside `menuOpen`:
     function openSettings() {
         peekAbort()                                  // a modal and a peek are never both up
         settingsDismissKey = 0
+        settingsPanel.index = 0                      // the panel owns it; seed, never bind
         settingsIndex = 0
         settingsOpen = true
     }
@@ -723,7 +724,8 @@ git commit -m "feat(settings): ctrl+, opens the panel; Esc closes it, not the pi
     function test_a_non_editable_row_changes_nothing() {
         seed()
         keyClick(Qt.Key_Comma, Qt.ControlModifier)
-        view.settingsIndex = view.settingsRows.length - 1     // lockBorder, last by SETTING_ORDER
+        // lockBorder is last by SETTING_ORDER; step to it with real presses.
+        for (var d = 0; d < view.settingsRows.length - 1; d++) keyClick(Qt.Key_Down)
         var before = view.testConfig.writes.length
         keyClick(Qt.Key_Right)
         compare(view.testConfig.writes.length, before, "no write is requested")
@@ -745,7 +747,9 @@ git commit -m "feat(settings): ctrl+, opens the panel; Esc closes it, not the pi
     function test_a_clamped_stepper_writes_nothing() {
         seed()
         keyClick(Qt.Key_Comma, Qt.ControlModifier)
-        view.settingsIndex = 5                        // workspaces, per SETTING_ORDER
+        // Navigate with real presses: `settingsIndex` is a read-back mirror now, not a
+        // control, so writing it would move nothing. SETTING_ORDER puts workspaces at index 5.
+        for (var d = 0; d < 5; d++) keyClick(Qt.Key_Down)
         for (var i = 0; i < 25; i++) keyClick(Qt.Key_Right)   // drive it to the 20 ceiling
         var atCeiling = view.testConfig.writes.length
         keyClick(Qt.Key_Right)
@@ -759,7 +763,7 @@ git commit -m "feat(settings): ctrl+, opens the panel; Esc closes it, not the pi
     function test_two_quick_presses_do_not_collapse_into_one_value() {
         seed()
         keyClick(Qt.Key_Comma, Qt.ControlModifier)
-        view.settingsIndex = 5                        // workspaces, default 10
+        for (var d = 0; d < 5; d++) keyClick(Qt.Key_Down)   // workspaces, default 10
         var before = view.testConfig.writes.length
         keyClick(Qt.Key_Right)
         keyClick(Qt.Key_Right)                        // no reload in between: the stub never writes a file
@@ -853,7 +857,13 @@ and the instance, inside the card after `bottomBarGlass`:
                 visible: root.settingsOpen
                 anchors.centerIn: parent
                 rows: root.settingsRows
-                index: root.settingsIndex
+                // NO `index: root.settingsIndex` binding. ✎ (corrected after Task 4's review.)
+                // handleKey assigns panel.index imperatively on Up/Down, and an imperative write
+                // to a property that carries a binding DESTROYS that binding permanently -- the
+                // same mechanism that cost this branch a Critical with the anchor ternaries.
+                // Verified on the engine: after one such write the caller can no longer drive
+                // the child at all. So the panel OWNS its index; Overview seeds it on open and
+                // mirrors it back for read-only use.
                 onIndexChanged: root.settingsIndex = index
                 background: root.background
                 foreground: root.foreground
