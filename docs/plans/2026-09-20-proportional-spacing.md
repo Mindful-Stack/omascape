@@ -43,7 +43,7 @@ below are the spec's numbers; the spec's table is the source of truth if the two
   `QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/ Layout::test_name`.
   One UI test: `bash tests/ui/run.sh Dropdown::test_name` — the positional argument is a
   **`TestCase::function` selector**; a bare suite name matches nothing and exits green, which
-  looks like a pass. Run the whole `Layout` case with `-input tests/ Layout`.
+  looks like a pass. Run the whole `Layout` case with `-input tests/tst_layout.qml`.
 - **A `SKIP:` is not a pass.** Read the runner's summary line, not just the exit code.
 - **Conventional Commits, scoped `spacing`**, body says why, and the trailer
   `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
@@ -341,7 +341,7 @@ Expected: both `PASS`. Then the whole file, because every other fixture pins pix
 literals and must not have moved:
 
 ```
-QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/ Layout
+QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/tst_layout.qml
 ```
 
 Expected: `Totals: N passed, 0 failed`.
@@ -633,7 +633,7 @@ which is what makes the centring arithmetic and the return's `canvasW + 2 * edge
 - [ ] **Step 4: Run the two tests, then the whole `Layout` case**
 
 ```
-QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/ Layout
+QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/tst_layout.qml
 ```
 
 Expected: `0 failed`. The pre-existing scratchpad tests (around lines 880–960) pin the pixel
