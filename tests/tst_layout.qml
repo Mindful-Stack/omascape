@@ -1657,5 +1657,12 @@ TestCase {
         // ...and the obvious one.
         compare(Logic.configWithKey('{"scrim":false,', "anchor", "bar"), "",
                 "a file that does not parse is never overwritten with a guess")
+
+        // A write that cannot be REPRESENTED must be refused, not reported as success. Both of
+        // these return a perfectly valid JSON document that simply does not contain the change.
+        compare(Logic.configWithKey('{"scrim":false}', "__proto__", "bar"), "",
+                "__proto__ sets no own property, so the write would vanish")
+        compare(Logic.configWithKey('{"scrim":false}', "anchor", undefined), "",
+                "an undefined value is dropped by stringify, so the write would vanish")
     }
 }

@@ -2170,6 +2170,17 @@ function configWithKey(rawText, key, value) {
         try { obj = JSON.parse(text) } catch (e) { return "" }
         if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return ""
     }
-    obj[key] = value
-    return JSON.stringify(obj, null, 2) + "\n"
+    // The contract above is "a non-empty result contains `key` at `value`". Three inputs break
+    // it without a naive implementation noticing: on THIS engine, `obj["__proto__"] = v` throws
+    // a TypeError outright (the assignment reassigns the prototype rather than setting an own
+    // property, and the engine rejects a non-object/non-null target); an `undefined` value is
+    // silently dropped by stringify; and a plain `key === "__proto__"` blacklist would still miss
+    // that second case. So the assignment is guarded here, and the round trip is checked below --
+    // both would otherwise return (or throw past) success-looking text with the change missing,
+    // and a caller that trusts a non-empty return would report success on a file that does not
+    // contain what the user asked for.
+    try { obj[key] = value } catch (e) { return "" }
+    var text2 = JSON.stringify(obj, null, 2)
+    if (!Object.prototype.hasOwnProperty.call(JSON.parse(text2), key)) return ""
+    return text2 + "\n"
 }
