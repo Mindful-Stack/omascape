@@ -1078,6 +1078,28 @@ var LOCK_BORDER_RE = /^rgba?\([0-9a-fA-F]{6}([0-9a-fA-F]{2})?\)$/
 // Fails to `false` on anything unexpected: a missing file, a malformed one, or a bar subtree
 // that is not an object. False means "paint the bar's colour", which is the behaviour that
 // was correct before this existed.
+// The current wallpaper as a file URL, from `readlink -f` output.
+//
+// Resolved, not the symlink itself: Qt caches Image sources by URL, so pointing an Image at
+// ~/.local/state/omarchy/current/background would keep serving the first wallpaper of the
+// session after a theme switch. Omarchy's own background plugin resolves it the same way.
+//
+// Encoded per PATH SEGMENT, not with encodeURI over the whole path. encodeURI deliberately
+// preserves the URI-reserved characters, "#" among them -- so a wallpaper living at
+// /home/u/wall#2.jpg would produce a URL whose path ends at "wall", with "#2.jpg" read as a
+// fragment, and Qt would quietly fail to load it. encodeURIComponent encodes those, and
+// rejoining with a literal "/" keeps the path structure it would otherwise have escaped.
+//
+// Anything that is not an absolute path yields "" -- the caller treats that as "no wallpaper"
+// and falls back to a painted colour, which is the behaviour from before this existed.
+function wallpaperUrl(raw) {
+    var path = String(raw || "").replace(/^\s+|\s+$/g, "")
+    if (path.length === 0 || path.charAt(0) !== "/") return ""
+    var parts = path.split("/")
+    for (var i = 0; i < parts.length; i++) parts[i] = encodeURIComponent(parts[i])
+    return "file://" + parts.join("/")
+}
+
 function shellBarTransparent(raw) {
     var o
     try { o = JSON.parse(String(raw || "")) } catch (e) { return false }

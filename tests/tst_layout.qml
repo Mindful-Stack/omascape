@@ -1177,6 +1177,25 @@ TestCase {
         compare(Logic.screenMargin(undefined), 16, "missing argument")
     }
 
+    // The wallpaper path comes from `readlink -f`, so it arrives with a trailing newline and
+    // may contain spaces. Everything that is not an absolute path must yield "" -- the view
+    // reads that as "no wallpaper" and falls back to a painted colour, which is what it did
+    // before wallpaper backing existed.
+    function test_wallpaper_url_is_built_defensively() {
+        compare(Logic.wallpaperUrl("/home/d/bg.jpg\n"), "file:///home/d/bg.jpg", "readlink's newline")
+        compare(Logic.wallpaperUrl("  /home/d/bg.jpg  "), "file:///home/d/bg.jpg", "surrounding space")
+        // THE discriminator against a bare "file://" + path: a space in the path would make a
+        // URL Qt silently fails to open, and the card would fall back to painting nothing.
+        compare(Logic.wallpaperUrl("/home/d/my wall.jpg"), "file:///home/d/my%20wall.jpg", "space encoded")
+        compare(Logic.wallpaperUrl("/home/d/a#b.jpg"), "file:///home/d/a%23b.jpg", "fragment char encoded")
+        // ...but the path structure must survive: encoding the slashes would break it entirely.
+        compare(Logic.wallpaperUrl("/a/b/c.jpg"), "file:///a/b/c.jpg", "slashes are left alone")
+        compare(Logic.wallpaperUrl("relative.jpg"), "", "not absolute")
+        compare(Logic.wallpaperUrl(""), "", "readlink found nothing")
+        compare(Logic.wallpaperUrl("\n"), "", "whitespace only")
+        compare(Logic.wallpaperUrl(undefined), "", "never probed")
+    }
+
     // The bar's transparency lives in the SHELL's config, not ours, and the card falls back
     // to the menu ground when it is on. Every failure mode must yield false -- "paint the
     // bar's colour" -- because that is what the code did before this key was consulted.

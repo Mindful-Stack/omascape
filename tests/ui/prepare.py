@@ -93,6 +93,7 @@ qml = qml.replace('id: root', '''id: root
     property alias testCard: card
     property alias testScrim: scrimRect
     property alias testShadow: cardShadow
+    property alias testWallpaper: wallpaperBack
     property alias testConfig: config
     property alias testLocks: locks
     property alias testEnterAnim: enterAnim
@@ -210,6 +211,8 @@ for edge in ('left', 'right'):
     '           property string motion: "auto"; property string motionEffective: "full"\n'
     '           property string anchor: "center"\n'
     '           property bool barTransparent: false\n'
+    '           property string wallpaperUrl: ""\n'
+    '           function probeWallpaper() {}\n'
     '           property bool motionResolved: true\n'
     '           property string lockBorder: "rgb(ff4444)"; property int lockBorderSize: 6\n'
     '           function probeMotion() {} }\n')

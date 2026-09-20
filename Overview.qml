@@ -280,6 +280,12 @@ Item {
     // No top bar to hang from (a side, bottom or hidden bar) means no attachment: the picker
     // keeps the centred card rather than squaring itself against nothing.
     readonly property bool barMode: config.anchor === "bar" && reservedTop > 0
+    // A transparent bar shows the WALLPAPER, because its exclusion zone keeps windows out of
+    // that strip. The card covers a region full of windows, so it cannot be transparent in the
+    // same way -- you would read the grid over the very windows it depicts. It paints the
+    // wallpaper instead: what the bar SHOWS, rather than what happens to be behind us.
+    readonly property bool wallpaperBacked:
+        barMode && config.barTransparent && config.wallpaperUrl !== ""
     // One progress for the whole bar-mode entrance; every row derives its own phase from it.
     // Root-level and not per-delegate: tilesModel and boxesModel are reconciled IN PLACE, so
     // delegates persist across rebuilds and a per-delegate Component.onCompleted would fire once
@@ -1319,6 +1325,7 @@ Item {
         // The staged entrance is bar-mode only: a top-down stagger under a card that scales from
         // its centre reads as a bug. With motion off, progress is SET, never animated — an
         // unplayed animation would leave every row at 0, i.e. an invisible grid.
+        config.probeWallpaper()          // a theme switch between summons must not show the old one
         openAnim.stop()
         if (root.barMode && root.motion.enabled) { root.entranceOpen = 0; openAnim.start() }
         else root.entranceOpen = 1
@@ -1607,10 +1614,12 @@ Item {
             // than one (two at 50% give 75%), which is what a cover-up strip would produce.
             radius: root.barMode ? 0 : root.cardRadius
             border.width: root.barMode ? 0 : 1
-            // A transparent bar has no colour to be continuous WITH, so the card stops
-            // pretending and uses the menu ground instead. It cannot follow the bar literally:
-            // a see-through card would put the workspace grid over live windows.
-            color: (root.barMode && !config.barTransparent) ? root.barBackground : root.background
+            // Three grounds. Wallpaper-backed, the Rectangle paints nothing and the Image
+            // below is the ground. Attached to an opaque bar, the bar's own token. Otherwise
+            // the menu ground, which is also the fallback when the wallpaper cannot be resolved.
+            color: root.wallpaperBacked ? "transparent"
+                 : (root.barMode && !config.barTransparent) ? root.barBackground
+                 : root.background
             // With real air around the card it must read as elevated rather than as a lighter
             // rectangle. Accent-derived rather than a fixed neutral: a black hairline looks like
             // a bug on a light card and a white one vanishes on it. `accent` is already
@@ -1668,6 +1677,23 @@ Item {
                 NumberAnimation { duration: root.motion.normal; easing.type: root.motion.move } }
             Behavior on implicitHeight { enabled: root.layoutMotion
                 NumberAnimation { duration: root.motion.normal; easing.type: root.motion.move } }
+            // The wallpaper, sized and placed against the PANEL rather than the card and
+            // lifted by the bar's height. That makes it the same crop of the same image at the
+            // same screen position as the real wallpaper behind the bar, so the two are
+            // continuous across the seam instead of merely similar. Declared first so every
+            // other child paints over it; the card's own `clip` reveals it during the unfurl,
+            // which is why it stays still while the card grows rather than sliding with it.
+            Image {
+                id: wallpaperBack
+                visible: root.wallpaperBacked
+                x: 0; y: -root.reservedTop
+                width: panel.width; height: panel.height
+                source: root.wallpaperBacked ? config.wallpaperUrl : ""
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                cache: true
+            }
+
             MouseArea { anchors.fill: parent; onClicked: {} }
 
             // The card's only visible edge in bar mode: the top is the join with the bar, the

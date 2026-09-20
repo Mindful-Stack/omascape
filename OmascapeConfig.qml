@@ -33,6 +33,12 @@ QtObject {
     readonly property string motionEffective: Logic.motionPolicy(motion, hyprAnimations)
     function probeMotion() { hyprProc.running = true; probeFallback.restart() }
 
+    // The wallpaper the shell is currently showing, as a file URL. Re-probed on every open so
+    // a theme switch between summons is picked up; the picker is transient, so polling would
+    // be waste. Empty until the first probe answers, which the view treats as "no wallpaper".
+    property string wallpaperUrl: ""
+    function probeWallpaper() { wallpaperProc.running = true }
+
     readonly property string path: Quickshell.env("HOME") + "/.config/omarchy/omascape.json"
     // The shell's own config, watched read-only for one key: whether the bar is transparent.
     // Not ours to write, and nothing here ever does.
@@ -68,6 +74,14 @@ QtObject {
         onLoadFailed: cfg.barTransparent = false
     }
 
+    property Process wallpaperProc: Process {
+        command: ["readlink", "-f", Quickshell.env("HOME") + "/.local/state/omarchy/current/background"]
+        stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: cfg.wallpaperUrl = Logic.wallpaperUrl(text)
+        }
+    }
+
     property Process hyprProc: Process {
         command: ["hyprctl", "-j", "getoption", "animations:enabled"]
         stdout: StdioCollector {
@@ -86,5 +100,5 @@ QtObject {
     property Timer probeFallback: Timer { interval: 500; onTriggered: cfg.motionResolved = true }
 
     // Warm the cache so the very first open already follows the compositor.
-    Component.onCompleted: probeMotion()
+    Component.onCompleted: { probeMotion(); probeWallpaper() }
 }

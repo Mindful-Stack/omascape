@@ -360,6 +360,38 @@ TestCase {
         compare(view.testCard.height, view.testCard.implicitHeight, "fully open immediately")
     }
 
+    // A transparent bar shows the wallpaper, so the card paints the wallpaper rather than a
+    // colour. The alignment is the whole point: the image is sized to the PANEL and lifted by
+    // the bar's height, so it is the same crop at the same screen position as the real
+    // wallpaper behind the bar. Off-by-anything here and the seam reappears, worse than before
+    // because the two halves would be the same picture at different offsets.
+    function test_a_transparent_bar_makes_the_card_paint_the_wallpaper() {
+        seed(26, 10)
+        view.testConfig.wallpaperUrl = "file:///tmp/does-not-exist.png"
+        view.testConfig.barTransparent = true
+        wait(60)
+        verify(view.wallpaperBacked, "precondition: the card should be wallpaper-backed")
+        compare(view.testCard.color.a, 0, "the Rectangle paints nothing; the image is the ground")
+        compare(view.testWallpaper.visible, true, "the wallpaper is shown")
+        compare(view.testWallpaper.y, -26, "lifted by the bar's height, so it aligns with the real one")
+        compare(view.testWallpaper.x, 0, "and flush with the screen's left edge")
+        compare(view.testWallpaper.width, view.testPanel.width, "sized to the panel, not the card")
+        compare(view.testWallpaper.height, view.testPanel.height, "in both axes")
+    }
+
+    // ...and it must fall back rather than paint nothing. An unresolvable wallpaper -- the probe
+    // has not answered yet, or readlink found nothing -- would otherwise leave a transparent
+    // Rectangle with no image behind it, i.e. an invisible card over the desktop.
+    function test_an_unresolved_wallpaper_falls_back_to_a_painted_ground() {
+        seed(26, 10)
+        view.testConfig.barTransparent = true
+        view.testConfig.wallpaperUrl = ""
+        wait(60)
+        verify(!view.wallpaperBacked, "no wallpaper means no wallpaper backing")
+        compare(view.testWallpaper.visible, false, "nothing to show")
+        verify(view.testCard.color.a > 0, "so the card must paint an opaque ground instead")
+    }
+
     // The card must not cast its shadow onto the bar it hangs from. This surface is
     // WlrLayer.Overlay and the bar is WlrLayer.Top, so a halo above the card's top edge is
     // painted straight onto the bar -- darkening it, and making the two read as different
