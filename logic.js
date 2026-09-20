@@ -1275,6 +1275,40 @@ function parseConfig(raw) {
     }
 }
 
+// The next value for a setting, `dir` +1 or -1.
+//
+// TOTAL: an unknown key, a non-editable one, or a value outside the set comes back as something
+// valid rather than throwing or inventing. A panel that silently rewrote a value it did not
+// recognise would be worse than one that did nothing.
+//
+// Enums WRAP; the two numeric settings CLAMP. Wrapping a stepper from 0 round to 20 on a single
+// Left press would be startling, and there is no way to express "I meant the end" on a keyboard
+// row.
+var SETTING_CYCLES = {
+    anchor: ["center", "bar"],
+    activate: ["enter", "select"],
+    motion: ["auto", "full", "off"],
+    scrim: [true, false],
+    hint: [true, false]
+}
+var SETTING_RANGES = { workspaces: [0, 20], lockBorderSize: [0, 20] }
+function nextSettingValue(key, current, dir) {
+    var step = Number(dir) < 0 ? -1 : 1
+    var cycle = SETTING_CYCLES[key]
+    if (cycle) {
+        var at = cycle.indexOf(current)
+        if (at < 0) return cycle[0]                 // out of set: land somewhere valid
+        return cycle[(at + step + cycle.length) % cycle.length]
+    }
+    var range = SETTING_RANGES[key]
+    if (range) {
+        var n = Number(current)
+        if (!isFinite(n)) return range[0]
+        return Math.max(range[0], Math.min(range[1], Math.round(n) + step))
+    }
+    return current                                   // not ours to change
+}
+
 // ---- Find (docs/specs/2026-09-11-find-design.md) ----------------------------------------
 // Fuzzy subsequence ranking over class and title. Pure: the Overview hands in the window list
 // `buildInput()` produced (special workspaces already excluded) in layout order, and gets back

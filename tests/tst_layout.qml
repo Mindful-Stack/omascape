@@ -1581,4 +1581,33 @@ TestCase {
         compare(row("scrim").value, false, "including a false boolean, which must not read as unset")
         compare(row("motion").value, "auto", "and an unset one shows its default")
     }
+
+    // Cycling. Every enum wraps in both directions and every stepper clamps -- and the function
+    // is TOTAL: anything it does not understand comes back unchanged, because a settings panel
+    // that silently rewrites a value it did not recognise is worse than one that does nothing.
+    function test_next_setting_value_cycles_and_clamps() {
+        compare(Logic.nextSettingValue("anchor", "center", 1), "bar", "two-state forward")
+        compare(Logic.nextSettingValue("anchor", "bar", 1), "center", "and wraps")
+        compare(Logic.nextSettingValue("anchor", "center", -1), "bar", "backwards wraps too")
+        compare(Logic.nextSettingValue("scrim", true, 1), false, "booleans toggle")
+        compare(Logic.nextSettingValue("scrim", false, -1), true, "in both directions")
+        // THE three-state case: a two-state implementation passes every line above.
+        compare(Logic.nextSettingValue("motion", "auto", 1), "full", "three-state steps")
+        compare(Logic.nextSettingValue("motion", "full", 1), "off", "through the middle")
+        compare(Logic.nextSettingValue("motion", "off", 1), "auto", "and wraps at the end")
+        // Steppers CLAMP rather than wrap: wrapping 0 -> 20 on a Left press would be startling.
+        compare(Logic.nextSettingValue("workspaces", 10, 1), 11, "steppers step")
+        compare(Logic.nextSettingValue("workspaces", 20, 1), 20, "and clamp at the top")
+        compare(Logic.nextSettingValue("workspaces", 0, -1), 0, "and at the bottom")
+        compare(Logic.nextSettingValue("lockBorderSize", 6, -1), 5, "the other stepper too")
+    }
+
+    function test_next_setting_value_is_total() {
+        compare(Logic.nextSettingValue("lockBorder", "rgb(ff4444)", 1), "rgb(ff4444)",
+                "a non-editable key is never rewritten")
+        compare(Logic.nextSettingValue("nosuchkey", "x", 1), "x", "nor is an unknown one")
+        compare(Logic.nextSettingValue("workspaces", NaN, 1), 0, "a non-finite number restarts at 0")
+        compare(Logic.nextSettingValue("anchor", "barr", 1), "center",
+                "an out-of-set value lands on the first valid one, not on itself")
+    }
 }
