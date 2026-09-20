@@ -126,6 +126,15 @@ TestCase {
         // The panel's first row is `anchor`, whose cycle is center -> bar.
         compare(String(view.testConfig.writes[before]), "anchor=bar",
                 "and asks for the NEXT value, not an arbitrary one")
+        // Correction 2's actual subject. A QML `var` holding an object does not re-evaluate
+        // dependent bindings when the object is mutated internally -- only when it is
+        // REASSIGNED. Mutating settingsPending in place leaves settingValue() correct (it reads
+        // fresh) while settingsRows never updates, so the panel computes the right next value
+        // and displays the old one. Asserting on writes[] cannot see that; this can.
+        var anchorRow = null
+        for (var i = 0; i < view.settingsRows.length; i++)
+            if (view.settingsRows[i].key === "anchor") anchorRow = view.settingsRows[i]
+        compare(anchorRow.value, "bar", "the row must show the new value, not the old one")
     }
 
     // A non-editable row consumes its keys rather than falling through to the picker beneath.
@@ -171,7 +180,7 @@ TestCase {
     function test_two_quick_presses_do_not_collapse_into_one_value() {
         seed()
         keyClick(Qt.Key_Comma, Qt.ControlModifier)
-        for (var d = 0; d < 5; d++) keyClick(Qt.Key_Down)   // workspaces, default 10
+        for (var d = 0; d < 5; d++) keyClick(Qt.Key_Down)   // workspaces (stub default 0, not parseConfig's 10)
         var before = view.testConfig.writes.length
         keyClick(Qt.Key_Right)
         keyClick(Qt.Key_Right)                        // no reload in between: the stub never writes a file
@@ -193,5 +202,25 @@ TestCase {
         keyClick(Qt.Key_Comma, Qt.ControlModifier)
         verify(!view.peeking, "opening settings aborts it")
         keyRelease(Qt.Key_Space)
+    }
+
+    // A refused save must drop ONLY that key's optimistic value, so the panel shows what the
+    // file still says for it -- while any other pending change stays pending.
+    function test_a_refused_save_reverts_only_that_key() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        keyClick(Qt.Key_Right)                       // anchor -> bar, accepted
+        view.testConfig.failSaves = true
+        for (var d = 0; d < 5; d++) keyClick(Qt.Key_Down)   // workspaces
+        keyClick(Qt.Key_Right)                       // refused
+        var rows = view.settingsRows, anchorRow = null, wsRow = null
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].key === "anchor") anchorRow = rows[i]
+            if (rows[i].key === "workspaces") wsRow = rows[i]
+        }
+        // Stub default (tests/ui/prepare.py) is 0, not parseConfig's 10 -- the fixture shows
+        // exactly the compositor's workspaces unless a test opts into padding.
+        compare(wsRow.value, 0, "the refused key reverts to what the file says")
+        compare(anchorRow.value, "bar", "but the earlier accepted change stays pending")
     }
 }

@@ -86,32 +86,20 @@ QtObject {
         cfg.configChanged()
     }
 
-    // Persist one setting. Reads the file's CURRENT text rather than rebuilding from the parsed
-    // properties, so keys this build does not know about are carried through (see
-    // Logic.configWithKey). Refused, not overwritten, when the file is not known to be either
-    // loaded or missing (readableForSave) or when it does not parse (configWithKey returns ""):
-    // the user may be mid-edit, and replacing their work with { changedKey: value } would be
-    // worse than doing nothing.
-    function save(key, value) {
-        if (!readableForSave) {
-            cfg.writeFailed("the file could not be read; fix that before changing settings here")
-            return false
-        }
-        var next = Logic.configWithKey(file.text(), key, value)
-        if (next.length === 0) {
-            cfg.writeFailed("the file could not be parsed; fix it before changing settings here")
-            return false
-        }
-        file.setText(next)
-        return true
-    }
-
-    // Applies several settings in ONE write. See the caller's comment (Overview.qml
-    // applySettingChange): a second write cancels the first and builds its payload from stale
-    // cached text (FileView.text() only updates on operationFinished, and saveAsync captures its
-    // payload before cancelling an in-flight write -- verified in Quickshell 0.3.1's
-    // src/io/fileview.cpp:321-338). So each payload must carry every unconfirmed change rather
-    // than only the newest, making a cancelled write's payload a subset of the next one's.
+    // Persist every given setting in ONE write. Reads the file's CURRENT text rather than
+    // rebuilding from the parsed properties, so keys this build does not know about are carried
+    // through (see Logic.configWithKey). Refused, not overwritten, when the file is not known to
+    // be either loaded or missing (readableForSave) or when any key fails to apply
+    // (configWithKey returns ""): the user may be mid-edit, and replacing their work with a
+    // guessed object would be worse than doing nothing.
+    //
+    // Always the WHOLE set the caller still has unconfirmed, not just the newest key. See the
+    // caller's comment (Overview.qml applySettingChange): a second write cancels the first and
+    // builds its payload from stale cached text (FileView.text() only updates on
+    // operationFinished, and saveAsync captures its payload before cancelling an in-flight write
+    // -- verified in Quickshell 0.3.1's src/io/fileview.cpp:321-338). So each payload must carry
+    // every unconfirmed change rather than only the newest, making a cancelled write's payload a
+    // subset of the next one's.
     function saveAll(values) {
         if (!readableForSave) {
             cfg.writeFailed("the file could not be read; fix that before changing settings here")

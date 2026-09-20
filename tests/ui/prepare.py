@@ -309,13 +309,18 @@ peeklayer = replaced(peeklayer, '    id: peek\n',
     # unconfirmed change on every save (a real second write cancels the first and would otherwise
     # lose it -- see Overview.qml's applySettingChange), so a test asserting on a single write's
     # content must see every key that call carried, not just the newest one.
+    #
+    # `failSaves` lets a test exercise the refusal branch of applySettingChange (a real refusal
+    # is an unreadable/unparseable file, neither of which this stub can produce) while still
+    # recording the attempt, so a test can assert BOTH that the write was requested and that it
+    # was refused.
+    '           property bool failSaves: false\n'
     '           function saveAll(values) {\n'
     '               var parts = []\n'
     '               for (var k in values) parts.push(k + "=" + values[k])\n'
     '               writes = writes.concat([parts.join(",")])\n'
-    '               return true\n'
+    '               return !failSaves\n'
     '           }\n'
-    '           function save(key, value) { var o = {}; o[key] = value; return saveAll(o) }\n'
     '           }\n')
 # Lock state stub: the real OmascapeLocks.qml watches two files through Quickshell.Io. The stub
 # keeps the one property later tests depend on — `armed` is null until a load resolves — and
