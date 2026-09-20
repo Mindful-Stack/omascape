@@ -40,7 +40,8 @@ TestCase {
 
     // Every box and group finite — the NaN floor (lore/knowledge/general/layout-and-sizing.md).
     function assertFinite(r, label) {
-        verify(isFinite(r.canvasSize.w) && isFinite(r.canvasSize.h), label + ": canvas " + JSON.stringify(r.canvasSize))
+        verify(isFinite(r.canvasSize.w) && r.canvasSize.w > 0 && isFinite(r.canvasSize.h) && r.canvasSize.h > 0,
+               label + ": canvas " + JSON.stringify(r.canvasSize))
         for (var i = 0; i < r.boxes.length; i++) {
             var b = r.boxes[i]
             verify(isFinite(b.x) && isFinite(b.y) && isFinite(b.w) && isFinite(b.h) && b.w > 0 && b.h > 0,
@@ -48,23 +49,8 @@ TestCase {
         }
         for (var g = 0; g < r.groups.length; g++) {
             var gr = r.groups[g]
-            verify(isFinite(gr.x) && isFinite(gr.y) && isFinite(gr.w) && isFinite(gr.h),
+            verify(isFinite(gr.x) && isFinite(gr.y) && isFinite(gr.w) && gr.w > 0 && isFinite(gr.h) && gr.h > 0,
                    label + ": group " + gr.monitorName + " " + JSON.stringify([gr.x, gr.y, gr.w, gr.h]))
-        }
-    }
-
-    // ---- proportional spacing (docs/specs/2026-09-20-proportional-spacing-design.md) ----
-
-    // Distinguishes: an implementation that reads `gapRatio` unguarded — Number(undefined) is
-    // NaN and would poison every width — or one that lets 0, a negative, Infinity, a numeric
-    // STRING or `true` switch the ratio model on. Green before the feature exists, on purpose:
-    // it is the regression guard for the pixel model every other fixture in this file pins.
-    function test_an_invalid_ratio_leaves_the_pixel_model_untouched() {
-        var base = JSON.stringify(fiveOn(1632, params))
-        var invalid = [undefined, null, 0, -0.1, NaN, Infinity, -Infinity, "0.08", true, {}]
-        for (var i = 0; i < invalid.length; i++) {
-            var out = JSON.stringify(fiveOn(1632, withRatio(params, invalid[i])))
-            compare(out, base, "gapRatio = " + String(invalid[i]) + " must not change the layout")
         }
     }
 
@@ -1749,5 +1735,42 @@ TestCase {
                 "__proto__ sets no own property, so the write would vanish")
         compare(Logic.configWithKey('{"scrim":false}', "anchor", undefined), "",
                 "an undefined value is dropped by stringify, so the write would vanish")
+    }
+
+    // ---- proportional spacing (docs/specs/2026-09-20-proportional-spacing-design.md) ----
+
+    // Distinguishes: an implementation that reads `gapRatio` unguarded — Number(undefined) is
+    // NaN and would poison every width — or one that lets 0, a negative, Infinity, a numeric
+    // STRING or `true` switch the ratio model on. Green before the feature exists, on purpose:
+    // it is the regression guard for the pixel model every other fixture in this file pins.
+    function test_an_invalid_ratio_leaves_the_pixel_model_untouched() {
+        var base = JSON.stringify(fiveOn(1632, params))
+        var invalid = [undefined, null, 0, -0.1, NaN, Infinity, -Infinity, "0.08", true, {}]
+        for (var i = 0; i < invalid.length; i++) {
+            var out = JSON.stringify(fiveOn(1632, withRatio(params, invalid[i])))
+            compare(out, base, "invalid[" + i + "] = " + String(invalid[i]) + " must not change the layout")
+        }
+    }
+
+    // Distinguishes: the real-valued formula the first spec draft carried, which put the 2024
+    // and 1820 rows 1-2 px OVER availW (found in review, 2026-09-20), and a fit step that shrinks
+    // when it need not (2536 and 3816 take no step and must not lose a pixel).
+    function test_ratio_mode_fits_the_row_to_whole_pixels() {
+        var rows = [ { availW: 2024, cw: 368, gap: 29, canvas: 2014, h: 230 },   // one fit step
+                     { availW: 2536, cw: 462, gap: 37, canvas: 2532, h: 289 },
+                     { availW: 3816, cw: 696, gap: 56, canvas: 3816, h: 435 },
+                     { availW: 1820, cw: 331, gap: 26, canvas: 1811, h: 207 } ]  // one fit step
+        for (var i = 0; i < rows.length; i++) {
+            var e = rows[i], r = fiveOn(e.availW), b1 = boxById(r, 1), b2 = boxById(r, 2), b5 = boxById(r, 5)
+            var at = "availW " + e.availW + ": "
+            compare(b1.w, e.cw, at + "cell width")
+            compare(b1.h, e.h, at + "cell height follows the monitor's 1.6 aspect")
+            compare(b1.x, e.gap, at + "the first box starts one gap in from the edge")
+            compare(b2.x, e.gap + e.cw + e.gap, at + "the second column is one cell and one gap on")
+            compare(b5.x + b5.w + e.gap, e.canvas, at + "the last box ends one gap short of the canvas edge")
+            compare(r.canvasSize.w, e.canvas, at + "canvas width")
+            verify(r.canvasSize.w <= e.availW, at + "the canvas must never be wider than availW")
+            assertFinite(r, at)
+        }
     }
 }
