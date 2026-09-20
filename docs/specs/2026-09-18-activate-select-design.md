@@ -352,6 +352,37 @@ cleared the latch rather than letting it stand.
 Finally, the whole existing suite is re-run under the default `"enter"` policy, which must be
 unchanged.
 
+✎ 2026-09-20 — four rows of the Behaviour table above shipped with no Tier 2 test, and the
+`Tab`-still-cycles assertion promised in the find × click list never landed. Closed as a
+follow-up (issue #33), all in `tests/ui/activate.qml` under the `test_g_` prefix:
+
+- **`Enter` commits**, on all three branches of the target rule — the selected workspace, the
+  cursor's window, and a clicked match. Each presses `Enter` with the pointer parked on a tile on
+  another workspace, so a handler that resolved correctly and then acted on hover fails. In the
+  match test that hover must be placed deliberately: `mouseClick` leaves the pointer on the tile
+  it clicked, so without a move afterwards a pointer-targeting `Enter` would name the same window
+  and pass by coincidence. What was asserted before was `resolveTarget()` naming the right thing,
+  which is the *input* to `activateTarget()`.
+- **A double-click inside a live query, on a non-match and on a well** — the two branches that
+  clear the query first. Both assert the query is gone as well as the dispatch: by the time
+  `doubleClicked` arrives the first click has already cleared it, so every assertion about the
+  dispatch alone is satisfied by a double-click that entered the right thing without the clearing
+  step ever having run.
+- **Middle-click under `"select"`** closes the window under the pointer while a *different*
+  workspace is selected, so the Decisions bullet no longer rests on the Close suite, which only
+  runs under `"enter"`. Right-click already had a witness here
+  (`test_c_a_key_swallowed_by_the_menu_still_clears_the_latch`).
+- **The scratchpad row as an ordinary box**: its tile selects and survives a rebuild, a
+  double-click enters it through the guarded scratchpad chunk rather than a bare focus, and
+  `Enter` on the row reaches `jump(-2)` and its `isScratchpad` branch. The fixture seeds a
+  scratchpad row holding one window, hidden until `Ctrl+S` like every other summon.
+  `digitActivate` is *not* part of this: it maps the ten digit keys onto ids 1–10 and can never
+  name `-2`, so the row is reached by click or by `Tab`, like any box without a digit of its own.
+- **`Tab` still cycles the same match set after a click**, which is the cheapest proof that a
+  click *moved* the find selection rather than merely repainting the ring.
+
+Each was confirmed to fail against the defect it names before being kept.
+
 ## Documentation
 
 README's *Fast selection* bullet gains the policy, and the config table gains `activate`.
