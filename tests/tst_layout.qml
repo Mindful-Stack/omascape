@@ -1846,4 +1846,59 @@ TestCase {
         }
         compare(worstSlack, 10, "five columns leave at most 10 px, at availW 791 (cols 5, cw 143, gap 11, canvas 781)")
     }
+
+    // Two monitors (so the group inset and header band are on), six workspaces on the first
+    // so it wraps into a second sub-row, and the scratchpad shown: every vertical seam the
+    // layout has. availW 2024 less the 2*6 inset is 2012 — cw 367, gap 29, no fit step.
+    function multiWithScratchpad() {
+        var wss = []
+        for (var i = 1; i <= 6; i++) wss.push({ id: i, monitorName: "eDP-1", focused: i === 1, occupied: false })
+        for (var j = 7; j <= 8; j++) wss.push({ id: j, monitorName: "HDMI-A-1", focused: false, occupied: false })
+        wss.push({ id: Logic.SCRATCHPAD_ID, monitorName: "eDP-1", special: "scratchpad",
+                   focused: false, occupied: true })
+        return Logic.layout({ monitors: [edp(), hdmi()], workspaces: wss, windows: [],
+                              focusedMonitorName: "eDP-1", availW: 2024, params: ratioParams })
+    }
+
+    // Distinguishes: an implementation that widened the columns and left every row seam on
+    // the 8 px `rowSpacing` — a 5x2 grid 29 px apart sideways and 8 px apart downwards — at any
+    // of the three seams: between sub-rows, between monitor groups, and above the scratchpad.
+    // The wrong values are 265, 529 and 798; each is 21 short of the right one.
+    function test_every_row_seam_is_the_ratio_gap() {
+        var r = multiWithScratchpad()
+        compare(boxById(r, 1).w, 367, "precondition: 2012 / 5.48 floors to 367")
+        compare(boxById(r, 1).h, 229, "precondition: eDP row height")
+        compare(boxById(r, 7).h, 206, "precondition: HDMI row height (16:9)")
+        // group 0: inset 6 + header 22 = 28, first row at 28, second sub-row after 229 + gap 29
+        compare(boxById(r, 1).y, 28, "first row sits under the chip band")
+        compare(boxById(r, 6).y, 28 + 229 + 29, "the sub-row seam is the gap, not rowSpacing")
+        // group 0 ends at 28 + 229 + 29 + 229 + inset 6 = 521; group 1 starts one gap later
+        compare(r.groups[0].h, 521, "group 0 height")
+        compare(r.groups[1].y, 521 + 29, "the monitor-group seam is the gap")
+        // group 1: 28 in, one 206 row, inset 6 -> ends at 550 + 28 + 206 + 6 = 790
+        compare(r.groups[1].y + r.groups[1].h, 790, "group 1 bottom")
+        compare(r.groups[2].special, "scratchpad", "precondition: the third group is the scratchpad")
+        compare(r.groups[2].y, 790 + 29, "the scratchpad seam is the gap")
+        assertFinite(r, "multi")
+    }
+
+    // Distinguishes: an edge applied to the boxes but not the group backdrops (a backdrop
+    // hugging x = 0 while its cells start 29 px in), or to the monitor groups but not the
+    // scratchpad row, or a canvas width that forgot to add the edges back. Every group starts
+    // one gap in; the canvas is the widest group plus two gaps; the scratchpad cell is centred
+    // on that canvas.
+    function test_the_edge_frames_every_group_and_the_canvas_reports_it() {
+        var r = multiWithScratchpad(), gap = 29, inset = 6
+        for (var g = 0; g < r.groups.length; g++)
+            compare(r.groups[g].x, gap, "group " + g + " starts one gap in")
+        compare(boxById(r, 1).x, gap + inset, "the first cell sits inside the edge and the inset")
+        compare(boxById(r, 7).x, gap + inset, "so does the second monitor's")
+        var widest = 5 * 367 + 4 * gap + 2 * inset              // 1963
+        compare(r.groups[0].w, widest, "group width excludes the edge")
+        compare(r.canvasSize.w, widest + 2 * gap, "the canvas adds one gap each side: 2021")
+        verify(r.canvasSize.w <= 2024, "and still fits the width it was given")
+        var s = boxById(r, Logic.SCRATCHPAD_ID)
+        compare(s.x + s.w / 2, r.canvasSize.w / 2, "the scratchpad cell is centred on the canvas")
+        compare(r.groups[2].w, widest, "the scratchpad row spans the widest group")
+    }
 }

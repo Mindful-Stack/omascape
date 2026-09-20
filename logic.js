@@ -456,12 +456,12 @@ function layout(input) {
             var rowW = chunk.length * cw + (chunk.length - 1) * gap
             if (rowW > groupW) groupW = rowW
             y += gch
-            if (s + cols < wss.length) y += P.rowSpacing        // between sub-rows of one group
+            if (s + cols < wss.length) y += rowGap               // between sub-rows of one group
         }
         y += inset
         group.w = groupW + 2 * inset; group.h = y - group.y
         if (group.w > canvasW) canvasW = group.w
-        if (r < order.length - 1) y += P.rowSpacing             // between monitor groups
+        if (r < order.length - 1) y += rowGap                    // between monitor groups
     }
 
     // Trailing scratchpad group (a special workspace shown on demand): its own header band —
@@ -472,8 +472,8 @@ function layout(input) {
     // second box for the same id.
     for (var si = 0; si < input.workspaces.length; si++) {
         var sws = input.workspaces[si]; if (!sws.special || !isScratchpad(sws.id)) continue
-        if (groups.length) y += P.rowSpacing
-        var sgroup = { monitorName: sws.monitorName, special: sws.special, x: 0, y: y, w: 0, h: 0,
+        if (groups.length) y += rowGap
+        var sgroup = { monitorName: sws.monitorName, special: sws.special, x: edge, y: y, w: 0, h: 0,
                        inset: inset, headerH: P.headerH, focused: false }
         groups.push(sgroup)
         y += inset + P.headerH
@@ -481,7 +481,7 @@ function layout(input) {
         // cell under a full-width grid read as misplaced in use).
         var rowW = Math.max(canvasW, cw + 2 * inset)
         var sbox = { workspaceId: sws.id, monitorName: sws.monitorName, monFocused: false,
-                     special: sws.special, x: inset + Math.round((rowW - 2 * inset - cw) / 2), y: y, w: cw,
+                     special: sws.special, x: edge + inset + Math.round((rowW - 2 * inset - cw) / 2), y: y, w: cw,
                      h: cellHeightFor(monByName[sws.monitorName]),
                      focused: !!sws.focused, occupied: !!sws.occupied,
                      windowCount: sws.windowCount | 0,
