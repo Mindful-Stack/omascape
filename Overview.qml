@@ -301,6 +301,14 @@ Item {
     // wallpaper instead: what the bar SHOWS, rather than what happens to be behind us.
     readonly property bool wallpaperBacked:
         barMode && config.barTransparent && config.wallpaperUrl !== ""
+
+    // Key-hint contrast. HintCap's defaults (cap 0.75, label 0.45) are tuned for a flat card,
+    // where the label being quiet is the point. Over a wallpaper -- especially a bright one --
+    // 0.45 of the foreground washes out entirely and the hints stop being readable. Both are
+    // raised together so the cap stays louder than the label it belongs to; raising only the
+    // label would invert the hierarchy and make the words shout over the keys.
+    readonly property real hintCapOpacity: wallpaperBacked ? 0.95 : 0.75
+    readonly property real hintLabelOpacity: wallpaperBacked ? 0.78 : 0.45
     // One progress for the whole bar-mode entrance; every row derives its own phase from it.
     // Root-level and not per-delegate: tilesModel and boxesModel are reconciled IN PLACE, so
     // delegates persist across rebuilds and a per-delegate Component.onCompleted would fire once
@@ -2254,7 +2262,9 @@ Item {
                                  { k: "esc", l: "close" },
                                  { k: "?", l: root.hintsExpanded ? "less" : "more" } ]
                         HintCap { foreground: root.foreground; fill: root.wellColor
-                                  fontFamily: root.fontFamily; fontSize: root.captionSize }
+                                  fontFamily: root.fontFamily; fontSize: root.captionSize
+                                  capOpacity: root.hintCapOpacity
+                                  labelOpacity: root.hintLabelOpacity }
                     }
                 }
                 Row {
@@ -2268,7 +2278,9 @@ Item {
                                  { k: "right-click", l: "menu" },
                                  { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" } ]
                         HintCap { foreground: root.foreground; fill: root.wellColor
-                                  fontFamily: root.fontFamily; fontSize: root.captionSize }
+                                  fontFamily: root.fontFamily; fontSize: root.captionSize
+                                  capOpacity: root.hintCapOpacity
+                                  labelOpacity: root.hintLabelOpacity }
                     }
                 }
             }

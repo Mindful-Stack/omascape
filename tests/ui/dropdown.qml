@@ -427,6 +427,33 @@ TestCase {
         compare(view.testHintGlass.visible, false, "and the hints keep their bare ground")
     }
 
+    // The key hints have to survive a photograph. HintCap's defaults are cap 0.75 / label 0.45,
+    // which is a deliberate hierarchy on a flat card and illegible over a bright wallpaper.
+    function test_the_key_hints_are_readable_over_a_wallpaper() {
+        seed(26, 10)
+        var flatCap = view.hintCapOpacity, flatLabel = view.hintLabelOpacity
+        view.testConfig.wallpaperUrl = "file:///tmp/does-not-exist.png"
+        view.testConfig.barTransparent = true
+        wait(60)
+        verify(view.hintLabelOpacity > flatLabel,
+               "the label must lift over a wallpaper, " + flatLabel + " -> " + view.hintLabelOpacity)
+        verify(view.hintCapOpacity > flatCap, "and the cap with it")
+        // THE discriminator. Raising only the label -- the obvious fix for "the words are hard
+        // to read" -- inverts the hierarchy and makes the words louder than the keys they
+        // describe. The cap has to stay on top in BOTH modes.
+        verify(view.hintCapOpacity > view.hintLabelOpacity,
+               "the cap must stay louder than its label over a wallpaper")
+        verify(flatCap > flatLabel, "and on a flat card")
+    }
+
+    // ...and the flat card keeps HintCap's own defaults, unchanged.
+    function test_a_flat_card_keeps_the_original_hint_contrast() {
+        seed(26, 10, "center")
+        verify(!view.wallpaperBacked, "precondition: not wallpaper-backed")
+        compare(view.hintCapOpacity, 0.75, "HintCap's own default")
+        compare(view.hintLabelOpacity, 0.45, "and the quieter label it was designed with")
+    }
+
     // The card must not cast its shadow onto the bar it hangs from. This surface is
     // WlrLayer.Overlay and the bar is WlrLayer.Top, so a halo above the card's top edge is
     // painted straight onto the bar -- darkening it, and making the two read as different
