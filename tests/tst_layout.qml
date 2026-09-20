@@ -1622,4 +1622,40 @@ TestCase {
         compare(Logic.nextSettingValue("anchor", "barr", -1), "center",
                 "an out-of-set value recovers in BOTH directions, not just forward")
     }
+
+    // The write payload. Four of these came out of a review that found the first design
+    // unsafe, and each one corresponds to a way a real file gets damaged.
+    function test_config_with_key_writes_without_losing_the_rest() {
+        // The ordinary case, and the one that stops defaults being pinned into the file: only
+        // what was there plus the change.
+        var out = Logic.configWithKey('{"scrim":false}', "anchor", "bar")
+        var back = JSON.parse(out)
+        compare(back.anchor, "bar", "the change lands")
+        compare(back.scrim, false, "and the existing key survives")
+        compare(Object.keys(back).length, 2, "nothing else is added — no pinned defaults")
+
+        // THE guarantee that matters across versions: a key this build has never heard of must
+        // not be deleted by it. An older panel must not eat a newer version's setting.
+        var future = JSON.parse(Logic.configWithKey('{"futureThing":42}', "anchor", "bar"))
+        compare(future.futureThing, 42, "an unknown key survives")
+
+        // A file that does not exist yet.
+        compare(JSON.parse(Logic.configWithKey("", "anchor", "bar")).anchor, "bar",
+                "an empty file becomes a file with just this key")
+        compare(JSON.parse(Logic.configWithKey("   \n ", "anchor", "bar")).anchor, "bar",
+                "and so does a whitespace-only one")
+    }
+
+    function test_config_with_key_refuses_what_it_cannot_safely_edit() {
+        // Verified behaviour, not theory: setting a property on a parsed array is DROPPED by
+        // stringify, on null it THROWS, and on a scalar it is dropped. Each would either lose
+        // the user's change silently or destroy a file they were mid-way through writing.
+        compare(Logic.configWithKey("[1,2]", "anchor", "bar"), "", "a JSON array root")
+        compare(Logic.configWithKey("null", "anchor", "bar"), "", "a null root")
+        compare(Logic.configWithKey("42", "anchor", "bar"), "", "a scalar root")
+        compare(Logic.configWithKey('"a string"', "anchor", "bar"), "", "a string root")
+        // ...and the obvious one.
+        compare(Logic.configWithKey('{"scrim":false,', "anchor", "bar"), "",
+                "a file that does not parse is never overwritten with a guess")
+    }
 }

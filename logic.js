@@ -2146,3 +2146,30 @@ function notifyLua(text) {
         'end'
     ).replace(/\n\s*/g, ' ')
 }
+
+// The file's new text after setting one key, or "" when the existing text cannot be edited
+// safely. The caller writes nothing on "".
+//
+// An OBJECT root is required -- not merely parseable text, which was the first design and is
+// unsafe. Verified against the engine: setting a property on a parsed array is silently dropped
+// by stringify (the user presses a key, sees nothing change, and their file is rewritten without
+// the setting), on `null` the assignment throws, and on a scalar it is dropped the same way as
+// the array.
+//
+// What this preserves, precisely: unknown keys survive SEMANTICALLY and insertion order survives,
+// which is what stops an older build deleting a newer version's setting. It is not a lossless
+// editor -- a round trip normalises 9007199254740993 to ...992, 1e400 to null, and collapses
+// duplicate keys. That is acceptable for a file holding small numbers, short strings and
+// booleans, and is documented rather than hidden.
+function configWithKey(rawText, key, value) {
+    var text = String(rawText === undefined || rawText === null ? "" : rawText)
+                   .replace(/^\s+|\s+$/g, "")
+    var obj
+    if (text.length === 0) obj = {}
+    else {
+        try { obj = JSON.parse(text) } catch (e) { return "" }
+        if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return ""
+    }
+    obj[key] = value
+    return JSON.stringify(obj, null, 2) + "\n"
+}
