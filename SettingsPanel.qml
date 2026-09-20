@@ -17,11 +17,34 @@ Rectangle {
     property int fontSize: 11
     property string filePath: ""
     signal changeRequested(string key, int dir)
+    // The last row is not a setting: it opens `filePath` in the user's editor, which is the only
+    // way to reach the keys this panel cannot edit (lockBorder) and the only way to see the file
+    // it has been rewriting. Overview owns the launch, as it owns every other side effect.
+    signal openRequested()
+
+    // The action row sits one past the last setting, so navigation is a single 0..actionIndex
+    // range and nothing has to special-case "the bottom".
+    readonly property int actionIndex: rows.length
+    // The selection's description, always visible rather than behind a key: this panel is where
+    // a user first meets names like "lock frame", and a description you have to discover does
+    // not answer the question they already have. Never undefined -- a binding that evaluates to
+    // undefined is destroyed, and the line would then stay blank for the rest of the session.
+    readonly property string currentHelp: {
+        if (panel.index >= panel.actionIndex) return "opens the file in your editor"
+        var r = panel.rows[panel.index]
+        return (r && r.help) ? String(r.help) : ""
+    }
+    // Two lines, reserved whether or not the text needs them. A help line that sized itself to
+    // its text would resize the panel under the selection on every Up/Down, which reads as the
+    // panel twitching rather than as the description changing.
+    readonly property int helpHeight: Math.round((panel.fontSize + 4) * 2)
 
     radius: 8
     color: background
-    implicitWidth: 420
-    implicitHeight: list.implicitHeight + pathLabel.implicitHeight + 34
+    // Wide enough that the descriptions and the config path fit without eliding on a normal
+    // theme; both degrade gracefully (wrap, elide) if a larger font pushes them over.
+    implicitWidth: 520
+    implicitHeight: 12 + list.implicitHeight + 10 + helpHeight + 12
 
     Column {
         id: list
@@ -57,12 +80,46 @@ Rectangle {
                 }
             }
         }
+
+        // The action row. Same shape as a setting row so the selection ring moves through it
+        // without a seam, and it carries the path it will open rather than naming it abstractly.
+        Rectangle {
+            id: actionRow
+            width: list.width
+            height: 26
+            radius: 4
+            color: panel.index === panel.actionIndex ? panel.rowFill : "transparent"
+            Text {
+                id: actionLabel
+                anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
+                text: "edit the file"
+                color: panel.foreground; opacity: 0.85
+                font.family: panel.fontFamily; font.pixelSize: panel.fontSize
+            }
+            Text {
+                anchors { left: actionLabel.right; leftMargin: 12; right: parent.right
+                          rightMargin: 8; verticalCenter: parent.verticalCenter }
+                horizontalAlignment: Text.AlignRight
+                // Elided in the MIDDLE: the interesting halves of a config path are its start
+                // and its filename, and a tail elide would hide the latter.
+                elide: Text.ElideMiddle
+                text: panel.filePath + "   ↵"
+                color: panel.index === panel.actionIndex ? panel.accent : panel.foreground
+                opacity: panel.index === panel.actionIndex ? 1 : 0.5
+                font.family: panel.fontFamily; font.pixelSize: panel.fontSize
+            }
+        }
     }
+
     Text {
-        id: pathLabel
-        anchors { left: parent.left; leftMargin: 20; bottom: parent.bottom; bottomMargin: 10 }
-        text: panel.filePath
-        color: panel.foreground; opacity: 0.45
+        id: helpLabel
+        anchors { left: parent.left; leftMargin: 20; right: parent.right; rightMargin: 20
+                  top: list.bottom; topMargin: 10 }
+        height: panel.helpHeight
+        verticalAlignment: Text.AlignTop
+        wrapMode: Text.WordWrap
+        text: panel.currentHelp
+        color: panel.foreground; opacity: 0.55
         font.family: panel.fontFamily; font.pixelSize: panel.fontSize - 1
     }
 
@@ -87,7 +144,14 @@ Rectangle {
     // semantics. Returns true when the key was consumed.
     function handleKey(e) {
         if (e.key === Qt.Key_Up)   { panel.index = Math.max(0, panel.index - 1); return true }
-        if (e.key === Qt.Key_Down) { panel.index = Math.min(panel.rows.length - 1, panel.index + 1); return true }
+        // actionIndex, not rows.length - 1: Down must be able to reach the action row.
+        if (e.key === Qt.Key_Down) { panel.index = Math.min(panel.actionIndex, panel.index + 1); return true }
+        if (panel.index >= panel.actionIndex) {
+            // The action row has no value to step through, so Left/Right are consumed and do
+            // nothing rather than editing whatever row happens to be above it.
+            if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) panel.openRequested()
+            return true
+        }
         var row = panel.rows[panel.index]
         if (!row || !row.editable) return true          // consumed: the panel is modal
         if (e.key === Qt.Key_Left)  { panel.changeRequested(row.key, -1); return true }

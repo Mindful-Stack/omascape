@@ -1574,6 +1574,33 @@ TestCase {
         compare(editable, rows.length - 1, "seven of the eight must be editable")
     }
 
+    // Every row the panel can land on must be able to say what it is. The panel shows the
+    // selection's description with no key to press, so a setting that reached SETTING_ORDER
+    // without a SETTING_HELP entry would render as a blank line under a name like "lock frame"
+    // -- the exact confusion the description exists to answer. Asserted against SETTING_ORDER
+    // and against the built rows, so neither a missing map entry nor a row that drops `help`
+    // on the way through settingsRows() can pass.
+    function test_every_setting_has_a_description() {
+        var missing = []
+        for (var i = 0; i < Logic.SETTING_ORDER.length; i++) {
+            var k = Logic.SETTING_ORDER[i]
+            if (!Logic.SETTING_HELP[k] || String(Logic.SETTING_HELP[k]).length === 0) missing.push(k)
+        }
+        compare(missing.join(","), "", "every setting needs a description")
+        var rows = Logic.settingsRows(Logic.parseConfig("{}")), blank = []
+        for (var j = 0; j < rows.length; j++)
+            if (!rows[j].help || String(rows[j].help).length === 0) blank.push(rows[j].key)
+        compare(blank.join(","), "", "and settingsRows must carry it onto the row")
+        // Distinct text, not one string reused: a map built by copying an entry and forgetting
+        // to edit it passes every check above.
+        var seen = {}, dupes = []
+        for (var m = 0; m < rows.length; m++) {
+            if (seen[rows[m].help]) dupes.push(rows[m].key)
+            seen[rows[m].help] = true
+        }
+        compare(dupes.join(","), "", "and each description must describe its own setting")
+    }
+
     function test_settings_rows_carry_the_current_values() {
         var rows = Logic.settingsRows(Logic.parseConfig('{"anchor":"bar","scrim":false}'))
         function row(k) { return rows.filter(function (r) { return r.key === k })[0] }

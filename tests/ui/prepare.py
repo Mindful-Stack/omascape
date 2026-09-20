@@ -82,6 +82,8 @@ qml = replaced(qml, '''    Variants {
 qml = replaced(qml, 'screens = Quickshell.screens || []', 'screens = root.testScreens || []',
                'focusedScreen screen list')
 qml = qml.replace('Quickshell.screens', '[]').replace('ToplevelManager.toplevels', 'null')
+qml = replaced(qml, 'Quickshell.execDetached(', 'root.testExecDetached(',
+               'the config-editor launch (Overview.openConfigFile)')
 qml = qml.replace('PanelWindow {', 'Item {')
 qml = re.sub(r'^\s*(screen: root\.targetScreen|screen: modelData|WlrLayershell\..*|exclusionMode:.*|color: "transparent"|mask: .*|Region \{ id: emptyRegion \})\n', '\n', qml, flags=re.M)
 qml = qml.replace('anchors { top: true; bottom: true; left: true; right: true }', 'width: 1200; height: 800')
@@ -116,6 +118,11 @@ qml = qml.replace('id: root', '''id: root
     // that instance breaks every UI suite at once with "Invalid alias reference", not just
     // Settings's.
     property alias testSettingsPanel: settingsPanel
+    // Stands in for Quickshell.execDetached: records the argv the picker would have launched.
+    // A `concat`, not a `push`: mutating a `var` array in place notifies nothing, so a test
+    // binding to testExec.length would never see it change.
+    property var testExec: []
+    function testExecDetached(cmd) { testExec = testExec.concat([cmd]) }
     property var testScreens: []
     property QtObject compositor: QtObject {
         property var monitors: ({values: []})

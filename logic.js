@@ -1213,6 +1213,20 @@ var SETTING_LABELS = {
 }
 var SETTING_ORDER = ["anchor", "activate", "scrim", "hint", "motion",
                      "workspaces", "lockBorderSize", "lockBorder"]
+// One sentence per setting, shown under the selection. The panel is the only place most users
+// ever meet these key names, and several of them do not explain themselves -- "lock frame" was
+// unreadable to the author of the feature on first sight. Every key in SETTING_ORDER must have
+// one (asserted in Tier 1), so a setting added later cannot ship as a bare name.
+var SETTING_HELP = {
+    anchor: "where the picker sits: centred on screen, or dropped from the top bar",
+    activate: "what a digit or a click does: jump straight there, or select and confirm with \u21b5",
+    scrim: "dim the desktop behind the picker",
+    hint: "show the key hints under the grid",
+    motion: "animations; auto follows Hyprland's own animation setting",
+    workspaces: "always show ids 1-N, empty ones included; 0 shows only the ones that exist",
+    lockBorderSize: "thickness in px of the frame marking a shared workspace; 0 turns it off",
+    lockBorder: "colour of that frame, as rgb(hhhhhh) -- edit the file to change it"
+}
 function settingsRows(cfg) {
     if (!cfg) return []
     var rows = [], seen = {}, i, k
@@ -1221,14 +1235,14 @@ function settingsRows(cfg) {
         if (!(k in cfg)) continue
         seen[k] = true
         rows.push({ key: k, label: SETTING_LABELS[k] || k, value: cfg[k],
-                    editable: k !== "lockBorder" })
+                    help: SETTING_HELP[k] || "", editable: k !== "lockBorder" })
     }
     // Anything parseConfig returns that SETTING_ORDER has not been told about still gets a row,
     // at the end, rather than vanishing. This keeps a drifted build honest to its user: they see
     // the setting exists even if the panel was not wired to edit it. CI catches drift via the
     // SETTING_ORDER assertion in the test, not via this fallback.
     for (k in cfg)
-        if (!seen[k]) rows.push({ key: k, label: k, value: cfg[k], editable: false })
+        if (!seen[k]) rows.push({ key: k, label: k, value: cfg[k], help: "", editable: false })
     return rows
 }
 

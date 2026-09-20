@@ -942,6 +942,15 @@ Item {
     // without Overview growing a second source of truth for it.
     property int settingsIndex: 0
 
+    // The panel's last row. `omarchy-launch-config-editor` is the platform's own way to open a
+    // config file -- it resolves the user's chosen editor, launches a terminal for the TUI ones
+    // and raises a toast -- so omascape does not get its own opinion about what an editor is.
+    // The picker closes: the editor it opens would otherwise be behind a full-screen overlay.
+    function openConfigFile() {
+        Quickshell.execDetached(["omarchy-launch-config-editor", config.path])
+        close()
+    }
+
     function openSettings() {
         peekAbort()                                  // a modal and a peek are never both up
         settingsDismissKey = 0
@@ -1003,6 +1012,14 @@ Item {
             for (var k in root.settingsPending)
                 if (root.settingsPending[k] !== config[k]) still[k] = root.settingsPending[k]
             root.settingsPending = still
+            // Every other config key reaches the view through a live binding (config.scrim on
+            // the scrim's visibility, config.anchor through barMode, config.lockBorderSize
+            // straight onto the frame) -- but `workspaces` is read only inside buildInput(),
+            // which nothing but rebuild() calls, and rebuild() is driven by COMPOSITOR events.
+            // So changing it from the panel wrote the file and left the grid exactly as it was
+            // until some unrelated Hyprland event happened along and rebuilt it, which reads as
+            // "the setting does nothing... and then later it did". A reload is a change to what
+            // the grid is built FROM, so it belongs on the same footing as a workspace event.
         }
         // saveAll returns true on DISPATCH, not completion, so applySettingChange's own revert
         // cannot see a write that fails later. Without this the optimistic value sticks forever:
@@ -2854,7 +2871,8 @@ Item {
                         id: hintKeys2
                         model: [ { k: "ctrl+w / mid-click", l: "close" },
                                  { k: "right-click", l: "menu" },
-                                 { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" } ]
+                                 { k: "ctrl+s", l: "scratchpad" }, { k: "ctrl+l", l: "lock" },
+                                 { k: "ctrl+,", l: "settings" } ]
                         HintCap { foreground: root.foreground; fill: root.wellColor
                                   fontFamily: root.fontFamily; fontSize: root.captionSize
                                   capOpacity: root.hintCapOpacity
@@ -2898,6 +2916,7 @@ Item {
                 // component actually reads and writes, not a guess that could drift from it.
                 filePath: config.path
                 onChangeRequested: function (key, dir) { root.applySettingChange(key, dir) }
+                onOpenRequested: root.openConfigFile()
             }
         }
 

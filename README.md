@@ -347,14 +347,22 @@ Optional user settings live in `~/.config/omarchy/omascape.json` (watched; edits
 
 ### Settings panel
 
-Press **Ctrl+,** to open the settings panel inside the picker. Up and Down move between the seven
-editable settings; Left and Right cycle the focused one's value. Esc closes the panel (the panel
-does not open while a search query is active, since the query has its own Esc behaviour).
+Press **Ctrl+,** to open the settings panel inside the picker (it is also listed in the second
+hint tier, under `?`). Up and Down move between the seven editable settings; Left and Right cycle
+the focused one's value. Esc closes the panel (the panel does not open while a search query is
+active, since the query has its own Esc behaviour).
+
+A line under the list describes whichever row is selected, so a name like "lock frame" explains
+itself without a trip to this file.
 
 The panel cycles five settings and steps two. `scrim` and `hint` toggle on or off; `anchor`
 (center/bar), `activate` (enter/select) offer two choices each; `motion` cycles auto, full, or off.
 `workspaces` and `lockBorderSize` step over `0`–`20`, and a larger `workspaces` value or a custom
 colour for the reminder frame (`lockBorder`) requires editing the JSON file directly.
+
+The last row is not a setting: **Enter** on it opens the config file in your editor (through
+Omarchy's own `omarchy-launch-config-editor`, so it follows whatever editor you have configured)
+and closes the picker, which would otherwise cover it.
 
 A change writes only the keys already in your file plus the changed one — it does not pin every
 default into the file. The file remains the source of truth: the only way to set a value the

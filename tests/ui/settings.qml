@@ -254,6 +254,101 @@ TestCase {
         verify(view.settingsOpen, "and the panel stays open")
     }
 
+    // Every row the panel can land on describes itself, with no key to press. The panel is
+    // where a user first meets names like "lock frame", so the description has to be there when
+    // they arrive, not behind a shortcut they would have to already know about.
+    function test_the_description_follows_the_selection() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        var panel = view.testSettingsPanel
+        var first = panel.currentHelp
+        verify(first.length > 0, "the top row describes itself")
+        compare(first, String(view.settingsRows[0].help), "with ITS row's description")
+        keyClick(Qt.Key_Down)
+        verify(panel.currentHelp !== first,
+               "and moving the selection changes it: still showing " + panel.currentHelp)
+        compare(panel.currentHelp, String(view.settingsRows[1].help), "to the new row's")
+    }
+
+    // The panel must not resize under the selection as the description changes: a two-line
+    // description on one row and a one-line description on the next would otherwise make the
+    // whole panel jump every time you press Down.
+    function test_the_panel_height_does_not_move_with_the_selection() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        var panel = view.testSettingsPanel
+        var h = panel.implicitHeight
+        for (var d = 0; d < panel.actionIndex; d++) {
+            keyClick(Qt.Key_Down)
+            compare(panel.implicitHeight, h,
+                    "row " + panel.index + " changed the panel height")
+        }
+    }
+
+    // Down must REACH the action row (a `rows.length - 1` ceiling stops one short of it) and
+    // must not run past it.
+    function test_down_reaches_the_open_row_and_stops() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        var panel = view.testSettingsPanel
+        compare(panel.actionIndex, view.settingsRows.length, "the action row is one past the settings")
+        for (var d = 0; d < panel.actionIndex + 5; d++) keyClick(Qt.Key_Down)
+        compare(view.settingsIndex, panel.actionIndex, "Down lands on it and stops there")
+        verify(panel.currentHelp.length > 0, "and it describes itself like any other row")
+    }
+
+    // The action row launches the editor on the file the panel has been writing -- config.path,
+    // not a guess -- and closes the picker, which would otherwise cover the editor it opened.
+    function test_the_open_row_launches_the_editor_and_closes_the_picker() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        for (var d = 0; d < view.testSettingsPanel.actionIndex; d++) keyClick(Qt.Key_Down)
+        compare(view.testExec.length, 0, "precondition: nothing launched yet")
+        keyClick(Qt.Key_Return)
+        compare(view.testExec.length, 1, "Enter launches exactly one process")
+        var argv = view.testExec[0]
+        compare(String(argv[argv.length - 1]), String(view.testConfig.path),
+                "on the path the panel actually reads and writes")
+        verify(!view.opened, "and the picker gets out of the editor's way")
+    }
+
+    // Left/Right on the action row must be consumed and do nothing -- NOT fall through to the
+    // last setting above it, which is what an index-clamped implementation does.
+    function test_the_open_row_steps_no_setting() {
+        seed()
+        keyClick(Qt.Key_Comma, Qt.ControlModifier)
+        for (var d = 0; d < view.testSettingsPanel.actionIndex; d++) keyClick(Qt.Key_Down)
+        var before = view.testConfig.writes.length
+        keyClick(Qt.Key_Right)
+        keyClick(Qt.Key_Left)
+        compare(view.testConfig.writes.length, before, "neither arrow writes anything")
+        compare(view.testExec.length, 0, "and neither launches anything")
+        verify(view.settingsOpen, "and the keys did not escape to the picker")
+    }
+
+    // `workspaces` is the one setting the view does not reach through a live binding: it is read
+    // inside buildInput(), and only rebuild() calls that. Overview.qml's `onWorkspacesChanged`
+    // handler is what re-lays the grid for it -- this pins that handler down, because nothing
+    // else covered it and the panel now gives users a way to change the value every time they
+    // open the picker. Fails with "10 to stay 10" if that handler is dropped.
+    function test_changing_the_workspace_count_relays_out_the_grid() {
+        seed()
+        compare(view.boxes.length, 10, "precondition: the compositor's ten workspaces")
+        view.testConfig.workspaces = 14        // what a reload's apply() does to this property
+        compare(view.boxes.length, 14,
+                "the padded count must re-lay the grid without a compositor event")
+    }
+
+    // ctrl+, is only discoverable if something says so. The second tier, not the first: the
+    // primary hint row already carries nine caps and is the width budget for a narrow card.
+    function test_the_hints_name_the_settings_key() {
+        seed()
+        var caps = view.testHintModel2, found = ""
+        for (var i = 0; i < caps.length; i++)
+            if (String(caps[i].k).indexOf(",") >= 0) found = String(caps[i].k) + "/" + String(caps[i].l)
+        compare(found, "ctrl+,/settings", "the ? tier must name the settings key")
+    }
+
     // Closing the picker must not leave the panel armed. Otherwise the next summon opens with
     // settings still intercepting every navigation key, with nothing on screen explaining why.
     function test_the_panel_does_not_survive_a_picker_session() {
