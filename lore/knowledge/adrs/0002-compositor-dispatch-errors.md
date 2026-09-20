@@ -94,6 +94,8 @@ The rules that follow:
 ## See also
 
 - [[adrs/0003-test-tiers]] — the tier that runs the parse and behaviour suites.
+- [[frameworks/hyprland/compositor-state]] — the read side of the same boundary: snapshots,
+  refresh and the monitor epoch.
 - `docs/specs/2026-09-12-lock-design.md`, `docs/specs/2026-09-15-actions-design.md` — the
   operations this shapes. Guard: `tests/tst_layout.qml`; parse and behaviour gate:
   `tests/lua-check.sh`, `tests/lua/tst_chunks.lua`.

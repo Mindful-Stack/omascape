@@ -134,3 +134,5 @@ Cite the spec. It is the only link between a component and the reasoning behind 
 - [[frameworks/quickshell/review-checklist]] — the short form, for review.
 - [[adrs/0004-qt-compatibility-floor]] — the dialect limits all of this sits inside.
 - [[learnings/plugin-hot-reload-serves-cached-source]] — why editing a component needs a restart.
+- [[frameworks/hyprland/compositor-state]] — what a leaf may assume about a `HyprlandMonitor`
+  handed to it, and what it must not.

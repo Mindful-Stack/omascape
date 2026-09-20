@@ -87,3 +87,5 @@ spec it cites are newer.
 - [[general/testing]] — how the layering is exploited by the test tiers.
 - [[general/release-and-distribution]] — how this repository reaches users.
 - [[adrs/0004-qt-compatibility-floor]] — the QML dialect the whole tree must stay inside.
+- [[frameworks/hyprland/compositor-state]] — what the root does with the compositor access it
+  keeps to itself, and why the models need refreshing by hand.
