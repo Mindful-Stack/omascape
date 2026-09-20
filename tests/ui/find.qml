@@ -138,12 +138,16 @@ TestCase {
         compare(view.compositor.commands.length, 0)
         compare(view.opened, true)
     }
-    // Distinguishes: a space starting a query (would set query " " and dim everything).
-    function test_space_does_not_start_a_query() {
+    // Distinguishes: a space starting a query (would set query " " and dim everything) — and,
+    // since Task 7, a space extending one already active. Both would once have happened (a bare
+    // Space used to fall through to appendQueryText); now Space is intercepted before that
+    // function is ever reached — it opens a peek instead — so the query is untouched either way,
+    // empty or not (spec: "`Space`, any state — never extends the find query").
+    function test_space_does_not_touch_the_query() {
         keyClick(Qt.Key_Space)
         compare(view.query, "")
         type("sl"); keyClick(Qt.Key_Space)
-        compare(view.query, "sl ")
+        compare(view.query, "sl")
     }
     // Distinguishes: bare-letter handling swallowing chords. Ctrl+K is reserved: it must
     // neither type nor act.

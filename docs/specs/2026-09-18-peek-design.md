@@ -7,8 +7,9 @@ Status: **approved design, pre-implementation.** Branch `peek`.
 ## Goal
 
 Hold `Space` to blow the current target up to 60% of the screen — a Quick Look for the overview.
-Release to dismiss. Navigation keeps working underneath while it is held, so `Space`+`Tab` is a
-big flip-through: hold, Tab to the right window, release, Enter.
+Release to dismiss. Navigation keeps working underneath while it is held, so `Space`+arrows is a
+big flip-through: hold, arrow to the right window, release, Enter. (`Space`+`Tab` is the same
+gesture one level up: `Tab` steps whole workspaces, so the peek flips between mini-maps.)
 
 ## Scope
 
@@ -26,7 +27,7 @@ resolved target; zoom/pan inside the peek; a peek for the monitor-group header.
 ## Decisions (brainstorm 2026-09-18)
 
 - **The peek shows whatever `Logic.target` resolves, and nothing else.** A window target (hover,
-  Tab cursor, or find match) peeks that window; a workspace target (hover over empty canvas, or
+  arrow cursor, or find match) peeks that window; a workspace target (hover over empty canvas, or
   the selected workspace with no cursor) peeks that whole workspace; **no target peeks nothing**.
   This is not a new targeting rule — it is the existing one (`logic.js:1046`), which already
   treats "no target" as terminal rather than falling back. The peek therefore cannot show
@@ -61,7 +62,7 @@ resolved target; zoom/pan inside the peek; a peek for the monitor-group header.
 - **`Space` is an action key, so it peeks what the pointer is over.** Peek acts on the target
   exactly as `Enter` and `Ctrl+W` do, and the key handler clears `pointerLive` for every key that
   is *not* an action key, before any resolve can see it (`Overview.qml:1518`). Without this,
-  hovering one window and pressing `Space` would preview the Tab cursor instead. `Qt.Key_Space`
+  hovering one window and pressing `Space` would preview the keyboard's cursor instead. `Qt.Key_Space`
   therefore joins `Logic.isActionKey` (`logic.js:1200`) rather than being special-cased in QML:
   the rule stays in the pure layer, where the Tier 1 suite asserts it alongside `Enter` and
   `Ctrl+W`. Only bare `Space` qualifies — a chorded `Space` falls through to the chord branch,
@@ -101,6 +102,14 @@ resolved target; zoom/pan inside the peek; a peek for the monitor-group header.
   the same aspect `cellHeightFor` uses for grid cells, so the peek and the cell can never disagree
   about a monitor's shape.
 
+> **Navigation keys, as of `main`'s `ec6083b` ("Tab steps workspaces, arrows step windows").**
+> `Tab`/`Shift+Tab` step **workspaces** (clearing the window cursor as they go) and the **arrows**
+> move the **window cursor** — the inverse of what this design was first written against. The peek
+> itself is indifferent: it re-targets on whatever navigation does, because it is a binding on
+> `resolveTarget()` and not a key handler. Only the key *names* in this document changed; every
+> behavioural claim is unchanged. With a query active the older mapping still holds — `Tab` cycles
+> matches, arrows navigate between them.
+
 ## Behaviour
 
 | Input                                  | effect                                                       |
@@ -111,8 +120,8 @@ resolved target; zoom/pan inside the peek; a peek for the monitor-group header.
 | `Space` down, no target                | nothing; no layer, no flicker — and nothing for the rest of that hold |
 | `Space` down, menu open                | dismisses the menu and nothing else; the still-held key does not then peek |
 | `Space` down, dialog open              | consumed by the dialog; no peek                               |
-| `Space` held, `Tab` / `Shift+Tab`      | cursor advances; **peek re-targets live**                    |
-| `Space` held, arrows                   | selection or match moves; peek re-targets live               |
+| `Space` held, `Tab` / `Shift+Tab`      | selection advances (cycles matches, if a query is active); **peek re-targets live** |
+| `Space` held, arrows                   | cursor moves (navigates matches, if a query is active); peek re-targets live |
 | `Space` held, pointer moves            | hover retargets; peek follows                                |
 | `Space` held, `Escape` clears the cursor | target falls back to the selected workspace; peek retargets to it |
 | `Space` held, target disappears        | hold **cancelled**: layer goes, and no target re-opens it before release |
@@ -146,8 +155,10 @@ k        = Math.min(peekBoxW / aspectW, peekBoxH / aspectH)     // fit, never st
 ```
 
 Backdrop: the existing `root.scrim`, at a step above the card's own, so the grid reads as
-"behind" rather than as competing content. The peek carries the same `cardRadius` and the card's
-`SoftShadow` treatment so it reads as the same material as the picker.
+"behind" rather than as competing content, and following `config.scrim` the same way the card's
+own scrim does — off means no backdrop, but the frame keeps its opaque background and shadow. The
+peek carries the same `cardRadius` and the card's `SoftShadow` treatment so it reads as the same
+material as the picker.
 
 **Window target.** One `ScreencopyView` on `handleByAddress[addr]`, the same path `WindowTile.qml`
 uses, with the existing icon fallback for windows that have no toplevel handle. The ROADMAP's
@@ -264,7 +275,7 @@ and cannot press a key):
 - `Space` with an active query does not change the query.
 - `Space` with `menuOpen` or `confirmOpen` reaches neither the peek nor the query.
 - An auto-repeat `Space` press is a no-op when already peeking, **and** when the hold is cancelled.
-- `Space` does not clear `pointerLive`: with the pointer over one tile and the Tab cursor on
+- `Space` does not clear `pointerLive`: with the pointer over one tile and the window cursor on
   another, `Space` peeks the hovered one. Repeated for a pointer over empty canvas inside a
   workspace box (peeks that workspace, not the cursor's window), and asserted again after an
   auto-repeat so a repeat cannot quietly flip the resolution to the keyboard.
@@ -290,8 +301,9 @@ and cannot press a key):
 
 **Tier 2 (nested Hyprland):**
 - Hold `Space` over a hovered tile, confirm one large capture appears and the grid is still live.
-- Hold `Space`, press `Tab` twice, confirm the peek shows the third window without releasing.
-- Release and confirm the cursor sits where `Tab` left it and no compositor state changed.
+- Hold `Space`, press an arrow twice, confirm the peek shows the third window without releasing.
+- Release and confirm the cursor sits where the arrows left it and no compositor state changed.
+- Hold `Space`, press `Tab`, confirm the peek flips to the next workspace's mini-map.
 - Hold `Space` on a workspace holding a fullscreen window plus tiled ones, and confirm the peek
   mini-map matches the grid cell's arrangement — the fullscreen window in its slot, neighbours
   visible — rather than covering the workspace.
@@ -299,3 +311,145 @@ and cannot press a key):
   and stays gone while the key is held.
 - Hold `Space`, right-click, and confirm the menu opens with no peek behind it and none returns
   on dismiss.
+
+## Verified facts (live, 2026-09-18, round 2)
+
+Probed on this machine (Hyprland 0.56.2, nested instance on an offset headless output, `hyprctl`,
+`quickshell`, `foot`, `jq`, `wtype` and `grim` all present) with `tests/integration/peek-probe.sh`,
+via `mise run test-integration`. This probe covers exactly the four claims no offscreen tier can
+reach — it is IPC-driven (`tests/integration/drag.qml`'s `dragtest` handler calling
+`overview.peekHold()`/`peekRelease()`/`peekState()`/`peekRows()`/`peekBox()`/`selectWs()`/
+`setCursor()` directly), so it proves the layer, the mini-map and cancellation-by-geometry, but
+**not** `Space`'s own key routing — that is the offscreen UI suite's job, and (for a real held
+key) case 4 below. It does **not** exercise every scenario the "Tier 2 (nested Hyprland)" list
+above names (no `Tab`-while-held retargeting, no close-from-another-client, no right-click-
+while-held) — those remain unverified live and are candidates for a future extension of this
+probe, not claims this run makes.
+
+**A first pass of this probe (round 1) had two false-positive PASSes**, caught by review and
+described in full below: case 3 ("live pixels") passed even with every capture path in the shell
+forced to its icon fallback — proven by mutation, see case 3 — and case 2 could still pass under
+the same stale-model race its own fix was meant to close. Both are fixed in this round; the fixes
+and the experiments that justify them are the point of this section, not just the final PASS
+lines.
+
+Verbatim output of the final run:
+
+```
+PASS 1 (workspace target): a peek hold changed no compositor state
+PASS 1 (window target): a peek hold changed no compositor state
+PASS 2: mini-map rows do not overlap (fullscreen modes [2,0])
+PASS 3: the peek's content changed between frames, cropped to its own box (live capture)
+FACT 4: before={"peeking":false,"key":"","cancelled":false} held={"peeking":true,"key":"s:1","cancelled":false} after={"peeking":false,"key":"","cancelled":false}
+PASS 4: a 2s held Space opened a peek and closed on release
+peek-probe: done
+```
+
+- **Case 1 — the peek changes no compositor state: PASS, run twice, and genuinely diffed.**
+  `hc clients -j`, `hc workspaces -j`, `hc monitors -j`, `hc activewindow -j` and `hc cursorpos -j`,
+  each `jq -S`-sorted and projected to the fields that cannot legitimately churn, were
+  byte-identical before and after a `peekHold` / mid-hold `setCursor` (a live retarget, the same
+  mechanism `Tab`/arrows use in production) / `peekRelease` round trip. Focus and cursor position
+  are now snapshotted too (round 1 omitted both — exactly what `fullscreen.sh:44-51` guards
+  elsewhere in this rig), and the round runs **twice**: once with the selected-workspace fallback
+  target (round 1's only case) and once with an explicit window target (`setCursor` to a real
+  window address). Confirms the spec's strongest claim, for both target kinds: the peek dispatches
+  nothing.
+- **Case 2 — the mini-map places a fullscreen window in its recovered slot: PASS, with a hard
+  precondition now guarding the race that produced round 1's false positive.** With one window
+  toggled fullscreen (`mode='fullscreen', action='toggle'` — see the dispatcher note below) and one
+  left tiled, `peekRows()` reported two non-overlapping rows with `fullscreen` modes `[2,0]`.
+  Two things were fixed here across the two review rounds:
+    - *Round 1's race:* `peekRows()`, unlike this file's `drop()`/`dropPoint()`/`unfullscreen()`,
+      read `overview._windows` without a preceding `overview.rebuild()`. The **first two live
+      runs** (before that fix) reported `[0,0]` — both rows tiled — which still passed the
+      non-overlap `jq` assertion for the trivial reason that ordinary tiles never overlap; slot
+      recovery was never actually exercised. Adding `overview.rebuild()` closed it — briefly.
+    - *Round 2's finding:* `rebuild()` alone only re-reads whatever Quickshell's Hyprland module
+      currently has cached in each toplevel's `lastIpcObject` — the actual fetch
+      (`Hyprland.refreshToplevels()`, wired through `Overview.qml`'s own `requestRefresh()`) is
+      **asynchronous** (see that file's `settleTimer`, which polls after requesting a refresh
+      rather than trusting one synchronous read). So `overview.rebuild()` alone was not guaranteed
+      to close the race on a slower machine — it happened to on this one. `peekRows()` now calls
+      `overview.requestRefresh()` before `overview.rebuild()`, and the probe itself polls
+      `peekRows()` (like `wait_fs` polls `hyprctl`) until a row reports `fullscreen > 0` — true of
+      both maximized (mode 1) and fullscreen (mode 2), since slot recovery runs for both, hence the
+      message below names both — **failing loudly** ("no row is fullscreen or maximized: model
+      stale, case 2 did not exercise slot recovery") if the poll times out, rather than silently
+      falling through to the overlap check the way round 1 did. `wait_fs` alone was never
+      sufficient here — it only proves `hyprctl` itself has the new state, never that Quickshell's
+      own copy of it has caught up.
+    - **Tooling note:** the brief's original script text dispatched `window.fullscreen` with a bare
+      `action = "on"|"off"`; that form is not attested anywhere else in this repo (production
+      `logic.js:603`, `fullscreen.sh`, `probe-fullscreen.sh` all use `{ mode = "fullscreen",
+      action = "toggle" }`), so the probe uses the same toggle form instead of introducing an
+      unverified dispatcher call. Confirmed correct by the reviewer independently.
+- **Case 3 — live pixels: PASS, but round 1's PASS was proven worthless, and the fix is verified
+  by mutation, not by inspection.** Round 1's case 3 held a peek and diffed two whole-screen `grim`
+  captures 1.2s apart. Review proved by direct experiment that this established nothing: forcing
+  `PeekLayer.qml`'s `WindowTile` to `capMode: "icon"` — the exact live-vs-icon distinction this
+  case exists to make — **still printed `PASS 3`**; forcing the grid delegate's `capMode` to
+  `"icon"` too, so that **no live capture existed anywhere in the shell**, still printed `PASS 3`.
+  Three compounding causes, all fixed:
+    1. An **uncropped** `grim` capture grabs the whole nested screen, so churn anywhere on it (a
+       tile appear animation, the peek's own fade-in, the just-spawned scratch window) satisfies
+       `cmp` regardless of what the peek itself is showing. Fixed by cropping to the peek's own
+       fitted box via a new `peekBox()` IPC reporter, read fresh over IPC rather than hardcoded (a
+       literal `grim -g` geometry would silently stop matching the peek the moment any layout
+       constant changed) — `peekBox()` replicates `PeekLayer.qml`'s own `boxW`/`boxH`/`fit`
+       geometry from data already available to the IPC handler and returns it in **global**
+       compositor pixel coordinates (the nested output sits at a nonzero global y-offset —
+       `start_nested`'s `position=0x1440` — so a screen-local rect would crop the wrong area of a
+       `grim -g` capture, which takes global layout coordinates).
+    2. `date +%%N` (a double `%`, a leftover escape from the plan's own heredoc) prints the literal
+       string `%N`, not nanoseconds — so the "animating" window only actually changed while its
+       terminal scrollback was still filling, not continuously. Fixed to `date +%N`.
+    3. The hold was never asserted open before capturing, so a *cancelled* hold — capturing
+       whatever the grid or backdrop happened to be doing — still passed. Fixed: `peekState`'s
+       `peeking` field is now asserted `true` right after `peekHold`, the same way case 1 already
+       did.
+    Round 1 also peeked the **selected workspace** in every case, never a window — `pointerLive` is
+    always false in this IPC-driven rig, so `Logic.target` fell through to `selectedId` on every
+    prior run, and the single large `ScreencopyView` case 3 is *named after* (the window-peek
+    path) was never exercised at this tier at all. Fixed via the new `setCursor()` reporter
+    (`cursorAddress` outranks `selectedId`), used here to peek a dedicated third scratch window
+    running `while :; do date +%N; sleep 0.2; done`, spawned and polled for the same way
+    `spawn_window()` does it (round 1 used a bare `sleep 1.5` guess instead).
+    **The fix was verified by mutation, per instruction, not merely by re-reading the diff:** a
+    scratch copy of the tree with `PeekLayer.qml`'s window `WindowTile` and the grid delegate's
+    `WindowTile` both hardcoded to `capMode: "icon"` was run against the fixed probe and printed
+    `FAIL 3: two frames 1.2s apart, cropped to the peek's own box ... are identical — the peek is
+    not showing live pixels`, exit 1 — the pristine tree prints `PASS 3` on the same run. That is
+    the actual evidence this case now discriminates; the PASS line alone is not.
+- **Case 4 — real auto-repeat: PASS on the narrower claim it can actually support, execution-
+  verified in both directions.** `wtype -P space` (key down) held for 2s, then `wtype -p space`
+  (key up), against the real nested compositor. The FACT line shows `peeking` went
+  `false -> true -> false` across the hold — a real `wtype` virtual keyboard press **does** reach
+  the overlay's key handler on this build and **does** open a peek that survives a 2s hold,
+  closing cleanly on release. This was the case flagged most likely to come back `UNVERIFIED`
+  (nothing in this repo had driven the overview with real keys before); it did not.
+  **What this case does *not* establish, corrected from round 1's overclaim:** it cannot
+  distinguish a *guarded* auto-repeat from an *unguarded* one that happens to re-enter the press
+  branch and reassign `peeking = true` to an already-true bool — observationally identical to the
+  guarded path from outside. So "the auto-repeat guard was verified" is not a fact this case
+  produces; what it produces is narrower and still new — not a count of openings, which is exactly
+  what telling guarded from unguarded would need: a real held key opens a peek and a real release
+  closes it, on this build. Repeat-*swallowing* itself remains **inferred**, pinned
+  instead by the offscreen, mutation-verified second-press proxy in `tests/ui/peek.qml`. Adding a
+  production-side press counter to discriminate repeat-swallowing at this tier was considered and
+  deliberately **not done** — the offscreen proxy already covers it and the cost is instrumenting
+  production code for a Tier 2 corroboration alone; recorded here as an accepted limitation, not an
+  oversight.
+  The `UNVERIFIED 4` branch is **execution-verified, not merely inspection-verified**: holding
+  `Shift_L` instead of `Space` (`wtype -P Shift_L` / `-p Shift_L`) produced `held.peeking == false`
+  and printed `UNVERIFIED 4: the held key never opened a peek ...`, exit 0, with no `PASS 4`
+  alongside it. Round 1's script had a real bug here — `[[ ... ]] || { echo UNVERIFIED ...; }`
+  followed by an *unconditional* `echo "PASS 4: ..."` — so a genuinely unverified run would have
+  printed both lines, exactly the dishonest "recorded as verified when it was never exercised"
+  outcome this case exists to prevent. Fixed to a proper if/elif so the two outcomes are mutually
+  exclusive; the `Shift_L` run above exercises that fix directly, not just the "held a real key"
+  claim.
+- **Not run this session:** offscreen Tier 1 (`167 passed, 0 failed`) and the offscreen UI suite
+  (`288 passed, 0 failed`, 8 suites) were re-run via `mise run test` before this round of fixes and
+  are unaffected by it — every change in both rounds touches only `tests/integration/*`, no
+  production QML or `logic.js`.

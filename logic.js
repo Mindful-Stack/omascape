@@ -249,6 +249,85 @@ function rowPhase(progress, rank, rowCount) {
     return t <= 0 ? 0 : (t >= 1 ? 1 : t)
 }
 
+// The grid's per-window placement for ONE workspace, factored out of `layout` so the peek's
+// mini-map (peekTiles) runs the identical code at a different box size. `wins` are that
+// workspace's windows, `mon` its monitor, `box` the rect to place them in — a grid cell for the
+// grid, a peek-sized rect for the peek. Returns the tile rows, `null` results dropped.
+//
+// Slot recovery is deliberately box-INDEPENDENT: it measures in usable-rect-local coordinates off
+// the real monitor, never off `box`, so the same slot is recovered at cell size and at peek size
+// and only the final _tileRect mapping differs. That is what makes peek/grid parity a property of
+// the code rather than of a test.
+//
+// Preconditions the caller owns, not this function: every window in `wins` belongs to the SAME
+// workspace (`others` is built from all of `wins` with no workspace filter of its own), and none
+// of them is on a lock placeholder workspace — a placeholder shows no tile and takes no capture
+// (spec: Rendering). `layout` enforces the placeholder rule itself, with its own
+// `gbox.placeholder` filter in the grouping pass below; `buildInput` (Overview.qml) independently
+// excludes a placeholder workspace's windows from `input.windows` further upstream, before
+// `layout` ever sees them. A caller with its own window list — the peek's mini-map — has no
+// `layout`-side filter to lean on, so it is standing on the `buildInput` guarantee alone; keep
+// that in mind before handing this function a window list built some other way. `mon` missing is
+// handled here directly (see the guard below) since a placeholder box's monitor can be absent.
+function _placeWindows(wins, mon, box, P) {
+    if (!mon) return []   // no usable monitor to place against — degrade rather than throw in _usableRect
+    // Tiled windows that are not fullscreen or maximized, in usable-rect-local coords: what a
+    // fullscreen window's slot is recovered from (see recoverSlot).
+    var R = _usableRect(mon), others = []
+    for (var pi = 0; pi < wins.length; pi++) {
+        var pw = wins[pi]
+        if (pw.floating || fullscreenMode(pw)) continue
+        others.push({ x: (pw.ax - mon.x) - R.x, y: (pw.ay - mon.y) - R.y, w: pw.sw, h: pw.sh })
+    }
+    var out = []
+    for (var wi = 0; wi < wins.length; wi++) {
+        var win = wins[wi]
+        var mode = fullscreenMode(win), layer = win.floating ? 2 : 1, slot = null
+        if (mode) {
+            var whole = { x: 0, y: 0, w: R.w, h: R.h }
+            if (win.floating) {
+                slot = { x: R.w * 0.2, y: R.h * 0.2, w: R.w * 0.6, h: R.h * 0.6 }   // no slot exists
+            } else {
+                slot = others.length ? recoverSlot(whole, others, P) : whole
+                if (!slot) { slot = whole; layer = 0 }                              // ambiguous → backdrop
+            }
+        }
+        var t = _tileRect(win, mon, box, P, slot)
+        if (t) {
+            t.address = win.address; t.workspaceId = win.workspaceId
+            t.layer = layer; t.fullscreen = mode
+            out.push(t)
+        }
+    }
+    return out
+}
+
+// The peek's workspace mini-map (docs/specs/2026-09-18-peek-design.md, "Workspace target"): the
+// SAME placement the grid runs, at peek size. `wins` are one workspace's windows and `mon` its
+// monitor; the box is the peek rect at the origin, so the returned rows are box-local and the
+// view positions them by parenting alone.
+function peekTiles(wins, mon, boxW, boxH, P) {
+    // `!wins` guards an unbound QML property, which arrives as `undefined` and would throw on
+    // `.length` inside _placeWindows. An empty (but defined) array is not guarded here — it is
+    // legal input, and _placeWindows already returns [] for it on its own; short-circuiting it
+    // here too would mask any non-array handed in by a QML wiring bug as a silently blank
+    // mini-map instead of an error.
+    if (!wins || !mon) return []
+    return _placeWindows(wins, mon, { x: 0, y: 0, w: boxW, h: boxH }, P)
+}
+
+// Fit `srcW x srcH` inside `boxW x boxH` preserving aspect — never stretch, never upscale past
+// the box (spec: "60% is a box, not a stretch"). A degenerate source (the monitorless "?"
+// placeholder reports 0x0) yields 0x0 rather than NaN, which a Rectangle paints as nothing at
+// all instead of collapsing the layer's whole geometry. The box itself gets the same guard: a
+// NaN box (seen from a binding that has not settled yet) must not leak into `w`/`h` either.
+function peekFit(srcW, srcH, boxW, boxH) {
+    if (!(srcW > 0) || !(srcH > 0)) return { w: 0, h: 0 }
+    if (!(boxW > 0) || !(boxH > 0)) return { w: 0, h: 0 }
+    var k = Math.min(boxW / srcW, boxH / srcH)
+    return { w: srcW * k, h: srcH * k }
+}
+
 // Breathing room between the picker and the screen edge, both axes. A FRACTION, because the two
 // absolute constants this replaces (`availCanvasW`'s `- 16` and the card's `- 16` / `- 64`) were
 // sized for a ~1600-logical card: at 1920 logical — a 4K panel at 2x, and the commonest laptop
@@ -380,40 +459,19 @@ function layout(input) {
         break
     }
 
-    // Tiled windows that are not fullscreen or maximized, per workspace, in usable-rect-local
-    // coords: what a fullscreen window's slot is recovered from (see recoverSlot).
-    var tiledByWs = {}
-    for (var pi = 0; pi < input.windows.length; pi++) {
-        var pw = input.windows[pi]
-        if (pw.floating || fullscreenMode(pw)) continue
-        var pbox = boxByWs[pw.workspaceId], pmon = pbox ? monByName[pbox.monitorName] : null
-        if (!pmon) continue
-        var pR = _usableRect(pmon)
-        ;(tiledByWs[pw.workspaceId] = tiledByWs[pw.workspaceId] || []).push(
-            { x: (pw.ax - pmon.x) - pR.x, y: (pw.ay - pmon.y) - pR.y, w: pw.sw, h: pw.sh })
+    // Windows grouped by workspace, skipping any whose box is missing or a lock placeholder
+    // (a placeholder shows no tile and takes no capture — spec: Rendering).
+    var winsByWs = {}
+    for (var gi = 0; gi < input.windows.length; gi++) {
+        var gw = input.windows[gi], gbox = boxByWs[gw.workspaceId]
+        if (!gbox || gbox.placeholder) continue
+        if (!monByName[gbox.monitorName]) continue
+        ;(winsByWs[gw.workspaceId] = winsByWs[gw.workspaceId] || []).push(gw)
     }
     var tiles = []
-    for (var wi = 0; wi < input.windows.length; wi++) {
-        var win = input.windows[wi], wbox = boxByWs[win.workspaceId]; if (!wbox) continue
-        if (wbox.placeholder) continue     // lock placeholder: no tile, no capture (spec: Rendering)
-        var wmon = monByName[wbox.monitorName]; if (!wmon) continue
-        var mode = fullscreenMode(win), layer = win.floating ? 2 : 1, slot = null
-        if (mode) {
-            var UR = _usableRect(wmon), whole = { x: 0, y: 0, w: UR.w, h: UR.h }
-            if (win.floating) {
-                slot = { x: UR.w * 0.2, y: UR.h * 0.2, w: UR.w * 0.6, h: UR.h * 0.6 }   // no slot exists
-            } else {
-                var others = tiledByWs[win.workspaceId] || []
-                slot = others.length ? recoverSlot(whole, others, P) : whole
-                if (!slot) { slot = whole; layer = 0 }                              // ambiguous → backdrop
-            }
-        }
-        var t = _tileRect(win, wmon, wbox, P, slot)
-        if (t) {
-            t.address = win.address; t.workspaceId = win.workspaceId
-            t.layer = layer; t.fullscreen = mode
-            tiles.push(t)
-        }
+    for (var wsk in winsByWs) {
+        var kbox = boxByWs[wsk]
+        tiles = tiles.concat(_placeWindows(winsByWs[wsk], monByName[kbox.monitorName], kbox, P))
     }
     return { canvasSize: { w: canvasW, h: y }, boxes: boxes, tiles: tiles,
              groups: groups, cell: { w: cw, h: ch, cols: cols } }
@@ -1455,7 +1513,10 @@ function isModifierKey(key) {
 function isActionKey(key, chord, ctrlMask) {
     if (chord === ctrlMask && key === 0x57) return true            // Ctrl+W (Qt.Key_W)
     if (chord) return false
-    return key === 0x01000004 || key === 0x01000005                // Return, Enter
+    // Return, Enter, and Space (peek). Space acts on the target exactly as the other two do, so
+    // it must read pointer liveness rather than clearing it — see the peek spec, "`Space` is an
+    // action key". A chorded Space is excluded by the line above.
+    return key === 0x01000004 || key === 0x01000005 || key === 0x20
 }
 
 // ---- Scratchpad (docs/specs/2026-09-12-scratchpad-design.md) ---------------------------
