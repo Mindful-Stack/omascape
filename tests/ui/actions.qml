@@ -92,6 +92,9 @@ TestCase {
         fail("no tile row for " + addr)
     }
     function hoverTile(addr) { var p = tileCentre(addr); mouseMove(view, p.x, p.y); wait(30) }
+    // The first hint tier's top edge in the fixture's own coordinates — `view` is stationary,
+    // the card is not.
+    function hintRowY() { return view.testHintRow.mapToItem(view, 0, 0).y }
     // A point inside a workspace box but clear of every tile in it: the well. Bottom-right
     // corner, inset past the box border — the fixture's windows all sit in the upper-left of
     // their monitor, so nothing is drawn there.
@@ -611,6 +614,44 @@ TestCase {
         wait(20)
         verify(view.testCard.hintSpace > before, "two tiers need more room than one")
     }
+    // The second tier appears the instant `?` lands; the card only STARTS growing then, over
+    // the next 160 ms. hintBox is anchored to the card's bottom, so a Column that takes its new
+    // size in one frame drags its first row up with it and then crawls back down against the
+    // card's growth — 21 px out and 10 px back here, the "flickering" hints. The row may end up
+    // somewhere new (a centred card grows both ways), but it must get there by moving one way.
+    //
+    // Motion must be ON: with motion off the card resizes instantly, the mismatch cannot happen,
+    // and this passes against the defect. `init()` sets scale 0 for every other test here.
+    function test_expanding_the_hints_does_not_jolt_the_first_tier() {
+        view.motion.scale = 1
+        var start = hintRowY()
+        keyClick("?")
+        var highest = start                    // the card grows, so the row can only move UP
+        for (var i = 0; i < 12; i++) { wait(20); highest = Math.min(highest, hintRowY()) }
+        var end = hintRowY()
+        verify(end < start, "precondition: a centred card moves the row up as it grows")
+        verify(highest >= end - 1,
+               "the first tier must not overshoot its resting position: started at " + start
+               + ", reached " + highest + ", rests at " + end)
+    }
+
+    // The same mismatch seen from the grid's side. The viewport is sized from the card's
+    // ANIMATED height minus the hint budget, so a budget that steps while the height glides
+    // shrinks the viewport by the new tier's height for the length of the animation — clipping
+    // the bottom of the bottom row of tiles and uncovering it again.
+    function test_expanding_the_hints_does_not_pulse_the_grid_viewport() {
+        view.motion.scale = 1
+        verify(view.testCard.implicitHeight < view.testCard.maxCardH - 40,
+               "precondition: the card has room to grow rather than eating into the grid")
+        var before = view.testFlick.height
+        keyClick("?")
+        var lowest = before
+        for (var i = 0; i < 12; i++) { wait(20); lowest = Math.min(lowest, view.testFlick.height) }
+        verify(lowest >= before - 1,
+               "the viewport must keep its height while the card grows to fit the tier: dipped to "
+               + lowest + " from " + before)
+    }
+
     // Distinguishes: the find bar resizing the card when the hints are expanded — the height
     // budget must already reserve the larger of the two, as it does for one tier today.
     function test_typing_does_not_move_the_card_with_hints_expanded() {

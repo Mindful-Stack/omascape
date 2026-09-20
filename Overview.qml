@@ -2065,18 +2065,31 @@ Item {
             // for the other on the first keystroke never resizes the card by the few pixels
             // their implicitHeights happen to differ by. Zero only when both are absent.
             readonly property bool findActive: root.query.length > 0
-            readonly property real hintSpace: {
-                // The larger of what is actually shown: the hint tiers only when hints are
-                // enabled, the find bar only while a query is active. An invisible item keeps
-                // its implicitHeight in QML, so the tiers must be excluded by the config flag
-                // rather than by their own visibility — otherwise a leftover expanded second
-                // tier (hintsExpanded true from an earlier `?`) keeps inflating the budget after
-                // config.hint turns off, even though nothing on screen explains the extra space.
-                var hints = config.hint ? hintBox.implicitHeight : 0
-                var bar = findActive ? findBar.implicitHeight : 0
+            // The larger of what is actually shown: the hint tiers only when hints are
+            // enabled, the find bar only while a query is active. An invisible item keeps
+            // its implicitHeight in QML, so the tiers must be excluded by the config flag
+            // rather than by their own visibility — otherwise a leftover expanded second
+            // tier (hintsExpanded true from an earlier `?`) keeps inflating the budget after
+            // config.hint turns off, even though nothing on screen explains the extra space.
+            function hintBudget(hints, bar) {
                 var h = Math.max(hints, bar)
                 return h > 0 ? h + 8 : 0
             }
+            // The budget in its two forms, differing only in WHICH height they ask for.
+            //
+            // RESTING (implicitHeight) is what the card sizes itself to: a target, reached over
+            // the 160 ms of the implicitHeight Behavior below. SHOWN (height) is what stands on
+            // the card this frame — hintBox rides that same curve (see its own Behavior), so the
+            // two grow in lockstep. Anything that must hold its place against a growing card
+            // subtracts the SHOWN one; asking the resting budget during the glide subtracts room
+            // the card has not gained yet, and the difference is spurious motion: the second tier
+            // arriving used to shove the first one 21 px up in a single frame and then walk it
+            // back down over the card's growth — the "flickering" hints.
+            readonly property real hintSpace:
+                hintBudget(config.hint ? hintBox.implicitHeight : 0,
+                           findActive ? findBar.implicitHeight : 0)
+            readonly property real shownHintSpace:
+                hintBudget(config.hint ? hintBox.height : 0, findActive ? findBar.height : 0)
             // Cap the card to the screen so the Flickable viewport can be smaller than the
             // content (`availCanvasW` already keeps canvas width <= this, minus the degenerate
             // narrow-screen case, which is expected to 2-D scroll per the spec). Because
@@ -2397,13 +2410,19 @@ Item {
                 // than its content, and sizing the viewport from the animated height would
                 // drive it toward zero -- onContentHeightChanged's clamp would then scroll the
                 // grid mid-animation and leave contentY wrong once it settled.
-                height: card.implicitHeight - card.pad * 2 - card.hintSpace
-                // The height this viewport is HEADING for. `card.implicitHeight` is itself the
-                // animated property (its Behavior animates implicitHeight, not height), so the
-                // line above reads a value in flight for the whole 160 ms after any layout
-                // change. Anything deciding "does this fit?" must ask about the resting size
-                // instead -- see toggleScratchpad, where reading the in-flight height scrolled
-                // the grid to reveal a row the card was already growing to fit.
+                // `shownHintSpace`, not `hintSpace`: both terms must be in the same tense or
+                // the viewport pulses. The card's height is mid-glide here, so pairing it with
+                // the RESTING hint budget took the whole of a newly expanded tier off the
+                // viewport at once and gave it back over the next 160 ms — clipping the bottom
+                // row of tiles and uncovering it again.
+                height: card.implicitHeight - card.pad * 2 - card.shownHintSpace
+                // The height this viewport is HEADING for, and the same rule read the other way:
+                // `card.implicitHeight` is itself the animated property (its Behavior animates
+                // implicitHeight, not height), so the line above reads a value in flight for the
+                // whole 160 ms after any layout change. Anything deciding "does this fit?" must
+                // ask about the resting size instead -- see toggleScratchpad, where reading the
+                // in-flight height scrolled the grid to reveal a row the card was already
+                // growing to fit. Resting throughout, so `hintSpace` is the right budget here.
                 readonly property real restingHeight:
                     Math.min(canvas.implicitHeight, card.maxCardH - card.pad * 2 - card.hintSpace)
                 contentWidth: canvas.implicitWidth
@@ -2865,6 +2884,20 @@ Item {
                 visible: config.hint && !card.findActive
                 anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 8 }
                 spacing: 4
+                // The tier change glides on the card's own curve instead of landing in one
+                // frame. This Column is anchored to the card's BOTTOM, and the card takes 160 ms
+                // to grow around a new tier: a Column that resizes instantly hauls its first row
+                // up by the new row's full height and then eases back down against that growth.
+                // Same duration and easing as the card's implicitHeight, so the bottom edge and
+                // the box's own height move as one and the first row never moves relative to the
+                // grid — the second tier is UNCOVERED in the room the card gains, which is what
+                // `clip` is for. Explicit `height` so the Behavior has a property to intercept;
+                // `implicitHeight` (the Column's own sum) stays the target and is what the card
+                // budgets for.
+                clip: true
+                height: implicitHeight
+                Behavior on height { enabled: root.layoutMotion
+                    NumberAnimation { duration: root.motion.normal; easing.type: root.motion.move } }
                 Row {
                     id: hint
                     anchors.horizontalCenter: parent.horizontalCenter
