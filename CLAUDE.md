@@ -41,6 +41,13 @@ These are the constraints that have cost the most time. Each links the record th
   span dispatches through it. Only the best-effort focus/cursor restore may stay raw
   `hl.dispatch`. Adding a chunk means adding it to the dump fixture in `tests/lua-check.sh` and
   raising its count floor, or the guard silently stops covering it.
+- **Compositor state is a snapshot, and `monitorFor()` is one-shot**
+  (`lore/knowledge/frameworks/hyprland/compositor-state.md`). `monitor.lastIpcObject` changes only
+  when something calls a `refresh*()`, and nothing notifies QML when Hyprland *replaces* the
+  `HyprlandMonitor` object for a screen — so a binding that calls `Hyprland.monitorFor(screen)`
+  needs the `(root.monitorEpoch, …)` comma-operator prefix that both existing sites use. Omitting
+  it produces no error, no warning and no test failure; the binding simply never re-evaluates.
+  Guard every `refresh*()` call with `typeof … === "function"`, as all six existing calls do.
 - **A `SKIP:` is not a pass** (`lore/knowledge/adrs/0003-test-tiers.md`). It is only enforced for
   `tests/lua-check.sh` (via `CI: "1"`); `tests/integration/` still exits 0 on every skip path, so
   read its output rather than its exit code.
@@ -69,7 +76,10 @@ docs/specs/                                      per-feature design docs — the
 docs/plans/                                      TDD implementation plans
 lore/knowledge/adrs/                             architecture decision records (/lore:adr)
 lore/knowledge/learnings/                        verified gotchas
-lore/knowledge/general/                          standards
+lore/knowledge/general/                          standards — architecture, testing, release
+lore/knowledge/languages/                        per-language authoring rules (lua, javascript, bash)
+lore/knowledge/frameworks/                       quickshell components, hyprland state
+lore/_tools/, scripts/*.mjs                      KB + workspace tooling (Node) — NOT the plugin
 ```
 
 `DESIGN.md` is the architecture overview, `ROADMAP.md` what's next, `PLAN.md` the v1 build log,
@@ -82,5 +92,14 @@ lore/knowledge/general/                          standards
   design and evidence; the record holds the rule and its consequences.
 - `logic.js` stays pure and unit-testable; `Overview.qml` wires Quickshell singletons to it.
   Layout maths belongs in `logic.js`, not in a QML binding.
+- **Two unrelated dialects of JavaScript live here.** `logic.js` loads into the QML engine and is
+  deliberately ES5 (`var`, no arrows, no template literals) because of the Qt 6.4 floor. The Node
+  tooling under `lore/_tools/` and `scripts/*.mjs` is ordinary modern JavaScript with zero runtime
+  dependencies. Neither one's rules apply to the other —
+  `lore/knowledge/languages/javascript/tooling-dialect.md`.
+- **Shell is the harness, not glue.** Every gate is a `bash` entry point. `scripts/` uses
+  `#!/bin/bash`, `tests/` uses `#!/usr/bin/env bash`, and `set -euo pipefail` goes on line two
+  unless the file says in a comment why it cannot —
+  `lore/knowledge/languages/bash/script-conventions.md`.
 - Frontmatter values in the KB must sit inline on one line. A block scalar (`>` or `|`) leaves the
   retrieval grep empty and drops the node out of search silently.
