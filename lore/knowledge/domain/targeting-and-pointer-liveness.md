@@ -135,3 +135,7 @@ changes nothing at all — including the latch.
 - [[general/architecture]] — the layering that puts every decision in the pure module.
 - [[general/testing]] — the tier this is asserted in, and how a test states what it falsifies.
 - [[frameworks/hyprland/compositor-state]] — the models the resolved target is looked up against.
+- `docs/specs/2026-09-18-activate-select-design.md` — the two activate policies and the digit
+  latch; `docs/specs/2026-09-18-peek-design.md` — `Space` as an action key and the cancel rule.
+  Implementation `logic.js:1345` / `Overview.qml:554`; coverage `tests/ui/actions.qml`,
+  `tests/ui/activate.qml`, `tests/ui/peek.qml`.

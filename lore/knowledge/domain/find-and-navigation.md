@@ -87,3 +87,5 @@ editing the line: *add the bonus before subtracting the penalty*. Do not "tidy" 
 - [[languages/javascript/code-style]] — why the key codes here are hand-written hex.
 - [[general/testing]] — `tests/tst_find.qml` and `tests/ui/find.qml` carry 56 `Distinguishes:`
   comments between them.
+- `docs/specs/2026-09-11-find-design.md`; the digit rule under the `select` policy is
+  `docs/specs/2026-09-18-activate-select-design.md`.
