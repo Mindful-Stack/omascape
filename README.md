@@ -351,11 +351,10 @@ Press **Ctrl+,** to open the settings panel inside the picker. Up and Down move 
 editable settings; Left and Right cycle the focused one's value. Esc closes the panel (the panel
 does not open while a search query is active, since the query has its own Esc behaviour).
 
-The panel edits six boolean settings and steps `workspaces` and `lockBorderSize` over `0`–`20`:
-- `scrim`, `hint`, `activate` (select/enter), `motion` (auto/full/off), `anchor` (center/bar)
-- `workspaces` — steps `0`–`20`; a larger value requires editing the JSON file directly
-- `lockBorderSize` — steps `0`–`20`; a custom colour for the reminder frame (`lockBorder`)
-  requires editing the JSON file directly
+The panel cycles five settings and steps two. `scrim` and `hint` toggle on or off; `anchor`
+(center/bar), `activate` (enter/select) offer two choices each; `motion` cycles auto, full, or off.
+`workspaces` and `lockBorderSize` step over `0`–`20`, and a larger `workspaces` value or a custom
+colour for the reminder frame (`lockBorder`) requires editing the JSON file directly.
 
 A change writes only the keys already in your file plus the changed one — it does not pin every
 default into the file. The file remains the source of truth: the only way to set a value the
