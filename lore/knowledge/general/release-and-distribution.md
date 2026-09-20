@@ -62,10 +62,19 @@ listed means running a **release train**:
 what they fetch. If `main` has moved on by the time they look, the request is about a snapshot
 that is no longer the branch tip and it stalls.
 
-That is exactly what happened to the omascape submission (marketplace#7262): validation passed at
-`64ec97b`, `main` had moved to `5790e24` before the reviewer looked, and it has kept going —
-`a72ecda`, then four more merges to `7200771`. Twelve merges past the commit that was verified.
-The old Omyview listing stayed live throughout.
+That is exactly what happened to the omascape submission,
+[marketplace#7262](https://github.com/omacom/omarchy-plugin-marketplace/issues/7262) — open since
+2026-09-16, labelled `validated` and `needs-fixes`. Marketplace validation and the automated
+security baseline both passed at `64ec97b`, and the reviewer then closed the loop with:
+
+> The validated marketplace/security snapshot is `64ec97b…`, but the current default-branch HEAD
+> is `5790e24…`. This submission cannot be approved against a different repository state.
+
+Note what that requires: the validated snapshot must **be** the default-branch HEAD, not merely
+exist in history. Publishing from a release branch does not satisfy it. `main` has kept going
+since — `a72ecda`, then four more merges to `7200771`, twelve past the verified commit — and the
+superseded Omyview listing stays live until this one lands. The reasoning is recorded in
+[[adrs/0006-marketplace-publication]].
 
 > **`main` is not frozen today, and a pending request would already be stale.** On 2026-09-20
 > alone, PR #32 merged as `4e2dfb8` and PR #34 as `7200771`. `64ec97b` is now 154 commits behind
@@ -122,7 +131,10 @@ CI is one workflow, `.github/workflows/ci.yml`, one job `logic-tests` on `ubuntu
 installs Qt6 QML test tooling and `lua5.4` from apt, sets `CI: "1"` so a missing runtime fails
 instead of skipping, and runs `bash tests/run.sh` — Tier 1 only. Two conventions worth keeping:
 `permissions: contents: read` rather than the repository default, and `actions/checkout` pinned
-to a full commit SHA rather than a tag, with the reason in a comment.
+to a full commit SHA rather than a tag, with the reason in a comment. **Neither is stylistic.**
+Both were supply-chain review findings on the marketplace submission — a mutable `actions/checkout@v4`
+tag and a missing least-privilege `permissions` block — fixed in omascape#19. Reverting either
+re-opens a resolved review point.
 
 `main` is protected: `logic-tests` is a required check and force-pushes are blocked. Both follow
 from the two channels above — a red commit on `main` is a shipped regression, and a rewritten
