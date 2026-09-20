@@ -1,6 +1,6 @@
 # Omascape — roadmap / next steps
 
-**Status:** **v2 shipped (2026-09-09).** Overlay on SUPER+P; per-monitor rows; **live window
+**Status:** **v2 shipped (2026-09-09).** Overlay on SUPER+TAB; per-monitor rows; **live window
 thumbnails** (Quickshell `ScreencopyView`); **drag-and-drop of windows between workspaces**
 (silent move); number/arrow/Enter selection; click-to-focus / middle-click-close. Coordinate
 math + reconcile in a unit-tested `logic.js` (Tier 1 CI); Tier 2 nested-Hyprland integration.
@@ -58,7 +58,7 @@ Overview stays open; post-move `refreshToplevels()` reconcile with bounded recov
 Extracted from the author's dotfiles into `Mindful-Stack/omascape` (2026-09-07). Installed
 per-machine with `omarchy plugin add https://github.com/Mindful-Stack/omascape.git --enable`
 and updated with `omarchy plugin update se.mindfulstack.omascape`. See `README.md` for the
-consumer-side install + SUPER+P bind.
+consumer-side install + SUPER+TAB bind.
 
 ### 7. ~~Find — type-ahead window search~~ ✅ done (2026-09-11)
 Type any letter to fuzzy-filter windows by class and title; see
@@ -109,6 +109,33 @@ monitor can't re-anchor or resize an open picker underneath the user.
 makes a digit or a click select instead, committed with `Enter`, the same digit again, or a
 double-click; see `docs/specs/2026-09-18-activate-select-design.md`.
 
+### 14. Shove — specced and reviewed, not built
+`Shift`+arrow takes the target one container in that direction: a window to the neighbouring
+workspace, a workspace to the neighbouring monitor. `docs/specs/2026-09-18-shove-design.md` is
+finished and review-hardened (branch name reserved: `shove`); no plan and no code exist, and the
+vocabulary node records it as "one word that is not behaviour yet". Parked 2026-09-18 to do card
+presence first. **Blocked on one compositor probe before the swap chunk can be written:** how a
+Lua chunk retargets a *specific monitor* to a workspace. `tests/lua/mock_hl.lua` models only the
+dispatchers existing chunks use, and none switches a monitor's active workspace. The spec names a
+fallback that uses only proven dispatchers (focus a window that landed on the destination; focus
+carries the workspace on 0.56.2). Run the probe under `tests/integration/` first. Two decisions in
+that spec were made against the obvious reading and must not be "simplified" back: same-monitor
+Shift+arrow swaps workspace *contents* (accepted as the risky half although
+`docs/roadmap-v3-ideas.md` parks reordering as fragile), and the rule branches on where the arrow
+*lands*, never on which arrow was pressed, because direction-keyed rules are dead for
+single-monitor users.
+
+### 15. Unknown-monitor hotplug — deferred bug (2026-09-18)
+Plugging in a monitor that has no entry in the user's Hyprland monitor config makes the overview
+misbehave. The symptom has not been captured and the cause not isolated; it may be that machine's
+monitor setup rather than an omascape bug, so it is parked, not triaged. When work next touches
+monitor enumeration, `focusedScreen()` or the per-monitor rows, capture the concrete symptom and
+`hyprctl monitors -j` for the unconfigured display before designing. Related: item 1 (the docked
+layout has never been verified either).
+
+Further afield, `docs/roadmap-v3-ideas.md` holds the research-backed v3 wishlist, including an
+"explicitly avoid" list of other overviews' scars.
+
 ## Maintenance gotchas (verified in-session)
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell
   rescanPlugins` reloads the registry but NOT the live QML component.
@@ -116,7 +143,7 @@ double-click; see `docs/specs/2026-09-18-activate-select-design.md`.
   in `~/.config/omarchy/shell.json` `plugins[]`).
 - `omarchy plugin add` clones into `~/.config/omarchy/plugins/<manifest id>/`, i.e.
   `se.mindfulstack.omascape/` — the folder is named after the manifest `id`, not the repo.
-- SUPER+P toggles open AND close even under the overlay's exclusive keyboard focus
+- SUPER+TAB toggles open AND close even under the overlay's exclusive keyboard focus
   (Hyprland forwards configured keybinds over the layer); bare keys still reach the overlay.
 - **Every compositor operation is one atomic Lua chunk** (`logic.js`: `tiledInsertLua`,
   `floatingMoveLua`, `unfullscreenLua`) — kept on its own merits, not because of `keepLoaded`.

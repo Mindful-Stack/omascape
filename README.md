@@ -134,6 +134,9 @@ instead of its windows.
 - A **recent Hyprland** (developed against 0.56.2). Omascape uses Hyprland's typed `hl.dsp.*`
   dispatchers for focus/move/close and requires **Lua configuration mode** (`hyprland.lua`),
   as used by Omarchy Quattro. A legacy `.conf` session rejects those dispatchers.
+- **Qt 6.9 or newer** under the shell — the card shadow is a `RectangularShadow`
+  (`QtQuick.Effects`), which arrived in 6.9. Omarchy ships well above this; CI tests exactly
+  6.9 so it stays the floor.
 - The **dwindle** layout for drag-to-rearrange. On any other layout a tiled drop still moves
   the window to the target workspace, but it is not re-tiled at the drop point (the
   cursor-based insert is a dwindle behaviour). Floating drops work on every layout.
@@ -185,7 +188,8 @@ o.bind("SUPER + TAB", "Workspace overview", "omarchy-shell shell toggle se.mindf
 If you use plain Hyprland config (`~/.config/hypr/bindings.conf` or `hyprland.conf`):
 
 ```ini
-bind = SUPER, A, exec, omarchy-shell shell toggle se.mindfulstack.omascape
+unbind = SUPER, TAB
+bind = SUPER, TAB, exec, omarchy-shell shell toggle se.mindfulstack.omascape
 ```
 
 Then reload Hyprland so the bind takes effect:

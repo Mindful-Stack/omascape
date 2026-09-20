@@ -2,12 +2,14 @@
 
 Date: 2026-09-06 · Omarchy 4.0.2 (Quattro) · Hyprland 0.56.2 · Quickshell shell
 
-A Quickshell workspace overview for Omarchy, triggered by SUPER+P. Replaces the
+A Quickshell workspace overview for Omarchy, triggered by SUPER+TAB (✎ 2026-09-20: v1 shipped on
+SUPER+P; the default is now SUPER+TAB everywhere. Stock Omarchy binds that to "next workspace",
+so `scripts/add-keybind.sh` unbinds it first). Replaces the
 dead v3 `workspace-picker.sh` (which relied on `walker`, removed in Quattro).
 
 ## Goal
 
-Press SUPER+P to get a visual overview of all workspaces (grouped by monitor) and
+Press SUPER+TAB to get a visual overview of all workspaces (grouped by monitor) and
 jump to one — keyboard or mouse.
 
 ## Scope
@@ -29,11 +31,11 @@ jump to one — keyboard or mouse.
 
 ## Behavior
 
-- **Trigger:** SUPER+P **toggles** the overlay (open *and* close), via `omarchy-shell
+- **Trigger:** SUPER+TAB **toggles** the overlay (open *and* close), via `omarchy-shell
   shell toggle`. Esc, a scrim click (outside the rows), and selecting a workspace also
   close it. The overlay uses *on-demand* keyboard focus (changed from *exclusive* on
   2026-09-15): an on-demand overlay layer grabs keyboard focus when it maps, so bare keys
-  (numbers/arrows/Esc) reach it, and Hyprland still processes the SUPER+P keybind over it.
+  (numbers/arrows/Esc) reach it, and Hyprland still processes the SUPER+TAB keybind over it.
   Exclusive focus had a side effect Hyprland 0.56 documents in `InputManager.cpp`
   ("forced above all"): while an exclusive layer exists, *every* pointer event on every
   monitor is routed to the exclusive surfaces, and to the first one at out-of-bounds
@@ -71,10 +73,13 @@ jump to one — keyboard or mouse.
 
 - Omarchy-shell **user plugin**: `~/.config/omarchy/plugins/se.mindfulstack.omascape/`
   (`manifest.json` + `Overview.qml` + any JS helpers). Lives in the user config dir →
-  survives `omarchy update`; hot-reloads on save (`omarchy-shell shell rescanPlugins`
-  to force).
-- Toggled via `omarchy-shell shell toggle se.mindfulstack.omascape`, bound to **SUPER+P** in
-  `~/.config/hypr/bindings.lua` (replacing the walker picker line).
+  survives `omarchy update`. It does **not** hot-reload on save, despite what this line
+  originally claimed: the shell's plugin reload destroys and re-creates the component but
+  never clears the QML type cache, so an edit is served from cached source until the shell
+  restarts. `rescanPlugins` reloads the manifest and registry, not the live QML. Use
+  `mise run link`. Measured 2026-09-19; see README § Local development loop.
+- Toggled via `omarchy-shell shell toggle se.mindfulstack.omascape`, bound to **SUPER+TAB** in
+  `~/.config/hypr/bindings.lua` (✎ 2026-09-20: was SUPER+P, replacing the walker picker line).
 - Built on the shell's shared overlay (`Ui/Panel.qml`) + Hyprland service. Data:
   `Hyprland.workspaces` (each with `.toplevels` = its windows incl. geometry + app id,
   `.monitor`), `Hyprland.focusedWorkspace`, `Hyprland.focusedMonitor`.

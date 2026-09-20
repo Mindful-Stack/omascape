@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "meta_repo": "omascape",
+  "knowledge_base": "lore",
+  "repos": [
+    {
+      "name": "omascape",
+      "url": "git@github.com:Mindful-Stack/omascape.git",
+      "description": "The Omascape Omarchy/Quickshell plugin. A single-repo household: the lore/ knowledge base is tracked inline alongside the code."
+    },
+    {
+      "name": "lore",
+      "description": "Inline knowledge base tracked in this repo. ADRs cite docs/specs/ rather than duplicating them."
+    }
+  ]
+}
