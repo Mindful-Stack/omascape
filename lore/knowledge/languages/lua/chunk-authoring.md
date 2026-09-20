@@ -7,7 +7,9 @@ tags: [languages, lua, compositor, hyprland]
 # Lua chunk authoring
 
 Omascape writes no `.lua` source for the compositor. Every compositor operation is a Lua string
-built by a function in `logic.js` and handed to Hyprland. Counts below were taken 2026-09-20.
+built by a function in `logic.js` and handed to Hyprland. Counts taken 2026-09-20 against this
+branch's base, `a72ecda`; `main` has moved on since, so the totals read low. The rules, not the
+totals, are the standard.
 
 There are **20 `*Lua()` builders** in `logic.js` (of 82 top-level functions). The suffix is
 exhaustive: every function that emits Lua is named `*Lua`, and no function that emits Lua is not.

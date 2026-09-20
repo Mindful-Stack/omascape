@@ -7,8 +7,9 @@ tags: [languages, lua, testing]
 # Lua chunk testing
 
 Two files hold all the real Lua in the repository: `tests/lua/mock_hl.lua` (345 lines) and
-`tests/lua/tst_chunks.lua`. Both exist because a generated chunk has two independent ways to fail
-invisibly. Counts taken 2026-09-20.
+`tests/lua/tst_chunks.lua`. Both exist because a generated chunk has two independent ways to
+fail invisibly. Counts taken 2026-09-20 against this branch's base, `a72ecda`; `main` has moved
+on since, so the totals read low. The rules, not the totals, are the standard.
 
 ## Two checks, for two failure modes
 

@@ -6,9 +6,10 @@ tags: [languages, javascript, qml, testing]
 
 # JavaScript code style (`logic.js`)
 
-Almost all of Omascape's JavaScript lives in one file. `logic.js` is 1886 lines and 82 top-level
-functions holding the layout maths, the reconcile diff, search ranking, key handling and the Lua
-chunk builders. Counts taken 2026-09-20.
+Almost all of Omascape's JavaScript lives in one file. `logic.js` is 1886 lines and 82
+top-level functions holding the layout maths, the reconcile diff, search ranking, key handling
+and the Lua chunk builders. Counts taken 2026-09-20 against this branch's base, `a72ecda`;
+`main` has moved on since, so the totals read low. The rules, not the totals, are the standard.
 
 Its first line is the whole architecture:
 
