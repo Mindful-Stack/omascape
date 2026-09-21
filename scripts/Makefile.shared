@@ -7,20 +7,10 @@
 # and mounted back as a git submodule without changing the consumer-side
 # Makefile.
 
-.PHONY: setup setup-core setup-all pull status \
+.PHONY: pull status \
         repos-create repos-rename repos-sync-names repos-sync-names-apply \
         policy-audit policy-audit-write policy-apply policy-help access-apply \
         update-kb test-scripts
-
-##@ Setup
-setup:   ## Interactive: pick sibling repos to clone (Enter = core)
-	@./scripts/setup.sh
-
-setup-core: ## Clone 'core'-tagged repos non-interactively
-	@./scripts/setup.sh --core
-
-setup-all: ## Clone every repo declared in household.json
-	@./scripts/setup.sh --all
 
 ##@ Repos
 pull:    ## Fetch the meta-repo + every sibling; ff-pull each that's on a clean main
