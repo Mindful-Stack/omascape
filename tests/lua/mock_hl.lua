@@ -74,7 +74,15 @@ function M.new(opts)
     if v == nil then return nil, "unknown config key '" .. k .. "'" end
     return v
   end
+  -- Counted and breakable like a dispatcher, so a case can target the RESTORE (the second call)
+  -- rather than the override: `hl.__fail_on = "config"` with `hl.__fail_nth = 2`. Real Lua drops
+  -- nil-valued keys from a table constructor, so `pairs` skipping them here is not an
+  -- approximation — it is exactly why a restore built from an unreadable get_config is a no-op.
   function hl.config(t)
+    hl.__seen.config = (hl.__seen.config or 0) + 1
+    if hl.__fail_on == "config" and (hl.__fail_nth == nil or hl.__fail_nth == hl.__seen.config) then
+      error("injected config failure", 0)
+    end
     for group, kv in pairs(t) do
       for k, v in pairs(kv) do hl.__config[group .. "." .. k] = v end
     end
