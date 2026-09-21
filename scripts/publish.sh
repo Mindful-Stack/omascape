@@ -241,9 +241,16 @@ fi
 
 # Only move a local release branch that is exactly where we branched from. Anything else is
 # a divergence the maintainer has to look at, not something to fast-forward over.
-if git rev-parse --verify "refs/heads/$INTO" >/dev/null 2>&1; then
-    [[ $(git rev-parse "refs/heads/$INTO") == "$onto" ]] \
-        || die "local $INTO is not at $ONTO; sort that out before publishing"
+if git rev-parse --verify "refs/heads/$INTO" >/dev/null 2>&1 \
+   && [[ $(git rev-parse "refs/heads/$INTO") != "$onto" ]]; then
+    # "not at" was true and useless. A local branch left behind by a fetch is the common
+    # case and a one-line fix; a local branch carrying unpublished commits is a different
+    # problem with the same symptom. Say which one this is.
+    read -r ahead behind < <(git rev-list --left-right --count "refs/heads/$INTO...$onto")
+    if (( ahead == 0 )); then
+        die "local $INTO is $behind behind $ONTO — fast-forward it first: git branch -f $INTO $ONTO"
+    fi
+    die "local $INTO is $ahead ahead of $ONTO and $behind behind: it carries commits that were never published — reconcile the two before publishing"
 fi
 git update-ref "refs/heads/$INTO" "$commit"
 

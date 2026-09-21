@@ -286,6 +286,38 @@ status=$?
 same "standing-on-it: exits 1"  "$status" "1"
 has  "standing-on-it: says where to stand" "$out" "publish from the development branch"
 
+# A local release branch that is merely stale is the common case -- a fetch updates the
+# remote-tracking ref and leaves the local branch behind -- and "not at origin/main" said
+# nothing about which of the two problems it was or how to get out of it.
+#
+# `published` stands in for origin/main here, so that `main` can be the stale local branch.
+# dev has to move between the two runs or the idempotence check answers first.
+pub() {
+    out=$(cd "$1" && OMARCHY_PLUGIN_VALIDATE="$work/validate-ok" \
+        bash scripts/publish.sh --onto "$2" --into "$3" 2>&1)
+    status=$?
+}
+box=$(setup stale)
+pub "$box" main published
+same "stale: the first release lands" "$status" "0"
+echo 'var x = 2;' > "$box/logic.js"
+git -C "$box" commit -qam "work that the next release carries"
+
+pub "$box" published main
+same "stale: exits 1"                "$status" "1"
+has  "stale: counts the gap"         "$out" "local main is 1 behind published"
+has  "stale: gives the one-line fix" "$out" "git branch -f main published"
+
+# Ahead is a different problem with the same symptom, and must not suggest clobbering it.
+git -C "$box" checkout -q main
+echo 'MIT (2026)' > "$box/LICENSE"
+git -C "$box" commit -qam "an unpublished commit on the release branch"
+git -C "$box" checkout -q dev
+pub "$box" published main
+same  "ahead: exits 1"                  "$status" "1"
+has   "ahead: says which way"           "$out" "1 ahead of published"
+lacks "ahead: does not suggest a force" "$out" "git branch -f"
+
 box=$(setup dirty)
 echo 'work in progress' > "$box/Overview.qml"
 run "$box"
