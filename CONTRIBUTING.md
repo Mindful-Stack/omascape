@@ -184,7 +184,11 @@ is the *publish*: while a listing request is open, don't run the train, because 
 approves a commit only while it is still the default branch's HEAD.
 
 Version bumps and tags belong to the train, not to individual feature PRs. Please don't bump
-`manifest.json`'s `version` in a feature PR.
+`manifest.json`'s `version` in a feature PR — the maintainer bumps it when the train departs,
+and `publish.sh` refuses to ship a changed tree under the version that is already published.
+The marketplace lists one version per commit, so two different trees published as `0.5.2` leave
+the listing describing the wrong one. A release that genuinely changes no code says so with
+`--allow-same-version`; an unchanged tree is a no-op and never reaches the question.
 
 ## Review
 

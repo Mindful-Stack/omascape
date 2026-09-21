@@ -100,6 +100,9 @@ MD
     git -C "$box" add Overview.qml logic.js manifest.json preview.webp LICENSE README.md
     git -C "$box" commit -qm "initial release"
     git -C "$box" checkout -q -b dev
+    # dev carries the bump: publishing a changed tree under the already-published
+    # version is refused, so the fixture has to look like a real release train.
+    sed -i 's/"1.0.0"/"1.0.1"/' "$box/manifest.json"
     git -C "$box" add -A
     git -C "$box" commit -qm "the project"
     echo "$box"
@@ -109,7 +112,7 @@ MD
 run() {
     local box=$1; shift
     out=$(cd "$box" && OMARCHY_PLUGIN_VALIDATE="${VALIDATOR:-$work/validate-ok}" \
-        bash scripts/publish.sh --onto main --into main "$@" 2>&1)
+        bash scripts/publish.sh --onto main --into main ${VERSION_FLAG:-} "$@" 2>&1)
     status=$?
 }
 
@@ -121,7 +124,7 @@ box=$(setup plain)
 before=$(git -C "$box" rev-parse main)
 run "$box"
 same "plain: exits 0"                       "$status" "0"
-has  "plain: names the version"             "$out" "1.0.0"
+has  "plain: names the version"             "$out" "1.0.1"
 clean "plain: the dev worktree is untouched" "$box"
 same "plain: dev did not move"              "$(git -C "$box" rev-parse HEAD)" "$(git -C "$box" rev-parse dev)"
 same "plain: still on dev"                  "$(git -C "$box" rev-parse --abbrev-ref HEAD)" "dev"
@@ -168,6 +171,7 @@ same "repeat: main did not move"  "$(git -C "$box" rev-list --count "$before"..m
 # ancestry check against the branch would have blocked every release after the first; the
 # Source-commit trailer is what makes the train repeatable.
 echo 'var x = 2;' > "$box/logic.js"
+sed -i 's/"1.0.1"/"1.0.2"/' "$box/manifest.json"
 git -C "$box" commit -qam "a second release's worth of work"
 run "$box"
 same "second: exits 0"                  "$status" "0"
@@ -301,6 +305,7 @@ box=$(setup stale)
 pub "$box" main published
 same "stale: the first release lands" "$status" "0"
 echo 'var x = 2;' > "$box/logic.js"
+sed -i 's/"1.0.1"/"1.0.2"/' "$box/manifest.json"
 git -C "$box" commit -qam "work that the next release carries"
 
 pub "$box" published main
@@ -317,6 +322,32 @@ pub "$box" published main
 same  "ahead: exits 1"                  "$status" "1"
 has   "ahead: says which way"           "$out" "1 ahead of published"
 lacks "ahead: does not suggest a force" "$out" "git branch -f"
+
+# The marketplace lists one version per commit, so two different trees published as the same
+# version leave it describing the wrong one. A warning under sixty lines of diffstat is a
+# warning nobody reads, so this refuses.
+box=$(setup unbumped)
+before=$(git -C "$box" rev-parse main)
+sed -i 's/"1.0.1"/"1.0.0"/' "$box/manifest.json"          # back to what main already ships
+echo 'var x = 3;' > "$box/logic.js"                       # but the tree really did change
+git -C "$box" commit -qam "a release that forgot the bump"
+run "$box"
+same "unbumped: exits 1"           "$status" "1"
+has  "unbumped: says what to do"   "$out" "bump it, or pass --allow-same-version"
+same "unbumped: main did not move" "$(git -C "$box" rev-parse main)" "$before"
+
+VERSION_FLAG=--allow-same-version run "$box"
+same "unbumped: the escape publishes"  "$status" "0"
+has  "unbumped: and says it used it"   "$out" "republishing 1.0.0 unchanged"
+
+# An unchanged tree is a no-op, not a version problem -- the idempotence check answers first.
+box=$(setup no-op)
+run "$box"
+same "no-op: the first release lands" "$status" "0"
+run "$box"
+same "no-op: exits 0"                 "$status" "0"
+has  "no-op: says nothing to publish" "$out" "nothing to publish"
+lacks "no-op: does not complain about the version" "$out" "bump it"
 
 box=$(setup dirty)
 echo 'work in progress' > "$box/Overview.qml"

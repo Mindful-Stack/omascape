@@ -16,8 +16,11 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/publish.sh [--source <ref>] [--onto <ref>] [--into <branch>] [--dry-run]
+#                      [--allow-same-version]
 #
 # Defaults: --source HEAD (worktree must be clean), --onto origin/main, --into main.
+# --allow-same-version republishes without bumping manifest.json -- for a release that
+# changes no code, and nothing else.
 
 die() { printf 'publish: %s\n' "$*" >&2; exit 1; }
 
@@ -26,6 +29,7 @@ ONTO=origin/main
 INTO=main
 DRY=0
 SOURCE_GIVEN=0
+SAME_VERSION_OK=0
 
 while (( $# )); do
     case $1 in
@@ -33,7 +37,8 @@ while (( $# )); do
         --onto)   ONTO=${2-};   shift 2 ;;
         --into)   INTO=${2-};   shift 2 ;;
         --dry-run) DRY=1; shift ;;
-        -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+        --allow-same-version) SAME_VERSION_OK=1; shift ;;
+        -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
         *) die "unknown argument: $1" ;;
     esac
 done
@@ -165,9 +170,6 @@ fi
 version=$(git show "$src:manifest.json" | grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' | sed 's/.*"\([^"]*\)"$/\1/')
 [[ -n $version ]] || die "manifest.json declares no version"
 prev_version=$(git show "$onto:manifest.json" 2>/dev/null | grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' | sed 's/.*"\([^"]*\)"$/\1/' || true)
-if [[ -n $prev_version && $prev_version == "$version" ]]; then
-    printf 'publish: warning -- manifest version is still %s; the marketplace lists a version per commit\n' "$version" >&2
-fi
 
 # ---- build the tree ----------------------------------------------------------------------
 # A temporary index, not a subshell: an EXIT trap fires inside `( )` too, and would delete
@@ -205,6 +207,18 @@ fi
 if [[ $tree == "$(git rev-parse "$onto^{tree}")" ]]; then
     echo "publish: $ONTO already carries this exact tree — nothing to publish"
     exit 0
+fi
+
+# Only now that there is a real change to ship does the version matter. The marketplace
+# lists one version per commit, so two different trees published as the same version leave
+# it describing the wrong one -- and a warning printed above sixty lines of diffstat is a
+# warning nobody reads. A release that genuinely changes no code is the exception, and says
+# so explicitly.
+if [[ -n $prev_version && $prev_version == "$version" && $SAME_VERSION_OK -eq 0 ]]; then
+    die "the tree changed but manifest.json is still $version — bump it, or pass --allow-same-version if this release changes no code"
+fi
+if [[ -n $prev_version && $prev_version == "$version" ]]; then
+    echo "publish: republishing $version unchanged (--allow-same-version)"
 fi
 
 echo "publish: $version from $(git rev-parse --short "$src") — ${#published[@]} files + README"
