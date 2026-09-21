@@ -123,6 +123,36 @@ case("tiled insert: the cleanup un-float itself throws → still reported (once)
   eq(hl.__config["dwindle.smart_split"], false, "smart_split restored")
   eq(Mock.names(hl)[#hl.__log], "cursor.move", "cursor restore still runs")
 end)
+-- The config override is only safe because it is undone. Both cases below are about the undo
+-- itself failing SILENTLY: the residue is global (it changes how every later window splits) and
+-- outlives the overview, so a drop that reports success while leaving dwindle reconfigured is
+-- the worst shape this chunk can end in.
+case("tiled insert: unreadable dwindle config → the override is never applied, so there is nothing to restore", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  hl.__config["dwindle.smart_split"] = nil
+  hl.__config["dwindle.use_active_for_splits"] = nil
+  run("TILED_INSERT", hl)
+  -- Distinguishes a restore built from the nil reads (`{ smart_split = nil }` is an EMPTY table,
+  -- so the override stands) from not overriding at all. Both leave the insert working; only the
+  -- second leaves the user's dwindle settings as it found them.
+  eq(hl.__config["dwindle.smart_split"], nil, "smart_split left unset")
+  eq(hl.__config["dwindle.use_active_for_splits"], nil, "use_active left unset")
+  eq(hl.__seen.config, nil, "hl.config never called at all")
+  eq(hl.__windows["0xabc"].floating, false, "the insert still happened and ended tiled")
+  eq(hl.__windows["0xabc"].workspace.id, 3, "on the target workspace")
+end)
+case("tiled insert: the config restore itself throws → reported, and focus and cursor are still restored", function()
+  local hl = Mock.new({ windows = tiledWindows() })
+  hl.__fail_on = "config"; hl.__fail_nth = 2   -- the override lands; the restore breaks
+  run("TILED_INSERT", hl)
+  eq(#hl.__notifications, 1, "one notification")
+  assert(hl.__notifications[1].text:find("tiled insert failed", 1, true), "notification names the operation")
+  -- The point of the guard: an unguarded restore raises straight out of the dispatched function,
+  -- so everything after it is skipped and the cursor is left wherever the placement warp put it.
+  eq(Mock.names(hl)[#hl.__log], "cursor.move", "cursor restore still runs")
+  eq(hl.__cursor.x, 5, "cursor is back where it started")
+  eq(hl.__windows["0xabc"].floating, false, "and the window is not left floating")
+end)
 case("tiled insert on a non-dwindle layout: the plain move throws → reported, cursor restored", function()
   local hl = Mock.new({ windows = tiledWindows(), layout = "master" })
   hl.__fail_on = "window.move"
