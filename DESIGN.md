@@ -248,9 +248,11 @@ than one group each group is inset (`groupInset`, 6 px) around its chip band and
 `Logic.layout` returns the group's full bounds so the view can draw an 8 % accent backdrop behind
 the focused monitor's group. The chip is a Nerd Font glyph — laptop for eDP/LVDS/DSI connectors,
 external screen otherwise — plus the connector name. A single group keeps no band and no inset.
-Each group's cells take the aspect ratio of their own monitor (cell width stays shared), so the
-picture is identical whichever screen has focus and previews no longer letterbox inside a cell
-shaped like the other monitor.
+Each group's cells take the aspect ratio of their own monitor (cell width stays shared), so
+previews no longer letterbox inside a cell shaped like the other monitor. The shared width is
+derived from the picker's own screen (`docs/specs/2026-09-20-proportional-spacing-design.md`),
+so the picture has the same shape and ordering whichever screen has focus, but not the same
+size: opened on a wider screen, every group's cells are wider.
 
 Hyprland only reports workspaces it has created (a `persistent:true` workspace whose monitor is
 unplugged is destroyed once empty), so `Logic.padWorkspaces` fills ids `1..workspaces` (config,

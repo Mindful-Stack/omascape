@@ -552,7 +552,13 @@ TestCase {
         var g = childNamed(bar, "findGlyph")
         fuzzyCompare((g.x + c.x + c.width) / 2, bar.width / 2, 1.5)   // the group is centred
         verify(q.truncated, "query is elided, not overflowing")
-        verify(q.contentWidth <= q.width + 0.5)
+        // ✎ 2026-09-21 (proportional spacing): the bar is exactly as wide as the grid, and the
+        // grid now follows the gap ratio, so the bar moved 858 -> 856 -> 854 as the ratio was
+        // swept 0.08 -> 0.06 -> 0.04 -- and at 854 the elided contentWidth landed 0.5 px over
+        // its box, the rounding the note above measured at +0.3 / -0.7. One pixel of
+        // tolerance covers what Qt's elision measures; a real overflow is a whole glyph.
+        verify(q.contentWidth <= q.width + 1,
+               "elided query overflows its box by " + (q.contentWidth - q.width))
         compare(c.text, "0 matches")   // count reads fully, unaffected by the query length
     }
     // Distinguishes: a ring toggled through `visible` (opacity would be 1 the instant the

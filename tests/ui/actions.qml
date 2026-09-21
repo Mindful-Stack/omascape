@@ -137,7 +137,19 @@ TestCase {
     // correctly there. This point sits inside the painted 1.03-scaled rect (the hover lift's own
     // halo) but strictly outside the tile's unscaled model geometry, so only a correct expansion
     // resolves it to the tile.
+    // The halo is a fixed ~1.5% of the tile's own pixel width (half of the 3% hover lift), so
+    // its size in real pixels tracks how much of the box's fixed width (set by the fixture's
+    // panel size and production params, not by workspace count) the window itself fills. At the
+    // default client size (400 of the 1920-wide monitor) that halo is under a device pixel —
+    // too thin for the mouse position mouseMove rounds to the nearest pixel to land in reliably.
+    // Widening 0xA to most of the monitor gives the same box a much bigger tile and a halo that
+    // clears a pixel regardless of which spacing model or params produced the box width.
     function test_tile_candidates_hit_the_scaled_edge_not_the_unscaled_one() {
+        view.compositor.workspaces = { values: [
+            wsRow(1, [{ address: "0xA", at: [40, 1500], size: [1600, 400], floating: false,
+                        title: "alpha", "class": "alpha", fullscreen: 0 }])
+        ] }
+        view.rebuild()
         hoverTile("0xA")   // hovering 0xA also scales IT (WindowTile's own HoverHandler, `hh`)
         var row = null
         for (var i = 0; i < view.testModel.count; i++) {
@@ -149,6 +161,7 @@ TestCase {
         for (var j = 0; j < cands.length; j++) if (cands[j].address === "0xA") { c = cands[j]; break }
         verify(c !== null, "no candidate for 0xA")
         verify(c.x < row.wx, "a hovered tile's candidate must be expanded left of its model geometry")
+        verify(row.wx - c.x >= 2, "precondition: the halo must be at least 2 px so its midpoint rounds inside it, got " + (row.wx - c.x))
         var px = (c.x + row.wx) / 2, py = row.wy + row.wh / 2   // strictly in the halo, left of the base edge
         var p = view.testCanvas.mapToItem(view, px, py)
         mouseMove(view, p.x, p.y)

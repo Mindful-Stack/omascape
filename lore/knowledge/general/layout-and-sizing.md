@@ -1,13 +1,14 @@
 ---
 title: Layout and sizing — derived constants, caps, and the NaN floor
-description: Sizes are derived from one pure function rather than duplicated as constants, maxCols is a cap and never a floor, and every layout input is guarded because a NaN reaches the card as a zero-size rectangle — an invisible overlay that still takes keyboard focus and draws the scrim.
+description: Sizes come from one pure function, not duplicated constants: the gap is a cell-width fraction (fixed-pixel is the fallback), maxCols is a cap not a floor, and every input is guarded — a NaN reaches the card as a zero-size overlay that still takes keyboard focus and draws the scrim.
 tags: [architecture, javascript, qml, ui, testing]
 ---
 
 # Layout and sizing — derived constants, caps, and the NaN floor
 
 All of it is pure `logic.js`, which is why it is all Tier 1 testable. Measured 2026-09-20 against
-`origin/main` (`7200771`). [[general/architecture]] covers why the maths lives there at all.
+`origin/main` (`7200771`) — the proportional-spacing paragraph describes `feat/proportional-spacing`,
+which lands after that commit. [[general/architecture]] covers why the maths lives there at all.
 
 ## A size that appears twice is derived once
 
@@ -40,11 +41,37 @@ var cw = Math.max(P.minCellW, Math.min(P.maxCellW,
     Math.floor((availW - (cols - 1) * gap) / cols)))
 ```
 
-The params are `maxCols: 5, minCellW: 140, maxCellW: 380` (`Overview.qml:273`), and the comment
-says it outright: *"maxCols is a CAP, not a floor."* A narrow screen gets fewer columns; it does
-not get five squeezed ones. Cell width is then clamped between `minCellW` and `maxCellW` — so
-`maxCellW` stops binding as soon as the margin takes its cut, which is exactly why the margin
-change above shrank the author's cells from 380.
+The params are `maxCols: 5, minCellW: 140, maxCellW: 800, gapRatio: 0.04` (`Overview.qml`, the
+`params` object), and the two statements above are the fixed-pixel FALLBACK branch — what runs
+when `gapRatio` is not set. The proportional branch, which is what production runs, follows
+below. The comment says it outright: *"maxCols is a CAP, not a floor."* A narrow screen gets
+fewer columns; it does not get five squeezed ones. Cell width is then clamped between
+`minCellW` and `maxCellW` — so `maxCellW` (then 380) stopped binding as soon as the margin took its cut,
+which is exactly why the margin change above shrank the author's cells from 380.
+
+Since 2026-09-20 the cell is no longer the thing that is capped in practice. With `gapRatio`
+set (0.04 in production since the 2026-09-21 sweep; the logic tests pin 0.08, the ratio the spec
+was derived at) the gap is that fraction of the cell width, both edges of the canvas
+carry one gap, and the cell takes what is left — fitted to whole pixels so the canvas is never
+wider than `availW` except when `minCellW` binds, the one case where the pixel model overflows
+too and the Flickable scrolls. In shape (the real code is ES5 with `Math.max`/`Math.min`; see
+`layout()`):
+
+```text
+gapMin = round(minCellW * ratio)                                   // 6 in production, 11 at 0.08
+cols   = clamp(floor((availW - gapMin) / (minCellW + gapMin)), 1, maxCols)   // both outer gaps count
+cw = clamp(floor(availW / (cols + (cols + 1) * ratio)), minCellW, maxCellW)
+gap = round(cw * ratio)
+while (cols * cw + (cols + 1) * gap > availW && cw > minCellW) { cw--; gap = round(cw * ratio) }
+```
+
+`maxCellW` is 800 now and only binds once the card offers at least 4192 logical px of interior
+width (4385 at the spec's 0.08); below that it is a sanity cap that never fires. The row spacing between sub-rows, monitor
+groups and the scratchpad follows the same gap. Without `gapRatio` — absent, or anything but a
+positive finite *number* (`typeof` is checked, so the string `"0.08"` does not switch it on; see
+the comment in `layout()`) — the pixel `cellSpacing` and `rowSpacing` apply exactly as before:
+the fallback rule below applied to a new input. The derivation, the fit step's proof and the
+measured table are in `docs/specs/2026-09-20-proportional-spacing-design.md`.
 
 ## Every layout input has a finite fallback
 
@@ -59,7 +86,7 @@ that is *valid geometry*, not zero:
 
 | Input | Fallback | Effect |
 |---|---|---|
-| `availW` missing or ≤ 0 | `maxCols * minCellW + (maxCols - 1) * gap` | `cols` resolves to `maxCols`, `cw` clamps to exactly `minCellW` |
+| `availW` missing or ≤ 0 | `maxCols * minCellW + (maxCols - 1 + edges) * gapMin` — `edges` is 2 in ratio mode, 0 otherwise (736 in production, 766 at 0.08) | `cols` resolves to `maxCols`, `cw` clamps to exactly `minCellW` |
 | `panelW` non-finite | `16` | the floor margin, i.e. the pre-change behaviour |
 | a monitor with non-positive logical size | the default aspect | same path a missing monitor takes |
 
@@ -92,4 +119,4 @@ It is pure, so a change to it is a Tier 1 change. It is also the reason each til
 - [[frameworks/hyprland/compositor-state]] — where a zeroed placeholder monitor comes from.
 - [[general/workspace-grid-defaults]] — the other sizing default, and its config key.
 - `docs/specs/2026-09-09-milestone-a-design.md`, `2026-09-10-window-states-design.md`,
-  `2026-09-18-card-presence-design.md`.
+  `2026-09-18-card-presence-design.md`, `2026-09-20-proportional-spacing-design.md`.

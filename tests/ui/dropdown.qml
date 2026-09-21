@@ -576,12 +576,15 @@ TestCase {
     }
 
     // The grid must sit in the middle of a full-width card, not hug its left edge. layout()
-    // places boxes from x = 0 and the canvas is exactly the grid's width, so on a panel where
-    // maxCellW caps the cells before the width runs out the remainder is pure slack. 2048
-    // logical is the real case that reported this: cells cap at 380, the grid is 1916, and
-    // 108 px were being dumped on the right.
+    // places boxes from x = 0 and the canvas is exactly the grid's width, so wherever the
+    // canvas is narrower than the card the remainder is pure slack. Since proportional
+    // spacing (docs/specs/2026-09-20-proportional-spacing-design.md) the cells fill the width
+    // and slack only survives where maxCellW binds: 6000 logical is past that (cells 800, gap
+    // 32, canvas 4192 at the production 0.04), which is why the width moved from the 2048 that first reported this.
+    // Distinguishes: a Flickable pinned at x = card.pad with the slack dumped on the right --
+    // the original bug -- on the one path that still produces slack.
     function test_the_grid_is_centred_when_narrower_than_the_card() {
-        seed(26, 10, "bar", 2048)
+        seed(26, 10, "bar", 6000)
         var avail = view.testCard.width - view.testCard.pad * 2
         var slack = avail - view.testFlick.width
         verify(slack > 20,
@@ -591,6 +594,27 @@ TestCase {
         // ...and the grid still fits, i.e. centring did not shrink the viewport below content.
         verify(view.testFlick.contentWidth <= view.testFlick.width,
                "content " + view.testFlick.contentWidth + " must fit " + view.testFlick.width)
+    }
+
+    // The real case: the author's 2048-logical laptop in bar mode. Before proportional spacing
+    // the cells capped at 380 and 108 px of card sat empty; now the canvas fills the card to
+    // within the fit step's remainder and the first cell starts one gap in.
+    // Distinguishes: production params still on the pixel model (canvas 1916, first box at
+    // x = 0) -- the whole feature switched off by a params object nobody updated -- and a
+    // gapRatio wired into the params but read by nothing.
+    function test_the_grid_fills_a_laptop_width_with_a_gap_at_each_edge() {
+        seed(26, 10, "bar", 2048)
+        var avail = view.testCard.width - view.testCard.pad * 2
+        compare(avail, 2024, "precondition: bar mode gives the canvas the panel minus the pad")
+        var canvas = view.testFlick.contentWidth
+        verify(canvas <= avail, "the canvas fits: " + canvas + " in " + avail)
+        verify(avail - canvas <= 10, "five columns leave at most 2*5 px, left " + (avail - canvas))
+        var first = view.boxes[0]
+        verify(first.x > 0, "the first cell does not touch the canvas edge")
+        compare(first.x, Math.round(first.w * view.params.gapRatio),
+                "the edge is one gap, and the gap is gapRatio of the cell")
+        compare(first.w, 386, "the spec's laptop row after the sweep: cell 386")
+        compare(first.x, 15, "gap 15")
     }
 
     // is the one property that makes this test able to tell the bug from the fix.

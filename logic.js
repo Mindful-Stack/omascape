@@ -354,16 +354,53 @@ function layout(input) {
     var inset = multi ? (P.groupInset || 0) : 0
 
     // adaptive cell size — maxCols is a CAP, not a floor
-    var gap = P.cellSpacing
-    // safe default when availW is missing/invalid: maxCols cells at minCellW with the
-    // (maxCols-1) gaps between them included, so cols resolves to maxCols and cw clamps
-    // to exactly minCellW — finite, valid geometry instead of NaN.
+    //
+    // Two spacing models (docs/specs/2026-09-20-proportional-spacing-design.md). With a valid
+    // `gapRatio` the gap is that fraction of the cell width, both edges of the canvas carry one
+    // gap, and the cell takes what is left. Without one — absent, non-numeric, zero, negative
+    // or infinite — the pixel `cellSpacing` / `rowSpacing` apply and the edges are 0: exactly
+    // the geometry that existed before the ratio did, so every fixture written against it
+    // still holds. `typeof` and not Number(): a numeric string must not switch the mode on.
+    var ratio = P.gapRatio
+    var proportional = typeof ratio === "number" && isFinite(ratio) && ratio > 0
+    // The gap the narrowest legal cell would get — the one the column count is decided with.
+    var gapMin = proportional ? Math.round(P.minCellW * ratio) : P.cellSpacing
+    var edges = proportional ? 2 : 0                       // outer gaps a row carries
+    // safe default when availW is missing/invalid: maxCols cells at minCellW with every gap
+    // the row carries included — the (maxCols-1) between them plus the outer ones — so cols
+    // resolves to maxCols and cw clamps to exactly minCellW: finite, valid geometry instead
+    // of NaN.
     var availW = (typeof input.availW === "number" && input.availW > 0)
-        ? input.availW - 2 * inset : (P.maxCols * P.minCellW + (P.maxCols - 1) * gap)
+        ? input.availW - 2 * inset
+        : (P.maxCols * P.minCellW + (P.maxCols - 1 + edges) * gapMin)
+    // The most columns of minimum cells that fit, outer gaps included: the largest n with
+    // n * minCellW + (n - 1 + edges) * gapMin <= availW.
     var cols = Math.max(1, Math.min(P.maxCols,
-        Math.floor((availW + gap) / (P.minCellW + gap))))
-    var cw = Math.max(P.minCellW, Math.min(P.maxCellW,
-        Math.floor((availW - (cols - 1) * gap) / cols)))
+        Math.floor((availW - (edges - 1) * gapMin) / (P.minCellW + gapMin))))
+    var cw, gap
+    if (proportional) {
+        // A row of n cells at width w is w * (n + (n+1) * ratio) wide.
+        cw = Math.max(P.minCellW, Math.min(P.maxCellW,
+            Math.floor(availW / (cols + (cols + 1) * ratio))))
+        gap = Math.round(cw * ratio)
+        // Fit to whole pixels. The real-valued estimate can overshoot availW by up to
+        // (cols+1)/2 px from the gap's rounding, and one step of cw removes at least cols px,
+        // so this runs at most once (the spec swept every width 162..8000). minCellW binding
+        // is the only way a row is ever wider than availW — the pixel model overflows there
+        // too, and the Flickable scrolls it.
+        while (cols * cw + (cols + 1) * gap > availW && cw > P.minCellW) {
+            cw -= 1
+            gap = Math.round(cw * ratio)
+        }
+    } else {
+        gap = gapMin
+        cw = Math.max(P.minCellW, Math.min(P.maxCellW,
+            Math.floor((availW - (cols - 1) * gap) / cols)))
+    }
+    // What the canvas carries on each side, and the spacing between rows of cells: the gap
+    // itself in ratio mode, the old constants otherwise.
+    var edge = proportional ? gap : 0
+    var rowGap = proportional ? gap : P.rowSpacing
     // Cell height follows each group's own monitor (see the group loop), so the picture is
     // identical whichever screen has focus; `cell.h` reports the focused monitor's for reference.
     // A monitor whose logical size is not positive is not a screen to draw at scale: Quickshell
@@ -395,7 +432,7 @@ function layout(input) {
         if (!wss.length) continue
         var focusedGroup = name === input.focusedMonitorName
         var gch = cellHeightFor(monByName[name])
-        var group = { monitorName: name, special: "", x: 0, y: y, w: 0, h: 0, inset: inset, headerH: headerH,
+        var group = { monitorName: name, special: "", x: edge, y: y, w: 0, h: 0, inset: inset, headerH: headerH,
                       focused: focusedGroup }
         groups.push(group)
         y += inset + headerH
@@ -404,7 +441,7 @@ function layout(input) {
             var chunk = wss.slice(s, s + cols)
             for (var c = 0; c < chunk.length; c++) {
                 var box = { workspaceId: chunk[c].id, monitorName: name, monFocused: focusedGroup,
-                            special: "", x: inset + c * (cw + gap), y: y, w: cw, h: gch,
+                            special: "", x: edge + inset + c * (cw + gap), y: y, w: cw, h: gch,
                             focused: !!chunk[c].focused, occupied: !!chunk[c].occupied,
                             // How many windows the workspace holds, not merely whether it holds
                             // any: Close all needs more than one (see workspaceMenuRows).
@@ -419,12 +456,12 @@ function layout(input) {
             var rowW = chunk.length * cw + (chunk.length - 1) * gap
             if (rowW > groupW) groupW = rowW
             y += gch
-            if (s + cols < wss.length) y += P.rowSpacing        // between sub-rows of one group
+            if (s + cols < wss.length) y += rowGap               // between sub-rows of one group
         }
         y += inset
         group.w = groupW + 2 * inset; group.h = y - group.y
         if (group.w > canvasW) canvasW = group.w
-        if (r < order.length - 1) y += P.rowSpacing             // between monitor groups
+        if (r < order.length - 1) y += rowGap                    // between monitor groups
     }
 
     // Trailing scratchpad group (a special workspace shown on demand): its own header band —
@@ -435,8 +472,8 @@ function layout(input) {
     // second box for the same id.
     for (var si = 0; si < input.workspaces.length; si++) {
         var sws = input.workspaces[si]; if (!sws.special || !isScratchpad(sws.id)) continue
-        if (groups.length) y += P.rowSpacing
-        var sgroup = { monitorName: sws.monitorName, special: sws.special, x: 0, y: y, w: 0, h: 0,
+        if (groups.length) y += rowGap
+        var sgroup = { monitorName: sws.monitorName, special: sws.special, x: edge, y: y, w: 0, h: 0,
                        inset: inset, headerH: P.headerH, focused: false }
         groups.push(sgroup)
         y += inset + P.headerH
@@ -444,7 +481,7 @@ function layout(input) {
         // cell under a full-width grid read as misplaced in use).
         var rowW = Math.max(canvasW, cw + 2 * inset)
         var sbox = { workspaceId: sws.id, monitorName: sws.monitorName, monFocused: false,
-                     special: sws.special, x: inset + Math.round((rowW - 2 * inset - cw) / 2), y: y, w: cw,
+                     special: sws.special, x: edge + inset + Math.round((rowW - 2 * inset - cw) / 2), y: y, w: cw,
                      h: cellHeightFor(monByName[sws.monitorName]),
                      focused: !!sws.focused, occupied: !!sws.occupied,
                      windowCount: sws.windowCount | 0,
@@ -473,7 +510,7 @@ function layout(input) {
         var kbox = boxByWs[wsk]
         tiles = tiles.concat(_placeWindows(winsByWs[wsk], monByName[kbox.monitorName], kbox, P))
     }
-    return { canvasSize: { w: canvasW, h: y }, boxes: boxes, tiles: tiles,
+    return { canvasSize: { w: canvasW + 2 * edge, h: y }, boxes: boxes, tiles: tiles,
              groups: groups, cell: { w: cw, h: ch, cols: cols } }
 }
 

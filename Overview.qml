@@ -292,9 +292,18 @@ Item {
 
     // headerH is the chip band per monitor group; logic.js lays it out only when more than
     // one monitor has workspaces (see Logic.layout), so a single monitor gets no band.
+    // gapRatio 0.04 selects layout()'s proportional mode — the gap is that fraction of the
+    // cell, each edge carries one gap, and the cell takes what is left
+    // (docs/specs/2026-09-20-proportional-spacing-design.md); cellSpacing and rowSpacing are
+    // the fixed-pixel fallback layout() uses when gapRatio is not a positive finite number.
+    // maxCellW 800 is a sanity cap that only binds once the card offers at least 4192
+    // logical px of interior width; below that the cells always fill it. 0.04 was chosen by
+    // eye on 2026-09-21, stepping down from the spec's 0.08 through 0.06 on both of the
+    // author's screens.
     readonly property var params: ({
-        maxCols: 5, minCellW: 140, maxCellW: 380, cellInset: 3, cellSpacing: 4,
-        rowSpacing: 8, headerH: 22, groupInset: 6, minTileW: 8, minTileH: 6, slotGapTolerance: 24
+        maxCols: 5, minCellW: 140, maxCellW: 800, cellInset: 3, cellSpacing: 4,
+        rowSpacing: 8, headerH: 22, groupInset: 6, minTileW: 8, minTileH: 6, slotGapTolerance: 24,
+        gapRatio: 0.04
     })
     // ---- Bar attachment ------------------------------------------------------------------
     // The reserved TOP strip of the screen the picker is ON. The overlay is an Overlay-layer
@@ -2393,10 +2402,11 @@ Item {
                 id: flick
                 // Centred on the card when the grid is narrower than the room available.
                 // layout() lays boxes out from x = 0 and the canvas is exactly the grid's
-                // width. In centred mode the card shrinks to the grid, so there is never any
-                // slack; a full-width bar-mode card leaves the difference -- 108 px on a
-                // 2048-logical panel, where maxCellW caps the cells at 380 before the width
-                // runs out -- and the grid would hug the left edge.
+                // width, edges included. In centred mode the card shrinks to the grid, so there
+                // is never any slack; a full-width bar-mode card leaves the fit step's few
+                // pixels (at most 2*cols), and real slack only where maxCellW binds -- at
+                // least 4192 logical px of interior width, where the canvas freezes at 4192.
+                // Either way the remainder must not sit on one side.
                 //
                 // It is the FLICKABLE that moves, not the canvas: pointerPoint() maps the
                 // pointer through `flick` and then calls the result canvas coordinates, which
