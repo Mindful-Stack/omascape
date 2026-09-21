@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest something the overlay should do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Features here usually start as a design doc in [docs/specs/](https://github.com/Mindful-Stack/omascape/tree/main/docs/specs)
+        before any code — so a clear description of the problem is more useful than a proposed
+        implementation. Have a look at [ROADMAP.md](https://github.com/Mindful-Stack/omascape/blob/main/ROADMAP.md)
+        first; it may already be there, or parked with a reason.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation you're in when you want this, not the feature itself.
+      placeholder: "When I'm screen sharing I want to…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What do you do today instead?
+      description: Workarounds, other tools, or "nothing — I live with it".
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I checked ROADMAP.md and the existing issues.
+          required: true

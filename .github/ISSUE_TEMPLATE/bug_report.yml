@@ -1,0 +1,97 @@
+name: Bug report
+description: Something in the overlay behaves wrongly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file this. Omascape is a compositor overlay, so the
+        environment details below are usually what makes a report reproducible.
+
+        **Security problem?** Don't file it here — see [SECURITY.md](https://github.com/Mindful-Stack/omascape/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you pressed, dragged or clicked, in order.
+      placeholder: |
+        1. Open the overlay with SUPER+TAB
+        2. Drag the tile on workspace 2 onto workspace 5
+        3. …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducible
+    attributes:
+      label: Does it happen every time?
+      options:
+        - Every time
+        - Often, but not always
+        - Once, and I could not reproduce it
+    validations:
+      required: true
+
+  - type: input
+    id: omascape-version
+    attributes:
+      label: Omascape version
+      description: "`omarchy plugin list | grep omascape`, or the commit you have checked out."
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: "Omarchy and Hyprland versions — `hyprctl version | head -1` covers the latter."
+      placeholder: |
+        Omarchy: Quattro, updated 2026-09-15
+        Hyprland: 0.xx.x
+        Quickshell: from omarchy-shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: monitors
+    attributes:
+      label: Monitor layout
+      description: |
+        Output of `hyprctl monitors -j | jq -r '.[] | "\(.name) \(.width)x\(.height)@\(.refreshRate) scale=\(.scale) at \(.x),\(.y)"'`,
+        or just describe it. Multi-monitor and fractional scaling are where most layout bugs live.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Shell log
+      description: Anything Omascape-related from the shell log around the time it happened.
+      render: shell
+
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshot or recording
+      description: Optional, but for anything visual it is worth more than a paragraph.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched the existing issues.
+          required: true
+        - label: I am on the current `main` (`omarchy plugin update se.mindfulstack.omascape`) and it still happens.
+          required: true
+        - label: The plugin is enabled (`omarchy plugin list | grep omascape`).
+          required: true
