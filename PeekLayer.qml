@@ -144,7 +144,7 @@ Item {
                 fontFamily: peek.fontFamily; titleSize: peek.captionSize
                 motion: peek.motion
                 // Measured, not estimated (2026-09-18, under the 380-px cell cap that predates
-                // proportional spacing; the grid cell is now 345 at 1920 logical, and peekTiles
+                // proportional spacing; the grid cell is now 353 at 1920 logical, and peekTiles
                 // sizes off frame.width, so the argument's SHAPE holds while its ratios have
                 // moved): at a 1920×1080 panel on a 2560×1440 monitor, real
                 // peekTiles output puts a mini-map tile at a uniform 3.09x its grid-cell

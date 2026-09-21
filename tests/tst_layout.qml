@@ -10,8 +10,10 @@ TestCase {
         rowSpacing: 12, headerH: 22, groupInset: 6, minTileW: 8, minTileH: 6, slotGapTolerance: 24
     })
 
-    // The production spacing params after docs/specs/2026-09-20-proportional-spacing-design.md:
-    // the gap is 8% of the cell, both edges carry one gap, and maxCellW is only a sanity cap.
+    // The spacing params these tests pin (docs/specs/2026-09-20-proportional-spacing-design.md):
+    // the gap is a fraction of the cell, both edges carry one gap, and maxCellW is only a sanity
+    // cap. The fixture keeps the 0.08 the spec was derived at; production moved to 0.06 after the
+    // 2026-09-21 sweep, and the UI suite pins that value against the real params object.
     // `params` above stays on the pixel model on purpose — every fixture in this file pins
     // absolute x/y literals against it, and the ratio must not move them.
     readonly property var ratioParams: ({

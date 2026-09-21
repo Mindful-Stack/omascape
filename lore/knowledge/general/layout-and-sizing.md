@@ -41,7 +41,7 @@ var cw = Math.max(P.minCellW, Math.min(P.maxCellW,
     Math.floor((availW - (cols - 1) * gap) / cols)))
 ```
 
-The params are `maxCols: 5, minCellW: 140, maxCellW: 800, gapRatio: 0.08` (`Overview.qml`, the
+The params are `maxCols: 5, minCellW: 140, maxCellW: 800, gapRatio: 0.06` (`Overview.qml`, the
 `params` object), and the two statements above are the fixed-pixel FALLBACK branch — what runs
 when `gapRatio` is not set. The proportional branch, which is what production runs, follows
 below. The comment says it outright: *"maxCols is a CAP, not a floor."* A narrow screen gets
@@ -50,22 +50,23 @@ fewer columns; it does not get five squeezed ones. Cell width is then clamped be
 which is exactly why the margin change above shrank the author's cells from 380.
 
 Since 2026-09-20 the cell is no longer the thing that is capped in practice. With `gapRatio`
-set (0.08 in production) the gap is that fraction of the cell width, both edges of the canvas
+set (0.06 in production since the 2026-09-21 sweep; the logic tests pin 0.08, the ratio the spec
+was derived at) the gap is that fraction of the cell width, both edges of the canvas
 carry one gap, and the cell takes what is left — fitted to whole pixels so the canvas is never
 wider than `availW` except when `minCellW` binds, the one case where the pixel model overflows
 too and the Flickable scrolls. In shape (the real code is ES5 with `Math.max`/`Math.min`; see
 `layout()`):
 
 ```text
-gapMin = round(minCellW * ratio)                                   // 11 in production
+gapMin = round(minCellW * ratio)                                   // 8 in production, 11 at 0.08
 cols   = clamp(floor((availW - gapMin) / (minCellW + gapMin)), 1, maxCols)   // both outer gaps count
 cw = clamp(floor(availW / (cols + (cols + 1) * ratio)), minCellW, maxCellW)
 gap = round(cw * ratio)
 while (cols * cw + (cols + 1) * gap > availW && cw > minCellW) { cw--; gap = round(cw * ratio) }
 ```
 
-`maxCellW` is 800 now and only binds once the card offers more than 4384 logical px of interior
-width; below that it is a sanity cap that never fires. The row spacing between sub-rows, monitor
+`maxCellW` is 800 now and only binds once the card offers at least 4288 logical px of interior
+width (4385 at the spec's 0.08); below that it is a sanity cap that never fires. The row spacing between sub-rows, monitor
 groups and the scratchpad follows the same gap. Without `gapRatio` — absent, or anything but a
 positive finite *number* (`typeof` is checked, so the string `"0.08"` does not switch it on; see
 the comment in `layout()`) — the pixel `cellSpacing` and `rowSpacing` apply exactly as before:
@@ -85,7 +86,7 @@ that is *valid geometry*, not zero:
 
 | Input | Fallback | Effect |
 |---|---|---|
-| `availW` missing or ≤ 0 | `maxCols * minCellW + (maxCols - 1 + edges) * gapMin` — `edges` is 2 in ratio mode, 0 otherwise (766 in production) | `cols` resolves to `maxCols`, `cw` clamps to exactly `minCellW` |
+| `availW` missing or ≤ 0 | `maxCols * minCellW + (maxCols - 1 + edges) * gapMin` — `edges` is 2 in ratio mode, 0 otherwise (748 in production, 766 at 0.08) | `cols` resolves to `maxCols`, `cw` clamps to exactly `minCellW` |
 | `panelW` non-finite | `16` | the floor margin, i.e. the pre-change behaviour |
 | a monitor with non-positive logical size | the default aspect | same path a missing monitor takes |
 

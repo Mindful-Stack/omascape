@@ -292,16 +292,17 @@ Item {
 
     // headerH is the chip band per monitor group; logic.js lays it out only when more than
     // one monitor has workspaces (see Logic.layout), so a single monitor gets no band.
-    // gapRatio 0.08 selects layout()'s proportional mode — the gap is that fraction of the
+    // gapRatio 0.06 selects layout()'s proportional mode — the gap is that fraction of the
     // cell, each edge carries one gap, and the cell takes what is left
     // (docs/specs/2026-09-20-proportional-spacing-design.md); cellSpacing and rowSpacing are
     // the fixed-pixel fallback layout() uses when gapRatio is not a positive finite number.
-    // maxCellW 800 is a sanity cap that only binds once the card offers more than 4384
-    // logical px of interior width; below that the cells always fill it.
+    // maxCellW 800 is a sanity cap that only binds once the card offers at least 4288
+    // logical px of interior width; below that the cells always fill it. 0.06 was chosen by
+    // eye on 2026-09-21 (0.08 read too wide on both of the author's screens).
     readonly property var params: ({
         maxCols: 5, minCellW: 140, maxCellW: 800, cellInset: 3, cellSpacing: 4,
         rowSpacing: 8, headerH: 22, groupInset: 6, minTileW: 8, minTileH: 6, slotGapTolerance: 24,
-        gapRatio: 0.08
+        gapRatio: 0.06
     })
     // ---- Bar attachment ------------------------------------------------------------------
     // The reserved TOP strip of the screen the picker is ON. The overlay is an Overlay-layer
@@ -2402,8 +2403,8 @@ Item {
                 // layout() lays boxes out from x = 0 and the canvas is exactly the grid's
                 // width, edges included. In centred mode the card shrinks to the grid, so there
                 // is never any slack; a full-width bar-mode card leaves the fit step's few
-                // pixels (at most 2*cols), and real slack only where maxCellW binds -- more
-                // than 4384 logical px of interior width, where the canvas freezes at 4384.
+                // pixels (at most 2*cols), and real slack only where maxCellW binds -- at
+                // least 4288 logical px of interior width, where the canvas freezes at 4288.
                 // Either way the remainder must not sit on one side.
                 //
                 // It is the FLICKABLE that moves, not the canvas: pointerPoint() maps the
