@@ -5,8 +5,11 @@ Guidance for Claude Code working on Omascape — an Omarchy/Quickshell workspace
 
 This is a **single-repo household**: the `lore/` knowledge base is tracked inline, alongside the
 code. There are no sibling repos, nothing is cloned in, and the workspace tooling's
-sibling/repo-lifecycle targets (`make setup`, `make repos-*`, `make policy-*`) have nothing to
-act on here.
+sibling/repo-lifecycle targets (`make repos-*`, `make policy-*`) have nothing to act on here.
+
+The template's `scripts/setup.sh` and its `make setup` targets were **removed** from this
+repository — a marketplace security review flags its clone-and-execute bootstrap, and with no
+sibling repos to clone it did nothing here. See `lore/knowledge/adrs/0006-marketplace-publication.md`.
 
 ## Commands — two different `test`s, don't confuse them
 

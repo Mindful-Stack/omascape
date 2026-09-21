@@ -42,7 +42,7 @@ cd "$WORKSPACE" || exit 1
 while IFS= read -r NAME; do
     [ -z "$NAME" ] && continue
     if [ ! -d "$NAME" ]; then
-        echo "$NAME: not cloned locally (skipped — run make setup)"
+        echo "$NAME: not cloned locally (skipped)"
         continue
     fi
     if ! git -C "$NAME" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
