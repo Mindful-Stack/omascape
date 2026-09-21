@@ -134,13 +134,13 @@ monitor enumeration, `focusedScreen()` or the per-monitor rows, capture the conc
 layout has never been verified either).
 
 ### 16. ~~Proportional spacing~~ ✅ done (2026-09-20)
-The gap between tiles is 6% of the tile width, each edge carries one gap, and the tiles take
+The gap between tiles is 4% of the tile width, each edge carries one gap, and the tiles take
 the rest — so a 2560- or 3840-logical screen fills instead of centring a 1916 px row with 4 px
-gaps in it. `maxCellW` is a sanity cap at 800 now. Cells shrink 380 → 377 on a 2048 laptop in
+gaps in it. `maxCellW` is a sanity cap at 800 now. Cells grow 380 → 386 on a 2048 laptop in
 bar mode to pay for the gap. See `docs/specs/2026-09-20-proportional-spacing-design.md`.
-Swept by eye on both of the author's screens 2026-09-21: the spec's 0.08 read too wide and
-moved to 0.06 (laptop 377 / 23, external 473 / 28). Still open: whether the top padding should
-follow the gap, and whether the 23 px drag dead-band between tiles bites in use.
+Swept by eye on both of the author's screens 2026-09-21: the spec's 0.08 read too wide, and
+so did 0.06; production is 0.04 (laptop 386 / 15, external 483 / 19). Still open: whether the top padding should
+follow the gap, and whether the 15 px drag dead-band between tiles bites in use.
 
 Further afield, `docs/roadmap-v3-ideas.md` holds the research-backed v3 wishlist, including an
 "explicitly avoid" list of other overviews' scars.

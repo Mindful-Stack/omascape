@@ -5,7 +5,7 @@ builds on the bar drop-down (`docs/specs/2026-09-19-bar-dropdown-design.md`).
 Status: **implemented and swept 2026-09-21** (brainstorm 2026-09-20; review corrections applied the
 same day — integer fitting, the missing-width fallback, and the external-screen figures). The
 derivation and tables below are at the 0.08 the design was worked out at; the sweep moved
-production to **0.06** — see "After the sweep" at the end.
+production to **0.04** — see "After the sweep" at the end.
 
 ## Goal
 
@@ -173,18 +173,19 @@ padding wants to follow the gap (out of scope here, noted for the sweep).
 
 ## After the sweep (2026-09-21)
 
-On both of the author's screens 0.08 read as too much gap for the tile it bought, so production
-runs `gapRatio` = 0.06. Same rule, same fit; only the number moved. The logic tests keep pinning
+On both of the author's screens 0.08 read as too much gap for the tile it bought, and so did
+0.06 on a second look, so production runs `gapRatio` = 0.04. Same rule, same fit; only the
+number moved. The logic tests keep pinning
 0.08 as their fixture ratio, because they pin the algorithm; the offscreen UI test reads the real
 params object and pins the production row.
 
-| screen (bar mode, `availW`) | at 0.08 `cw` / gap | **at 0.06 `cw` / gap** | canvas |
-|---|---|---|---|
-| laptop, 2024 | 368 / 29 | **377 / 23** | 2023 |
-| external, 2536 | 462 / 37 | **473 / 28** | 2533 |
-| 4K at 1×, 3816 | 696 / 56 | **711 / 43** | 3813 |
-| laptop, centred card, 1820 | 331 / 26 | **339 / 20** | 1815 |
+| screen (bar mode, `availW`) | at 0.08 `cw` / gap | at 0.06 | **at 0.04 `cw` / gap** | canvas |
+|---|---|---|---|---|
+| laptop, 2024 | 368 / 29 | 377 / 23 | **386 / 15** | 2020 |
+| external, 2536 | 462 / 37 | 473 / 28 | **483 / 19** | 2529 |
+| 4K at 1×, 3816 | 696 / 56 | 711 / 43 | **728 / 29** | 3814 |
+| laptop, centred card, 1820 | 331 / 26 | 339 / 20 | **347 / 14** | 1819 |
 
-At 0.06 the cap first binds at `availW` 4288 (canvas frozen at 5·800 + 6·48 = 4288), the minimum
-gap is 8, and the missing-width fallback is 748. Still open after the sweep: whether the top
-padding should follow the gap, and whether the 23 px drag dead-band between tiles bites in use.
+At 0.04 the cap first binds at `availW` 4192 (canvas frozen at 5·800 + 6·32 = 4192), the minimum
+gap is 6, and the missing-width fallback is 736. Still open after the sweep: whether the top
+padding should follow the gap, and whether the 15 px drag dead-band between tiles bites in use.

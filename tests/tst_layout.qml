@@ -12,7 +12,7 @@ TestCase {
 
     // The spacing params these tests pin (docs/specs/2026-09-20-proportional-spacing-design.md):
     // the gap is a fraction of the cell, both edges carry one gap, and maxCellW is only a sanity
-    // cap. The fixture keeps the 0.08 the spec was derived at; production moved to 0.06 after the
+    // cap. The fixture keeps the 0.08 the spec was derived at; production moved to 0.04 after the
     // 2026-09-21 sweep, and the UI suite pins that value against the real params object.
     // `params` above stays on the pixel model on purpose — every fixture in this file pins
     // absolute x/y literals against it, and the ratio must not move them.

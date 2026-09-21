@@ -580,7 +580,7 @@ TestCase {
     // canvas is narrower than the card the remainder is pure slack. Since proportional
     // spacing (docs/specs/2026-09-20-proportional-spacing-design.md) the cells fill the width
     // and slack only survives where maxCellW binds: 6000 logical is past that (cells 800, gap
-    // 48, canvas 4288 at the production 0.06), which is why the width moved from the 2048 that first reported this.
+    // 32, canvas 4192 at the production 0.04), which is why the width moved from the 2048 that first reported this.
     // Distinguishes: a Flickable pinned at x = card.pad with the slack dumped on the right --
     // the original bug -- on the one path that still produces slack.
     function test_the_grid_is_centred_when_narrower_than_the_card() {
@@ -613,8 +613,8 @@ TestCase {
         verify(first.x > 0, "the first cell does not touch the canvas edge")
         compare(first.x, Math.round(first.w * view.params.gapRatio),
                 "the edge is one gap, and the gap is gapRatio of the cell")
-        compare(first.w, 377, "the spec's laptop row after the sweep: cell 377")
-        compare(first.x, 23, "gap 23")
+        compare(first.w, 386, "the spec's laptop row after the sweep: cell 386")
+        compare(first.x, 15, "gap 15")
     }
 
     // is the one property that makes this test able to tell the bug from the fix.
