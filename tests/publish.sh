@@ -15,6 +15,13 @@ script="$src/scripts/publish.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+# Omarchy's own validator only exists on an Omarchy box, and the synthetic plugins below are
+# not built to satisfy its schema -- so the suite always supplies its own. A case that cares
+# about the validator overrides this per run.
+printf '#!/bin/bash\nexit 0\n'                          > "$work/validate-ok"
+printf '#!/bin/bash\necho "rejected: bad tree" >&2\nexit 1\n' > "$work/validate-no"
+chmod +x "$work/validate-ok" "$work/validate-no"
+
 passed=0
 failed=0
 ok()  { printf '  ok   %s\n' "$1"; passed=$((passed + 1)); }
@@ -101,7 +108,8 @@ MD
 # run <box> [args...]: the script against that box's dev. Sets $out and $status.
 run() {
     local box=$1; shift
-    out=$(cd "$box" && bash scripts/publish.sh --onto main --into main "$@" 2>&1)
+    out=$(cd "$box" && OMARCHY_PLUGIN_VALIDATE="${VALIDATOR:-$work/validate-ok}" \
+        bash scripts/publish.sh --onto main --into main "$@" 2>&1)
     status=$?
 }
 
@@ -230,6 +238,28 @@ git -C "$box" checkout -q dev
 run "$box"
 same "diverged: exits 1"  "$status" "1"
 has  "diverged: says which way round" "$out" "not an ancestor"
+
+# Omarchy runs this validator on update and hard-resets the user when it fails, so a tree it
+# rejects must never become a commit -- the user would keep a working plugin and silently
+# stop receiving updates.
+box=$(setup rejected)
+before=$(git -C "$box" rev-parse main)
+VALIDATOR="$work/validate-no" run "$box"
+same "rejected: exits 1"       "$status" "1"
+has  "rejected: says why"      "$out" "omarchy-plugin-validate rejects"
+has  "rejected: passes the validator's own message through" "$out" "rejected: bad tree"
+same "rejected: main did not move" "$(git -C "$box" rev-parse main)" "$before"
+
+box=$(setup validated)
+run "$box"
+same "validated: exits 0"      "$status" "0"
+has  "validated: says it ran"  "$out" "omarchy-plugin-validate passed"
+
+# No validator is not a pass, and the run says so rather than going quiet.
+box=$(setup unvalidated)
+VALIDATOR=/nonexistent/omarchy-plugin-validate run "$box"
+same "unvalidated: still exits 0" "$status" "0"
+has  "unvalidated: says it skipped" "$out" "SKIPPED omarchy-plugin-validate"
 
 box=$(setup dirty)
 echo 'work in progress' > "$box/Overview.qml"

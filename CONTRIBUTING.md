@@ -132,7 +132,11 @@ git tag -a v0.5.2 main && git push origin v0.5.2
 `scripts/publish.sh` assembles the published tree with plumbing against a temporary index — no
 branch is checked out and nothing is pushed — and refuses to build one whose manifest entry point
 is missing, whose imports do not resolve, whose README links a screenshot that no longer exists,
-or which trips the marketplace's own security-baseline patterns. The release commit records the
+or which trips the marketplace's own security-baseline patterns. On a machine with Omarchy
+installed it also runs `omarchy-plugin-validate` against the built tree: that validator is step 4
+of `omarchy plugin update`, and a tree it rejects does not fail loudly — the user is hard-reset
+to their old commit, keeps a working plugin, and silently stops receiving updates. The release
+commit records the
 `dev` commit it came from in a `Source-commit:` trailer, which is what lets the next train check
 that nothing already published is being rolled back.
 

@@ -77,7 +77,10 @@ published plugin tree (or publish an artifact containing only runtime plugin fil
   branch is checked out, no worktree is touched, nothing is pushed. It refuses to build a tree
   whose manifest entry point is missing, whose QML imports do not resolve inside the published
   set, whose README links a screenshot that is no longer in the source, or which matches the
-  marketplace's own baseline patterns.
+  marketplace's own baseline patterns. Where Omarchy is installed it also runs
+  `omarchy-plugin-validate` against the built tree — step 4 of `omarchy plugin update`, which
+  hard-resets the user to `ORIG_HEAD` on failure, so a tree it rejects strands every install on
+  its current commit without anything appearing to break.
 - The release commit records its source in a `Source-commit:` trailer. The next train checks that
   commit is an ancestor of the new source, which is how "nothing already published gets rolled
   back" is enforced without requiring `main` to be an ancestor of `dev` — it never is again after
@@ -109,7 +112,9 @@ published plugin tree (or publish an artifact containing only runtime plugin fil
 - Contributors land on a default branch that is not where the work happens. CONTRIBUTING.md and
   the README both open by saying so; it will still catch people out.
 - `main` has no CI. Its contents are a subset of a `dev` tree that was green, and the publish
-  guards cover the assembly, but nothing runs a test against the artifact itself.
+  guards cover the assembly, but nothing runs a test against the artifact itself. The closest
+  thing is `omarchy-plugin-validate`, and it only runs where Omarchy is installed — which is a
+  maintainer's machine, never CI.
 
 ## Assumptions and invalidation triggers
 

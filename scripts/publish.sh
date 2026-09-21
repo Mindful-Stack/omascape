@@ -185,6 +185,23 @@ git update-index --add --cacheinfo "100644,$blob,README.md"
 tree=$(git write-tree)
 unset GIT_INDEX_FILE
 
+# Omarchy runs its own validator as step 4 of `plugin update` and does `git reset --hard
+# ORIG_HEAD` when it fails -- so a tree that fails here does not break loudly, it silently
+# stops every installed user from ever receiving another update. Run it against the real
+# tree while we still have one to throw away.
+VALIDATE=${OMARCHY_PLUGIN_VALIDATE:-}
+[[ -n $VALIDATE ]] || VALIDATE=$(command -v omarchy-plugin-validate 2>/dev/null || true)
+[[ -n $VALIDATE || ! -x /usr/share/omarchy/bin/omarchy-plugin-validate ]] \
+    || VALIDATE=/usr/share/omarchy/bin/omarchy-plugin-validate
+if [[ -n $VALIDATE && -x $VALIDATE ]]; then
+    stage="$tmp/tree"; mkdir -p "$stage"
+    git archive "$tree" | tar -x -C "$stage"
+    "$VALIDATE" "$stage" || die "omarchy-plugin-validate rejects the published tree"
+    echo "publish: omarchy-plugin-validate passed"
+else
+    echo "publish: SKIPPED omarchy-plugin-validate (not installed) — the tree is unverified against Omarchy" >&2
+fi
+
 if [[ $tree == "$(git rev-parse "$onto^{tree}")" ]]; then
     echo "publish: $ONTO already carries this exact tree — nothing to publish"
     exit 0
