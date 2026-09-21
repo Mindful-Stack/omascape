@@ -429,6 +429,11 @@ does not animate at all, and you may prefer to leave the compositor's layer anim
 
 Contributions are welcome — bug reports, fixes, and the roadmap items in `ROADMAP.md`.
 
+**Start with [CONTRIBUTING.md](CONTRIBUTING.md)** — reporting, the PR process, the CI
+conventions that are not negotiable, and why `main` occasionally stops moving. Participation is
+under the [Code of Conduct](CODE_OF_CONDUCT.md); security problems go through
+[SECURITY.md](SECURITY.md), not the issue tracker.
+
 ### Project layout
 
 | File / dir          | What it is                                                              |
@@ -542,11 +547,12 @@ checking behavior by hand. Before opening a PR, confirm:
 
 ### Submitting changes
 
-1. Branch off `main`: `git checkout -b your-change`.
-2. Keep commits focused; write a clear message explaining the *why*.
-3. If you change behavior, update `DESIGN.md`/`ROADMAP.md` to match.
-4. Open a PR against `Mindful-Stack/omascape`. Describe what you tested from the checklist
-   above (a screenshot or short screen recording helps a lot for UI changes).
+The full process lives in [CONTRIBUTING.md](CONTRIBUTING.md). In short: branch off `main`, keep
+commits focused and explain the *why*, update `DESIGN.md`/`ROADMAP.md` when behavior changes,
+and open a PR against `Mindful-Stack/omascape` describing what you tested from the checklist
+above. A screenshot or short screen recording helps a lot for UI changes.
+
+Don't bump `manifest.json`'s `version` in a feature PR — that belongs to the release train.
 
 Maintainers: **@DanielThyselius**, **@dotnetemmanuel**.
 
