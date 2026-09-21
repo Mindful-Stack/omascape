@@ -115,6 +115,17 @@ published plugin tree (or publish an artifact containing only runtime plugin fil
   guards cover the assembly, but nothing runs a test against the artifact itself. The closest
   thing is `omarchy-plugin-validate`, and it only runs where Omarchy is installed — which is a
   maintainer's machine, never CI.
+- **Branch protection on `main` now works by exception rather than by rule.** Its required
+  `logic-tests` check can never go green, which is what stops a pull request being merged there,
+  and the release push lands only because administrators are exempt. That is a deliberate
+  trade — an unmergeable branch is worth more here than a pushable one — but it means enabling
+  "Include administrators" on `main` silently breaks releases, and the error says nothing about
+  protection. `dev` takes over as the branch where the check is real.
+- Publishing writes a branch ref without checking it out, so a worktree holding `main` would be
+  left on the new commit with the old files on disk — which git reads as a full set of staged
+  additions, every one a development file the release had just removed. Committing there would
+  republish the entire development tree. `publish.sh` refuses instead; `tests/publish.sh` covers
+  both that and the case where the maintainer is simply standing on `main`.
 
 ## Assumptions and invalidation triggers
 

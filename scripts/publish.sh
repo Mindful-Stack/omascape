@@ -225,6 +225,20 @@ this branch is the artifact Omarchy installs.
 
 Source-commit: $src")
 
+# `git update-ref` will happily move a branch that a worktree has checked out, and that
+# worktree is then sitting on the new commit with the old files still on disk -- which git
+# reads as "the user staged 162 additions", every one of them a development file the release
+# had just removed. A commit there republishes the entire dev tree to main. Refuse instead.
+checked_out=$(git worktree list --porcelain | awk -v b="refs/heads/$INTO" '
+    /^worktree /{ path = substr($0, 10) }
+    /^branch /   { if (substr($0, 8) == b) { print path; exit } }')
+if [[ -n $checked_out ]]; then
+    if [[ $checked_out == "$(git rev-parse --show-toplevel)" ]]; then
+        die "you are on $INTO; publish from the development branch instead"
+    fi
+    die "$INTO is checked out at $checked_out; publishing would leave that worktree staging the files this release removes"
+fi
+
 # Only move a local release branch that is exactly where we branched from. Anything else is
 # a divergence the maintainer has to look at, not something to fast-forward over.
 if git rev-parse --verify "refs/heads/$INTO" >/dev/null 2>&1; then

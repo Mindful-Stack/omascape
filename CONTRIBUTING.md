@@ -140,6 +140,44 @@ commit records the
 `dev` commit it came from in a `Source-commit:` trailer, which is what lets the next train check
 that nothing already published is being rolled back.
 
+### Branch protection
+
+The two branches are protected differently, and the difference is load-bearing.
+
+| | `main` | `dev` |
+| --- | --- | --- |
+| Required check | `logic-tests` — *never satisfiable* | `logic-tests` |
+| Force pushes | blocked | blocked |
+| Deletions | blocked | blocked |
+| Administrators included | **no** | no |
+
+`main` keeps `logic-tests` as a required check even though CI never runs there — workflows are
+not published, and they would only ever report a skip on a branch with no tests. That is the
+point: a check that can never go green means a pull request opened against `main` cannot be
+merged by anybody. It is the one thing standing between an accidental merge and the whole
+development tree landing in every user's plugin directory on their next update.
+
+The release push gets through because administrators are exempt. **That exemption is part of the
+release procedure, not an oversight** — switching on "Include administrators" for `main` makes
+`mise run release:publish` unpushable, and the error does not mention branch protection. Blocked
+force pushes matter for a different reason: `omarchy plugin update` is `merge --ff-only`, so
+rewriting published history makes every existing install un-updatable.
+
+`dev` requires `logic-tests` because it is now the integration branch. Setting it up, once:
+
+```
+gh api -X PUT repos/Mindful-Stack/omascape/branches/dev/protection --input - <<'JSON'
+{
+  "required_status_checks": { "strict": false, "contexts": ["logic-tests"] },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+JSON
+```
+
 Because `main` only moves when someone runs that, it sits still through a marketplace review on
 its own — there is no freeze to hold and `dev` keeps merging throughout. What maintainers do hold
 is the *publish*: while a listing request is open, don't run the train, because the marketplace

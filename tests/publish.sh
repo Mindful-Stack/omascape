@@ -261,6 +261,31 @@ VALIDATOR=/nonexistent/omarchy-plugin-validate run "$box"
 same "unvalidated: still exits 0" "$status" "0"
 has  "unvalidated: says it skipped" "$out" "SKIPPED omarchy-plugin-validate"
 
+# `git update-ref` moves a branch regardless of who has it checked out, and the worktree that
+# did is then on the new commit with the old files on disk -- which reads as a full set of
+# staged additions, every one a development file this release had just removed. Committing
+# there would republish the whole dev tree.
+box=$(setup checked-out)
+before=$(git -C "$box" rev-parse main)
+git -C "$box" worktree add -q "$work/checked-out-release" main
+run "$box"
+same "checked-out: exits 1"        "$status" "1"
+has  "checked-out: names the path" "$out" "$work/checked-out-release"
+has  "checked-out: says what it would have done" "$out" "files this release removes"
+same "checked-out: main did not move" "$(git -C "$box" rev-parse main)" "$before"
+clean "checked-out: that worktree is untouched" "$work/checked-out-release"
+git -C "$box" worktree remove --force "$work/checked-out-release"
+
+# Standing on the release branch is the same mistake with a more useful answer. The script is
+# invoked by absolute path here: `main` is the published tree, so it has no scripts/ to run.
+box=$(setup standing-on-it)
+git -C "$box" checkout -q main
+out=$(cd "$box" && OMARCHY_PLUGIN_VALIDATE="$work/validate-ok" \
+    bash "$script" --source dev --onto main --into main 2>&1)
+status=$?
+same "standing-on-it: exits 1"  "$status" "1"
+has  "standing-on-it: says where to stand" "$out" "publish from the development branch"
+
 box=$(setup dirty)
 echo 'work in progress' > "$box/Overview.qml"
 run "$box"
