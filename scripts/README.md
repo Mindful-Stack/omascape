@@ -15,6 +15,12 @@ knowledge base supports via `make split-lore`.
   `update-kb`, `repos-create`, `repos-rename`, `repos-sync-names`, `policy-*`,
   `test-scripts`). The root `Makefile` does `include scripts/Makefile.shared`
   and adds household-specific targets (`split-lore`, `rename`, KB tooling).
+- `publish.sh` — **Omascape's release train, not workspace tooling.** Builds
+  the runtime-only published tree from `dev` and records it as a commit on
+  `main`, which is what `omarchy plugin add` clones (ADR-0010).
+  `mise run release:publish`; `tests/publish.sh` covers it.
+- `dev-link.sh` — points the live Omarchy plugin directory at this worktree
+  (`mise run dev:link`). Also Omascape's, not the household's.
 - `claude-settings.json` — canonical Claude Code baseline, copied to the
   workspace root's `.claude/settings.json` by hand when you want it; that copy
   is generated, not tracked.

@@ -429,10 +429,17 @@ does not animate at all, and you may prefer to leave the compositor's layer anim
 
 Contributions are welcome — bug reports, fixes, and the roadmap items in `ROADMAP.md`.
 
-**Start with [CONTRIBUTING.md](CONTRIBUTING.md)** — reporting, the PR process, the CI
-conventions that are not negotiable, and why `main` occasionally stops moving. Participation is
-under the [Code of Conduct](CODE_OF_CONDUCT.md); security problems go through
+**Start with [CONTRIBUTING.md](CONTRIBUTING.md)** — reporting, the PR process, and the CI
+conventions that are not negotiable. Participation is under the
+[Code of Conduct](CODE_OF_CONDUCT.md); security problems go through
 [SECURITY.md](SECURITY.md), not the issue tracker.
+
+**You want `dev`, not `main`.** `dev` is the project — this README, the specs, the tests, the
+tooling. `main` is the published plugin tree: the QML, `logic.js`, the manifest and the licence,
+built from `dev` by `scripts/publish.sh` and never committed to by hand, because a bare
+`git clone` of the default branch is literally what `omarchy plugin add` installs
+([ADR-0010](lore/knowledge/adrs/0010-published-tree-is-the-default-branch.md)). Branch off `dev`
+and open pull requests against it.
 
 ### Project layout
 
@@ -448,7 +455,7 @@ under the [Code of Conduct](CODE_OF_CONDUCT.md); security problems go through
 | `SoftShadow.qml`    | Shadow under floating tiles.                                            |
 | `logic.js`          | Pure logic: geometry, reconcile, Lua chunk generation. Unit-tested.     |
 | `tests/`            | Tier 1 logic + UI tests (`mise run test`), Lua chunk suite, integration. |
-| `scripts/`          | `add-keybind.sh` (appends the toggle bind); `dev-link.sh` (`mise run dev:link`). |
+| `scripts/`          | `add-keybind.sh` (appends the toggle bind); `dev-link.sh` (`mise run dev:link`); `publish.sh` (builds `main`). |
 | `DESIGN.md`         | What it does and why.                                                   |
 | `docs/specs/`       | One design doc per feature (find, scratchpad, lock, …).                 |
 | `ROADMAP.md`        | What's next.                                                            |
@@ -547,10 +554,14 @@ checking behavior by hand. Before opening a PR, confirm:
 
 ### Submitting changes
 
-The full process lives in [CONTRIBUTING.md](CONTRIBUTING.md). In short: branch off `main`, keep
+The full process lives in [CONTRIBUTING.md](CONTRIBUTING.md). In short: branch off `dev`, keep
 commits focused and explain the *why*, update `DESIGN.md`/`ROADMAP.md` when behavior changes,
-and open a PR against `Mindful-Stack/omascape` describing what you tested from the checklist
-above. A screenshot or short screen recording helps a lot for UI changes.
+and open a PR **against `dev`** describing what you tested from the checklist above. A
+screenshot or short screen recording helps a lot for UI changes.
+
+If you add a file the overlay loads at runtime, add it to the published set in
+`scripts/publish.sh` too — `mise run test` fails the build if an import would not resolve in
+the published tree.
 
 Don't bump `manifest.json`'s `version` in a feature PR — that belongs to the release train.
 

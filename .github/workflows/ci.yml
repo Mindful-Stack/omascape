@@ -1,7 +1,11 @@
 name: ci
+# `main` is the published plugin tree (ADR-0010) and carries no tests, so building it would
+# only ever report a skip. Development, and therefore CI, lives on `dev`.
 on:
   push:
+    branches: [dev]
   pull_request:
+    branches: [dev]
 # The workflow only reads the repository and reports through the checks API that
 # GITHUB_TOKEN grants by default. Nothing here writes to the repo, so drop every
 # other scope rather than inherit the repository default.

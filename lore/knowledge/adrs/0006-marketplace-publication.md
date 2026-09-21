@@ -2,7 +2,7 @@
 title: "ADR-0006: Publishing runs as a release train, and `main` freezes during review"
 description: "Marketplace listing requires the validated snapshot to be the default-branch HEAD, so releases are batched, tagged and submitted by full SHA, and no commit reaches main until the maintainer applies approved-and-verified."
 tags: [adr, release, omarchy, tooling, ci]
-status: proposed
+status: superseded
 date: 2026-09-20
 deciders: [Daniel Thyselius]
 confidence: medium
@@ -12,9 +12,14 @@ confidence: medium
 
 ## Status
 
-Proposed 2026-09-20. Not yet practised: `main` moved twice on the day this was written. It
-becomes accepted when the first train runs — batch merged, `manifest.json` bumped, tag pushed,
-verification request filed, freeze held to approval.
+Proposed 2026-09-20. **Superseded 2026-09-21 by [[adrs/0010-published-tree-is-the-default-branch]].**
+
+The train ran once — batched, bumped to 0.5.1, tagged, filed — and the freeze held. What it did
+not survive was the finding that arrived next: the review is of the whole repository, not of the
+code the plugin loads, so freezing `main` protected the snapshot while doing nothing about what
+the snapshot contained. ADR-0010 makes `main` the published tree instead, which removes the need
+for a freeze rather than enforcing one. The release train, the full-SHA submission and the two CI
+conventions below carry forward unchanged.
 
 ## Context
 
