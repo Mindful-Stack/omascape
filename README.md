@@ -25,7 +25,7 @@ you, are under [Install](#install).
 
 ![Omascape open over omarchy.org: two monitor groups, live thumbnails of every window](preview.webp)
 
-![Open, drag windows between workspaces, jump, and the scratchpad row](docs/screenshots/demo.gif)
+![Open, drag windows between workspaces, jump, and the scratchpad row](https://raw.githubusercontent.com/Mindful-Stack/omascape/dev/docs/screenshots/demo.gif)
 
 ## Features
 
@@ -95,27 +95,27 @@ you, are under [Install](#install).
 **Drag a window to another workspace.** The tile follows the cursor and the target box lights
 up; dropping moves the window silently, the overview stays open.
 
-![A window tile mid-drag, hovering another workspace box](docs/screenshots/drag.webp)
+![A window tile mid-drag, hovering another workspace box](https://raw.githubusercontent.com/Mindful-Stack/omascape/dev/docs/screenshots/drag.webp)
 
 **Type to find.** `slack` matched two windows: they ring in the accent colour, everything else
 dims, and the bar counts the matches.
 
-![Find bar with the query "slack", two matching windows ringed](docs/screenshots/find.webp)
+![Find bar with the query "slack", two matching windows ringed](https://raw.githubusercontent.com/Mindful-Stack/omascape/dev/docs/screenshots/find.webp)
 
 **Scratchpad row.** `Ctrl+S` shows Omarchy's scratchpad below the workspaces; drop a window on
 it to send it there.
 
-![The scratchpad row shown under the workspace grid](docs/screenshots/scratchpad.webp)
+![The scratchpad row shown under the workspace grid](https://raw.githubusercontent.com/Mindful-Stack/omascape/dev/docs/screenshots/scratchpad.webp)
 
 **Lock for screen sharing.** Armed workspaces carry a lock badge; their windows are black in
 every capture, and while a capture is running (here: the screenshot itself) the box shows a lock
 instead of its windows.
 
-![Five workspaces armed with the lock badge](docs/screenshots/lock.webp)
+![Five workspaces armed with the lock badge](https://raw.githubusercontent.com/Mindful-Stack/omascape/dev/docs/screenshots/lock.webp)
 
 **Follows your theme.** Tokyo Night, Rosé Pine, Osaka Jade and Matte Black, no configuration.
 
-![The overview under four Omarchy themes](docs/screenshots/themes.webp)
+![The overview under four Omarchy themes](https://raw.githubusercontent.com/Mindful-Stack/omascape/dev/docs/screenshots/themes.webp)
 
 ---
 
@@ -427,136 +427,11 @@ does not animate at all, and you may prefer to leave the compositor's layer anim
 
 ## Contributing
 
-Contributions are welcome — bug reports, fixes, and the roadmap items in `ROADMAP.md`.
+`main` is the published plugin tree: the files Omarchy installs and nothing else.
+Development happens on **[`dev`](https://github.com/Mindful-Stack/omascape/tree/dev)**,
+which carries the specs, tests, tooling and knowledge base.
 
-**Start with [CONTRIBUTING.md](CONTRIBUTING.md)** — reporting, the PR process, the CI
-conventions that are not negotiable, and why `main` occasionally stops moving. Participation is
-under the [Code of Conduct](CODE_OF_CONDUCT.md); security problems go through
-[SECURITY.md](SECURITY.md), not the issue tracker.
-
-### Project layout
-
-| File / dir          | What it is                                                              |
-| ------------------- | ----------------------------------------------------------------------- |
-| `manifest.json`     | Omarchy plugin manifest (id, kind, entry point). Schema v1.             |
-| `Overview.qml`      | The overlay: layout, input, drag-and-drop, animation.                   |
-| `WindowTile.qml`    | One window thumbnail (live capture or icon fallback).                    |
-| `FindBar.qml`       | The type-to-find query bar.                                             |
-| `LockFrame.qml`     | The share-time reminder frame around a monitor with an armed workspace. |
-| `OmascapeConfig.qml` | Reads and watches `~/.config/omarchy/omascape.json`.                     |
-| `OmascapeLocks.qml`  | Armed-workspace state, the share observer and the runtime rules.        |
-| `SoftShadow.qml`    | Shadow under floating tiles.                                            |
-| `logic.js`          | Pure logic: geometry, reconcile, Lua chunk generation. Unit-tested.     |
-| `tests/`            | Tier 1 logic + UI tests (`mise run test`), Lua chunk suite, integration. |
-| `scripts/`          | `add-keybind.sh` (appends the toggle bind); `dev-link.sh` (`mise run dev:link`). |
-| `DESIGN.md`         | What it does and why.                                                   |
-| `docs/specs/`       | One design doc per feature (find, scratchpad, lock, …).                 |
-| `ROADMAP.md`        | What's next.                                                            |
-| `PLAN.md`           | The v1 build log, with the verified gotchas.                            |
-
-If you're new to Quickshell/QML: it's Qt Quick (declarative UI, JavaScript for logic). You
-don't need to know it deeply — the QML files are commented, and the shell
-APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inline in
-`DESIGN.md`.
-
-### Local development loop
-
-1. **Clone or check out anywhere you like.** Several worktrees can coexist; one of them at a
-   time is the one Omarchy loads.
-
-   ```bash
-   git clone git@github.com:Mindful-Stack/omascape.git
-   cd omascape
-   ```
-
-2. **Make this checkout the live one:**
-
-   ```bash
-   mise run dev:link
-   ```
-
-   It points `~/.config/omarchy/plugins/se.mindfulstack.omascape` at the worktree you ran it
-   from, moves any existing clone install aside to `.se.mindfulstack.omascape.install` (Omarchy's
-   scans ignore dot-prefixed entries), restarts the shell, and prints which branch and commit are
-   now live:
-
-   ```
-   linked   se.mindfulstack.omascape -> /home/you/Source/omascape
-   was      a real install, moved to .se.mindfulstack.omascape.install
-   branch   my-feature @ 40abb73 (dirty)
-   session  …_1789641915_…  (systemctl --user show-environment; answers hyprctl)
-   restart  ok — new instance pid 2230186
-   ```
-
-   `mise run dev:unlink` puts the clone back. Running it from the installed clone itself is fine:
-   it is already the live checkout, so only the restart happens.
-
-   The names mirror Omarchy's own `omarchy dev link` / `dev unlink` / `dev status`, which do the
-   same three things for Omarchy itself.
-
-   The plugin id is global, so **whichever worktree linked last is the one running.** To see
-   which:
-
-   ```bash
-   mise run dev:status
-   ```
-
-   ```
-   linked   se.mindfulstack.omascape -> /home/you/Source/omascape
-   branch   my-feature @ 40abb73 (dirty)
-   shell    pid 2484468, started 2026-09-19T17:32:48
-   verdict  live — the running shell started after this link was written
-   ```
-
-   `STALE` there means the running shell predates the current link and is still serving the
-   previous checkout — the QML engine caches compiled source per path, so re-pointing the link
-   does not reach a shell that is already up. Run `mise run dev:link` to restart onto it.
-
-3. **Edit, then `mise run dev:link` again** to pick the change up.
-
-   > ⚠️ **Editing QML requires a full shell restart, not just a rescan.**
-   > `omarchy-shell shell rescanPlugins` reloads the manifest/registry but **not** the live
-   > QML component, so your code change won't show until the shell restarts. `mise run dev:link`
-   > does that for you — and it restarts only the compositor your session identifies, rather
-   > than whichever one happens to answer.
-
-4. **Validate the manifest** before you commit (the shell enforces the same checks and will
-   silently refuse a bad manifest):
-
-   ```bash
-   omarchy plugin validate .
-   ```
-
-### Testing
-
-`mise run test` is the Tier 1 suite: pure layout/actions/find logic plus offscreen Qt
-mouse-event tests (see [Drag regression checks](#drag-regression-checks) for what it covers
-and what it needs installed). `mise run test-integration` adds a nested Hyprland run.
-
-Plenty of the overlay is still visual, though, so testing also means reloading the shell and
-checking behavior by hand. Before opening a PR, confirm:
-
-- [ ] `mise run test` passes.
-- [ ] `omarchy plugin validate .` passes.
-- [ ] SUPER+TAB opens and closes the overlay; `Esc` and click-outside close it.
-- [ ] Number keys `1`–`0` jump to the right workspace; Tab + `Enter` work; arrows step windows; click works.
-- [ ] The window mini-map roughly matches your real window layout.
-- [ ] It re-themes correctly after `omarchy theme next` (or any theme switch).
-- [ ] If you have a second monitor: the two-row layout and per-monitor mini-map coordinates
-      are correct (this path is still being validated — call it out in the PR).
-
-### Submitting changes
-
-The full process lives in [CONTRIBUTING.md](CONTRIBUTING.md). In short: branch off `main`, keep
-commits focused and explain the *why*, update `DESIGN.md`/`ROADMAP.md` when behavior changes,
-and open a PR against `Mindful-Stack/omascape` describing what you tested from the checklist
-above. A screenshot or short screen recording helps a lot for UI changes.
-
-Don't bump `manifest.json`'s `version` in a feature PR — that belongs to the release train.
-
-Maintainers: **@DanielThyselius**, **@dotnetemmanuel**.
-
----
+Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

@@ -623,10 +623,16 @@ function reportLua(what) {
 // workspace so the anchor is the window under the cursor rather than the focused window.
 // Hidden workspaces keep use_active on: there dwindle already falls back to the closest node
 // by geometry. Everything runs inside the compositor before the next frame, so nothing flashes.
+// Both are tuned only when both read back non-nil, because the override is only as safe as its
+// undo: `{ smart_split = nil }` is an EMPTY table in Lua, so a restore built from an unreadable
+// read is a no-op that leaves the user's dwindle settings rewritten globally — silently, and
+// past the life of the overview. Unreadable means the insert runs untuned, which costs only the
+// guaranteed side.
 // The risky steps run in a pcall; the un-float, both fullscreen re-applies and the config
 // restore are separate guarded steps that re-read state, so a throw never leaves the window
-// floating, and the error is reported (log + notification). Layouts other than dwindle get a
-// plain silent move: the cursor-based insert is dwindle behaviour.
+// floating, the config changed, or the cursor where the placement warp put it, and the error is
+// reported (log + notification). Layouts other than dwindle get a plain silent move: the
+// cursor-based insert is dwindle behaviour.
 function tiledInsertLua(addr, targetWs, placement) {
     var ws = String(parseInt(targetWs, 10))
     var gx = Math.round(placement.x), gy = Math.round(placement.y)
@@ -653,6 +659,12 @@ function tiledInsertLua(addr, targetWs, placement) {
         '  end\n' +
         '  local smart = hl.get_config("dwindle.smart_split")\n' +
         '  local useActive = hl.get_config("dwindle.use_active_for_splits")\n' +
+        // Only tune what we can put back. A nil read is not restorable: Lua drops nil-valued keys
+        // from a table constructor, so a restore built from one is `hl.config({ dwindle = {} })` —
+        // a silent no-op leaving smart_split on and use_active_for_splits off for every window the
+        // user opens afterwards, until their next config reload. The insert itself does not need
+        // the override; without it the side just follows the user's own force_split.
+        '  local tune = smart ~= nil and useActive ~= nil\n' +
         '  local aws = hl.get_active_workspace()\n' +
         '  local onActive = aws ~= nil and aws.id == ' + ws + '\n' +
         // Fullscreen bookkeeping. The target workspace's fullscreen window is stripped so every
@@ -665,7 +677,7 @@ function tiledInsertLua(addr, targetWs, placement) {
         '  local fsSel = fa ~= "" and ("address:" .. fa) or nil\n' +
         '  local fsMode = fsWin and tws.fullscreen_mode or 0\n' +
         '  local ownMode = same and w.fullscreen or 0\n' +
-        '  hl.config({ dwindle = { smart_split = true, use_active_for_splits = not onActive } })\n' +
+        '  if tune then hl.config({ dwindle = { smart_split = true, use_active_for_splits = not onActive } }) end\n' +
         '  local ok, err = pcall(function()\n' +
         '    if fsSel then ' + fullscreenBodyLua('fsSel', '0') + ' end\n' +
         '    ' + fullscreenBodyLua('sel', '0') + '\n' +
@@ -694,7 +706,7 @@ function tiledInsertLua(addr, targetWs, placement) {
         '  step(function() local fw = hl.get_window(sel); if fw and fw.floating then run(hl.dsp.window.float({ window = sel, action = "toggle" })) end end)\n' +
         '  step(function() if fsSel and fsSel ~= sel then ' + fullscreenBodyLua('fsSel', 'fsMode') + ' end end)\n' +
         '  step(function() if ownMode ~= 0 then ' + fullscreenBodyLua('sel', 'ownMode') + ' end end)\n' +
-        '  hl.config({ dwindle = { smart_split = smart, use_active_for_splits = useActive } })\n' +
+        '  step(function() if tune then hl.config({ dwindle = { smart_split = smart, use_active_for_splits = useActive } }) end end)\n' +
         '  ' + reportLua('tiled insert') + '\n' +
         '  ' + restoreFocusLua('prevW', 'prevWs', 'cur') + '\n' +
         'end'
