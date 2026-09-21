@@ -5,8 +5,11 @@ Guidance for Claude Code working on Omascape — an Omarchy/Quickshell workspace
 
 This is a **single-repo household**: the `lore/` knowledge base is tracked inline, alongside the
 code. There are no sibling repos, nothing is cloned in, and the workspace tooling's
-sibling/repo-lifecycle targets (`make setup`, `make repos-*`, `make policy-*`) have nothing to
-act on here.
+sibling/repo-lifecycle targets (`make repos-*`, `make policy-*`) have nothing to act on here.
+
+The template's `scripts/setup.sh` and its `make setup` targets were **removed** from this
+repository — a marketplace security review flags its clone-and-execute bootstrap, and with no
+sibling repos to clone it did nothing here. See `lore/knowledge/adrs/0006-marketplace-publication.md`.
 
 ## Commands — two different `test`s, don't confuse them
 
@@ -65,6 +68,13 @@ These are the constraints that have cost the most time. Each links the record th
   (`lore/knowledge/learnings/plugin-hot-reload-serves-cached-source.md`). The reload fires and rebuilds the
   component from *cached* source, so it looks like it worked while serving old code. A restart is
   mandatory after every edit.
+- **`main` is the published artifact, not a branch you commit to**
+  (`lore/knowledge/adrs/0010-published-tree-is-the-default-branch.md`). `omarchy plugin add`
+  bare-clones the default branch, so `main` carries only the runtime files and the community
+  health files — no `CLAUDE.md`, no `docs/`, no `lore/`, no `tests/`, no `scripts/`. Work happens
+  on `dev` and every PR targets `dev`. `main` moves only through `mise run release:publish`.
+  A new runtime file that is not a root `.qml` must be added to the published set in
+  `scripts/publish.sh`, or the overlay loads here and fails on every installed copy.
 - **Verify the knowledge base with `make validate`, never the bare CLI.**
   `node lore/_tools/cli.js validate` from the repo root resolves to a nonexistent `./knowledge`,
   reads zero files and exits 0. The individual `lore/_tools/*.js` files are modules with no CLI
@@ -73,7 +83,8 @@ These are the constraints that have cost the most time. Each links the record th
 ## Where things live
 
 ```
-Overview.qml, WindowTile.qml, PeekLayer.qml, …   the QML surface
+Overview.qml, WindowTile.qml, PeekLayer.qml, …   the QML surface — what ships
+scripts/publish.sh                               builds main from dev (mise run release:publish)
 logic.js                                         pure layout/reconcile/Lua-chunk logic, unit-tested
 OmascapeLocks.qml                                persisted lock state
 scripts/dev-link.sh                              the dev install (mise run link)

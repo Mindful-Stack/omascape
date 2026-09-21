@@ -19,3 +19,9 @@ run = "bash scripts/dev-link.sh --unlink"
 [tasks."dev:status"]
 description = "Show which checkout the live plugin dir points at, and whether the running shell is it"
 run = "bash scripts/dev-link.sh --status"
+
+# The release train (ADR-0010). Builds the runtime-only tree from this branch and records it
+# as a commit on `main`, which is what `omarchy plugin add` clones.
+[tasks."release:publish"]
+description = "Build the published plugin tree from dev and record it on main"
+run = "bash scripts/publish.sh"

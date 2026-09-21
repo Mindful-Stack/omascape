@@ -7,16 +7,22 @@ knowledge base supports via `make split-lore`.
 
 ## Contents
 
-- Bash + Node `.mjs` scripts: `setup.sh`, `pull-all.sh`, `status-all.sh`,
+- Bash + Node `.mjs` scripts: `pull-all.sh`, `status-all.sh`,
   `update-kb.sh`, `rename.sh`, `split-lore.sh`, `new-repo.mjs`,
   `repo-rename.mjs`, `repos-sync-names.mjs`, `repo-policy.mjs`.
   All stdlib-only — no `npm install` required.
-- `Makefile.shared` — the shared make targets (`setup`, `pull`, `status`,
+- `Makefile.shared` — the shared make targets (`pull`, `status`,
   `update-kb`, `repos-create`, `repos-rename`, `repos-sync-names`, `policy-*`,
   `test-scripts`). The root `Makefile` does `include scripts/Makefile.shared`
   and adds household-specific targets (`split-lore`, `rename`, KB tooling).
-- `claude-settings.json` — canonical Claude Code baseline. `setup.sh` copies
-  it to the workspace root's `.claude/settings.json` on every run; that copy
+- `publish.sh` — **Omascape's release train, not workspace tooling.** Builds
+  the runtime-only published tree from `dev` and records it as a commit on
+  `main`, which is what `omarchy plugin add` clones (ADR-0010).
+  `mise run release:publish`; `tests/publish.sh` covers it.
+- `dev-link.sh` — points the live Omarchy plugin directory at this worktree
+  (`mise run dev:link`). Also Omascape's, not the household's.
+- `claude-settings.json` — canonical Claude Code baseline, copied to the
+  workspace root's `.claude/settings.json` by hand when you want it; that copy
   is generated, not tracked.
 
 ## `repo-rename.mjs` — end-to-end repo rename

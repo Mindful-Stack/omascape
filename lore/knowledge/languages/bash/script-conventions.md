@@ -15,8 +15,9 @@ Measured 2026-09-20 against `origin/main` (`7200771`) plus `tests/split-lore.sh`
 branch: **15 scripts, 2111 lines**, split `tests/` 13 and `scripts/` 2. [[languages/bash/test-harnesses]] covers how the test scripts
 assert; this node is how any script here is written.
 
-> **Scope.** The household scaffold adds six more scripts under `scripts/` — `setup.sh`,
-> `pull-all.sh`, `rename.sh`, `split-lore.sh`, `status-all.sh`, `update-kb.sh`. Those are
+> **Scope.** The household scaffold adds five more scripts under `scripts/` —
+> `pull-all.sh`, `rename.sh`, `split-lore.sh`, `status-all.sh`, `update-kb.sh`. (The template's
+> sixth, `setup.sh`, was removed here; see [[adrs/0006-marketplace-publication]].) Those are
 > template-supplied workspace tooling, not Omascape's, and they are maintained upstream. They
 > happen to follow the same shebang and strict-mode rules, so nothing below conflicts, but do
 > not treat them as the reference when the template and this node disagree.
