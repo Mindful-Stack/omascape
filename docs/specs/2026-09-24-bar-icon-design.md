@@ -2,7 +2,8 @@
 
 Date: 2026-09-24 · Target: Omarchy Quattro, Quickshell 0.3.1 · Record:
 `lore/knowledge/adrs/0011-bar-icon-surface.md` (proposed).
-Status: **designed, not built.** Blocked on the enable-coupling probe below, and on the owner's decision about the share reminder that the probe informs.
+Status: **designed, not built.** Probes ran 2026-09-24 (results below); blocked on the owner's
+decision about the share reminder.
 
 ## Goal
 
@@ -77,15 +78,14 @@ Reading the code predicts:
      ADR-0008 keeps the component loaded precisely so that the frame exists between summons.
      Removing the icon mid-share would drop the reminder while the share is still running.
    - The blanking itself is compositor-side (`no_screen_share` window and layer rules set by
-     Lua chunks, `logic.js`). Whether those rules survive the unload, and whether the next load
-     re-establishes them correctly, has not been checked.
+     Lua chunks, `logic.js`), and probe (a′) confirmed it survives the unload.
 2. **Existing installs** keep their `plugins` entry, so the plugin is already enabled.
    **`omarchy bar put` does not add the icon there.** `putBarWidget` returns early only when the
    id is already *in the bar*. Otherwise it calls `setEnabled`, which finds the `plugins` entry
    and inserts nothing. Its fallback `moveBarEntry` then fails with "could not find widget",
    `setEnabled` ignores that and returns true, and `put` reports success. This was confirmed by
-   review against the installed registry's functions. There is no verified migration yet.
-   Two candidates, both unverified:
+   review against the installed registry's functions, and by probe (b). Two migrations, both
+   verified by probe (b):
    - `omarchy plugin disable se.mindfulstack.omascape`, then
      `omarchy plugin enable se.mindfulstack.omascape --section left`. Disable removes the
      `plugins` entry (a third-party id is not added to `disabledPlugins`), and enable then takes
@@ -114,9 +114,52 @@ Probe, on a real shell against a dev-linked build (Tier 2 / by hand), recorded i
 - (c) **Both entries.** Remove the icon, then press SUPER+TAB, and check whether a share
   reminder survives the removal.
 
-**Decision required before ADR-0011 is accepted:** is it acceptable that removing the icon can
-take the share reminder with it, and perhaps the blanking too? The probe supplies the facts; the
-answer is the owner's. If it is not acceptable, the icon moves to a `type: "qml"` module whose
+### Probe results (2026-09-24)
+
+Run on Hyprland 0.56.2 with one monitor (eDP-1). The build was dev-linked: this spec's manifest
+plus a probe `BarWidget.qml`, since discarded. Workspace 1 was armed, and the share was faked with
+a `grim` loop at about 6 Hz. That drives `screenshare.state`, and `share-state` read `1`
+throughout. Readings:
+
+- **frame** — the `omascape-lockframe` layer count;
+- **overlay** — whether a toggle produced the `omascape` layer;
+- **blanking** — the mean grey of a crop of the armed workspace's window (0 means black);
+- **icon** — a screenshot of the bar.
+
+| step | `shell.json` after | overlay | frame | blanked | icon |
+|---|---|---|---|---|---|
+| baseline, `plugins` only | `plugins` | loaded | 4 | yes | none |
+| (b) `omarchy bar put … --after omarchy.workspaces` | **unchanged**; printed "is on the bar", exit 0 | loaded | 4 | yes | **none** |
+| (b) hand-add a bar entry, keep `plugins` | both | loaded | 4 | yes | after workspaces, live, no restart |
+| (c) `omarchy plugin disable` with both entries | `plugins` (bar entry removed) | **loaded** | **4** | yes | gone |
+| (b) candidate 1, step 1: `disable` again | neither | **unloaded** | **0** | **yes** | none |
+| (b) candidate 1, step 2: `enable --section left` | bar `left[2]`, no `plugins` | loaded | 4 | yes | after workspaces |
+| (a′) `disable`, from bar-only, mid-share | neither | **unloaded** | **0** | **yes** | gone |
+| (a′) `enable` again | bar `left[2]` | loaded | 4 | yes | after workspaces |
+
+What this settles:
+
+- **`omarchy bar put` is worse than a no-op on existing installs.** It claims success: "is on the
+  bar". It must never appear in the README.
+- **Both migration candidates work.**
+  - Candidate 1 (`disable` then `enable --section left`) leaves the fresh-install state, with the
+    coupling. It also unloads the overlay, and the frame with it, for the moment in between.
+  - The hand edit leaves the both-entries state. Removing the icon there keeps the overlay and
+    the frame, but it takes a JSON edit, and `plugin disable` then needs two runs to really
+    disable the plugin. Its first run prints "Disabled" while the plugin stays enabled.
+- **(a′) The coupling costs the reminder, not the protection.** When the icon is removed from a
+  fresh install mid-share, the overlay unloads and the reminder frame disappears. The armed
+  workspace **stays blanked** in the capture, because the `no_screen_share` rules and the share
+  observer live in the compositor's Lua state (`_G.omascape_lock`), not in QML. Re-enabling brings
+  the frame back at once.
+- **Not verified:** a real pointer click on the icon, since no pointer tool was available. The
+  button runs the same toggle command as the keybind, which the probe did exercise. Also not
+  checked: whether a window opened on the armed workspace *while the overlay is unloaded* is
+  blanked. The rule matches the workspace, so it should be.
+
+**Decision required before ADR-0011 is accepted:** is it acceptable that removing the icon from a
+fresh install unloads the overlay, taking SUPER+TAB and the share reminder frame with it while
+the blanking holds (probe (a′))? The answer is the owner's. If it is not acceptable, the icon moves to a `type: "qml"` module whose
 removal cannot touch the overlay (ADR-0011's first alternative), and the manifest keeps
 `kinds: ["overlay"]`.
 
