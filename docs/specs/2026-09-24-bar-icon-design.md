@@ -2,7 +2,7 @@
 
 Date: 2026-09-24 · Target: Omarchy Quattro, Quickshell 0.3.1 · Record:
 `lore/knowledge/adrs/0011-bar-icon-surface.md` (proposed).
-Status: **designed, not built.** Blocked on the enable-coupling probe below.
+Status: **designed, not built.** Blocked on the enable-coupling probe below, and on the owner's decision about the share reminder that the probe informs.
 
 ## Goal
 
@@ -71,23 +71,54 @@ So "configurable left/center/right" already exists, in the shell. Omascape only 
 Reading the code predicts:
 
 1. **Fresh enable** puts the id only in `bar.layout`. Removing the icon removes the only entry,
-   so the overlay unloads and SUPER+TAB stops working.
-2. **Existing installs** keep their `plugins` entry, so the plugin is already enabled. No icon
-   appears until the user runs `omarchy bar put se.mindfulstack.omascape --after
-   omarchy.workspaces`.
-3. **Both entries present:** removing the icon deletes the bar entry first, and the `plugins`
-   entry keeps the overlay alive.
+   so the whole overlay component unloads. That takes more than the keyboard route with it:
+   - SUPER+TAB stops working;
+   - the **share-time reminder frame** goes away. `LockFrame` lives inside `Overview.qml`, and
+     ADR-0008 keeps the component loaded precisely so that the frame exists between summons.
+     Removing the icon mid-share would drop the reminder while the share is still running.
+   - The blanking itself is compositor-side (`no_screen_share` window and layer rules set by
+     Lua chunks, `logic.js`). Whether those rules survive the unload, and whether the next load
+     re-establishes them correctly, has not been checked.
+2. **Existing installs** keep their `plugins` entry, so the plugin is already enabled.
+   **`omarchy bar put` does not add the icon there.** `putBarWidget` returns early only when the
+   id is already *in the bar*. Otherwise it calls `setEnabled`, which finds the `plugins` entry
+   and inserts nothing. Its fallback `moveBarEntry` then fails with "could not find widget",
+   `setEnabled` ignores that and returns true, and `put` reports success. This was confirmed by
+   review against the installed registry's functions. There is no verified migration yet.
+   Two candidates, both unverified:
+   - `omarchy plugin disable se.mindfulstack.omascape`, then
+     `omarchy plugin enable se.mindfulstack.omascape --section left`. Disable removes the
+     `plugins` entry (a third-party id is not added to `disabledPlugins`), and enable then takes
+     the bar-widget insert path. The result is state 1, coupling included. It also unloads the
+     overlay for a moment, so it must not be run during a share.
+   - Hand-add `{ "id": "se.mindfulstack.omascape" }` to `bar.layout.left` after
+     `omarchy.workspaces`, keeping the `plugins` entry. The result is state 3. No CLI command
+     reaches it.
+3. **Both entries present:** removing the icon should delete the bar entry first
+   (`findEntryLocation` checks the bar before `plugins`), and the `plugins` entry should keep the
+   overlay loaded.
 
 Probe, on a real shell against a dev-linked build (Tier 2 / by hand), recorded in this spec:
 
-- (a) remove the existing entry, `omarchy plugin enable`, confirm the icon appears after the
-  workspaces, remove it from the bar, then press SUPER+TAB;
-- (b) with only a `plugins` entry, confirm there's no icon, run `omarchy bar put`, and confirm it appears;
-- (c) with both entries, remove the icon, then press SUPER+TAB.
+- (a) **Fresh enable.** Remove the existing entry and run `omarchy plugin enable`. Confirm the
+  icon appears after the workspaces, remove it from the bar, then press SUPER+TAB.
+- (a′) **Removal during a share.** Starting from (a), arm a workspace and start a screen share
+  showing it. Confirm the reminder frame is visible. Remove the icon, then record whether the
+  frame disappears and whether the armed workspace is still blanked in the share. Re-enable, and
+  record whether frame and blanking come back.
+- (b) **Migration**, which gates the upgrade instructions. With only a `plugins` entry, confirm
+  that `omarchy bar put` reports success and adds nothing. Then try each candidate above and
+  record the resulting `shell.json` and whether the icon appears. Only a candidate that passes
+  goes into the README. If neither passes, the README tells existing users to wait rather than
+  giving them a command that silently does nothing.
+- (c) **Both entries.** Remove the icon, then press SUPER+TAB, and check whether a share
+  reminder survives the removal.
 
-The README wording follows the result. If (a) loses the overlay, the README says so next to the
-enable instructions and points to `omarchy bar move` instead of removal. If users hit it anyway,
-ADR-0011's trigger moves the icon to a `type: "qml"` module.
+**Decision required before ADR-0011 is accepted:** is it acceptable that removing the icon can
+take the share reminder with it, and perhaps the blanking too? The probe supplies the facts; the
+answer is the owner's. If it is not acceptable, the icon moves to a `type: "qml"` module whose
+removal cannot touch the overlay (ADR-0011's first alternative), and the manifest keeps
+`kinds: ["overlay"]`.
 
 ## Testing
 
@@ -105,6 +136,10 @@ ADR-0011's trigger moves the icon to a `type: "qml"` module.
 ## Docs
 
 - README: a "Bar icon" section covering what it does, how to move it (`omarchy bar move`), how to
-  add it on an existing install, how to change the glyph, and the enable caveat.
+  add it on an existing install, how to change the glyph, and the enable caveat. The caveat
+  covers both SUPER+TAB and the share reminder. The existing-install step contains only a
+  migration that probe (b) verified. Without one it says the icon is for fresh installs for now,
+  and never shows `omarchy bar put`, which reports success and does nothing.
 - ROADMAP: a new item.
-- ADR-0011 flips to `accepted` when `BarWidget.qml` lands.
+- ADR-0011 flips to `accepted` when `BarWidget.qml` lands, and only after the share-reminder
+  decision above has been made and written into the record.

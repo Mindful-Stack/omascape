@@ -5,7 +5,7 @@ tags: [adr, architecture, omarchy, quickshell, qml]
 status: proposed
 date: 2026-09-24
 deciders: [Daniel Thyselius]
-confidence: medium
+confidence: low
 ---
 
 # ADR-0011: The bar icon is a host-owned bar widget, and the shell owns its placement
@@ -13,6 +13,11 @@ confidence: medium
 ## Status
 
 Proposed 2026-09-24. Design: `docs/specs/2026-09-24-bar-icon-design.md`.
+
+Open before acceptance: whether it is acceptable that removing the icon can unload the share
+reminder (see Consequences). The owner decides once the spec's probes (a′) and (b) have run, and
+the answer is written here. If the answer is no, this record is rejected in favour of the
+`type: "qml"` module.
 
 ## Context
 
@@ -66,13 +71,19 @@ Rules this implies:
 - Placement has one source of truth. An `omascape.json` key would have given two, which disagree
   the moment the user drags the icon.
 - The icon inherits the bar's theme, vertical-bar handling and widget picker at no cost.
-- **Negative: enable is shared.** On a fresh `omarchy plugin add --enable`, the id goes only into
-  `bar.layout`. Removing the icon from the bar then likely disables the overlay, and SUPER+TAB
-  with it. The README must say so, and a Tier 2 probe must confirm the real behaviour before
-  release.
-- **Negative: existing installs get no icon.** Their `plugins` entry already counts as enabled,
-  so the shell inserts nothing. Upgrading users have to run `omarchy bar put
-  se.mindfulstack.omascape --after omarchy.workspaces` once.
+- **Negative: enable is shared, and so is the share reminder.** On a fresh `omarchy plugin add
+  --enable`, the id goes only into `bar.layout`. Removing the icon from the bar then likely
+  unloads the whole overlay component. That takes SUPER+TAB with it, and it also takes the
+  `LockFrame` share-time reminder, which lives in `Overview.qml`. The reminder is the reason
+  [[adrs/0008-keep-loaded-overlay]] keeps the component loaded, so a bar gesture can now undo
+  what that record relies on, even in the middle of a share. The blanking rules are
+  compositor-side; whether they survive the unload is unverified. The spec's probe (a′) settles
+  the facts.
+- **Negative: existing installs get no icon, and there is no verified migration.** Their
+  `plugins` entry already counts as enabled. `omarchy bar put` then inserts nothing, and it still
+  reports success: `putBarWidget` returns early only for an id already in the bar, `setEnabled`
+  finds the `plugins` entry, and its fallback `moveBarEntry` fails silently. Upgrade instructions
+  wait for the spec's probe (b).
 - `manifest.json` changes `kinds` and `entryPoints`, which is visible to the marketplace and rides
   the next release.
 - `BarWidget.qml` imports `qs.Ui` from the host, so its Tier 1 fixture needs stubs for
@@ -83,9 +94,9 @@ Rules this implies:
 
 - *Assumes the shell keeps `bar-widget` and `defaultSection` stable.* Trigger: Omarchy renames
   or drops either, or `omarchy plugin validate` rejects the manifest ⇒ amend.
-- *Assumes the enable coupling is tolerable once documented.* Trigger: the probe shows that
-  removing the icon disables the overlay **and** users report losing the keybind that way ⇒
-  supersede with the `type: "qml"` module option.
+- *Assumes the enable coupling is tolerable once documented.* Trigger: probe (a′) shows that
+  removing the icon also drops the blanking rules, not just the reminder frame, or users report
+  losing the keybind or the reminder that way ⇒ supersede with the `type: "qml"` module option.
 - *Assumes one left-click action is enough.* Trigger: a second click action is wanted ⇒ amend;
   it needs a toggle-payload contract, which is its own decision.
 
