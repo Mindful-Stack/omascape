@@ -16,9 +16,14 @@ Proposed 2026-09-24. Design: `docs/specs/2026-09-24-bar-icon-design.md`.
 
 Open before acceptance: whether it is acceptable that removing the icon from a fresh install
 unloads the overlay, taking SUPER+TAB and the share reminder frame with it while the blanking
-holds. Probes (a′) and (b) ran on 2026-09-24; the results are in the spec. The owner's answer is
-written here. If the answer is no, this record is rejected in favour of the
-`type: "qml"` module.
+holds. Probes (a′) and (b) ran on 2026-09-24; the results are in the spec.
+
+Decided 2026-09-24 (Daniel Thyselius): **the coupling is accepted.** Removing the icon never
+exposes an armed workspace, because the blanking holds. What it costs is convenience and the
+reminder, and both come back when the plugin is re-enabled. The README states the consequence
+next to the icon instructions. Existing installs migrate with `omarchy plugin disable
+se.mindfulstack.omascape && omarchy plugin enable se.mindfulstack.omascape --section left`,
+marked "not during a share". Acceptance still waits on the first dependent code.
 
 ## Context
 

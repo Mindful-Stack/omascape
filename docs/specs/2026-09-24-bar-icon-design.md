@@ -2,8 +2,8 @@
 
 Date: 2026-09-24 · Target: Omarchy Quattro, Quickshell 0.3.1 · Record:
 `lore/knowledge/adrs/0011-bar-icon-surface.md` (proposed).
-Status: **designed, not built.** Probes ran 2026-09-24 (results below); blocked on the owner's
-decision about the share reminder.
+Status: **designed, not built.** Probes ran 2026-09-24 (results below). The coupling is accepted,
+and existing installs migrate with disable + enable (see the decision below).
 
 ## Goal
 
@@ -157,7 +157,7 @@ What this settles:
   checked: whether a window opened on the armed workspace *while the overlay is unloaded* is
   blanked. The rule matches the workspace, so it should be.
 
-**Decision required before ADR-0011 is accepted:** is it acceptable that removing the icon from a
+**Decided 2026-09-24: accepted, with the disable + enable migration.** The question was: is it acceptable that removing the icon from a
 fresh install unloads the overlay, taking SUPER+TAB and the share reminder frame with it while
 the blanking holds (probe (a′))? The answer is the owner's. If it is not acceptable, the icon moves to a `type: "qml"` module whose
 removal cannot touch the overlay (ADR-0011's first alternative), and the manifest keeps
