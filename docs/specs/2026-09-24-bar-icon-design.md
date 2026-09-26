@@ -178,7 +178,7 @@ removal cannot touch the overlay (ADR-0011's first alternative), and the manifes
 
 ## Docs
 
-- README: a "Bar icon" section covering what it does, how to move it (`omarchy bar move`), how to
+- README: a "Bar button" section covering what it does, how to move it (`omarchy bar move`), how to
   add it on an existing install, how to change the glyph, and the enable caveat. The caveat
   covers both SUPER+TAB and the share reminder. The existing-install step contains only a
   migration that probe (b) verified. Without one it says the icon is for fresh installs for now,
