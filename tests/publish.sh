@@ -213,6 +213,20 @@ run "$box"
 same "bad-bar-entry: exits 1"  "$status" "1"
 has  "bad-bar-entry: names it" "$out" "Missing.qml"
 
+box=$(setup no-overlay-entry)
+sed -i 's/"entryPoints": { "overlay": "Overview.qml" }/"entryPoints": { "barWidget": "Overview.qml" }/' "$box/manifest.json"
+git -C "$box" commit -qam "rename the overlay entry point away"
+run "$box"
+same "no-overlay-entry: exits 1"  "$status" "1"
+has  "no-overlay-entry: says why" "$out" "declares no overlay entry point"
+
+box=$(setup overlay-key-elsewhere)
+sed -i 's/"entryPoints": { "overlay": "Overview.qml" }/"entryPoints": { "barWidget": "Overview.qml" }, "overlay": { "x": 1 }/' "$box/manifest.json"
+git -C "$box" commit -qam "rename the overlay entry point away, but leave an unrelated top-level overlay key"
+run "$box"
+same "overlay-key-elsewhere: exits 1"  "$status" "1"
+has  "overlay-key-elsewhere: says why" "$out" "declares no overlay entry point"
+
 box=$(setup bad-import)
 printf 'import QtQuick\nimport "helpers/util.js" as U\nItem { }\n' > "$box/Overview.qml"
 git -C "$box" commit -qam "import something that will not ship"

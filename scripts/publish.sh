@@ -138,11 +138,25 @@ done < <(printf '%s\n' "$readme" | grep -oE "$RAW/[^)]+" | sed "s|^$RAW/||" | so
 is_published() { local n; for n in "${published[@]}"; do [[ $n == "$1" ]] && return 0; done; return 1; }
 
 # Every entry point the shell loads — the overlay, and the bar button (ADR-0011). One that is not
-# published loads here and fails on every installed copy. python3 parses the manifest: invalid
-# JSON stops here with a traceback under set -e, which is loud enough for a release gate.
-entries=$(git show "$src:manifest.json" | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin).get("entryPoints", {}).values()))')
-grep -q . <<<"$entries" || die "manifest.json declares no entry points"
-git show "$src:manifest.json" | grep -qE '"overlay"[[:space:]]*:' || die "manifest.json declares no overlay entry point"
+# published loads here and fails on every installed copy. python3 parses the manifest once and
+# reports on entryPoints itself, not on the raw text, so a stray top-level "overlay" key (metadata,
+# not an entry point) can't stand in for the real one. Invalid JSON stops here with a traceback
+# under set -e, which is loud enough for a release gate; a missing python3 gets a hint instead.
+command -v python3 >/dev/null 2>&1 || die "python3 is required to read manifest.json"
+entries=$(git show "$src:manifest.json" | python3 -c '
+import json, sys
+points = json.load(sys.stdin).get("entryPoints", {})
+if not points:
+    print("__NO_ENTRIES__")
+elif "overlay" not in points:
+    print("__NO_OVERLAY__")
+else:
+    print("\n".join(points.values()))
+')
+case "$entries" in
+    __NO_ENTRIES__) die "manifest.json declares no entry points" ;;
+    __NO_OVERLAY__) die "manifest.json declares no overlay entry point" ;;
+esac
 while IFS= read -r entry; do
     is_published "$entry" || die "manifest entry point is not published: $entry"
 done <<<"$entries"
