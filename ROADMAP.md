@@ -142,6 +142,12 @@ Swept by eye on both of the author's screens 2026-09-21: the spec's 0.08 read to
 so did 0.06; production is 0.04 (laptop 386 / 15, external 483 / 19). Still open: whether the top padding should
 follow the gap, and whether the 15 px drag dead-band between tiles bites in use.
 
+### 17. Bar button
+A bar-widget that toggles the overview, right after the workspaces by default; the shell owns
+placement. The enable coupling (removing the button disables the plugin) is accepted: the
+blanking survives, and the reminder frame and SUPER+TAB return on re-enable. See
+`docs/specs/2026-09-24-bar-icon-design.md` and ADR-0011.
+
 Further afield, `docs/roadmap-v3-ideas.md` holds the research-backed v3 wishlist, including an
 "explicitly avoid" list of other overviews' scars.
 
@@ -149,7 +155,8 @@ Further afield, `docs/roadmap-v3-ideas.md` holds the research-backed v3 wishlist
 - **Editing `Overview.qml` requires `omarchy restart shell`** — `omarchy-shell shell
   rescanPlugins` reloads the registry but NOT the live QML component.
 - New plugins default **disabled** — `omarchy plugin enable se.mindfulstack.omascape` (stored
-  in `~/.config/omarchy/shell.json` `plugins[]`).
+  in `shell.json` `bar.layout` since the bar button; older installs have a `plugins[]` entry
+  instead).
 - `omarchy plugin add` clones into `~/.config/omarchy/plugins/<manifest id>/`, i.e.
   `se.mindfulstack.omascape/` — the folder is named after the manifest `id`, not the repo.
 - SUPER+TAB toggles open AND close even under the overlay's exclusive keyboard focus

@@ -59,7 +59,9 @@ These are the constraints that have cost the most time. Each links the record th
   specials test, not a sign test.
 - **A `SKIP:` is not a pass** (`lore/knowledge/adrs/0003-test-tiers.md`). It is only enforced for
   `tests/lua-check.sh` (via `CI: "1"`); `tests/integration/` still exits 0 on every skip path, so
-  read its output rather than its exit code.
+  read its output rather than its exit code; `tests/bar-widget-api.sh` enforces it the other way
+  round — a missing Omarchy shell fails a local run and only prints a NOTE on CI
+  (`lore/knowledge/general/testing.md`).
 - **Never run `omarchy restart shell` from a tool call** without establishing
   `HYPRLAND_INSTANCE_SIGNATURE` from `systemctl --user show-environment`
   (`lore/knowledge/learnings/omarchy-restart-shell-loses-the-bar.md`). A stale value kills the bar and fails the
