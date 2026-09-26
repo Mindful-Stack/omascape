@@ -1,7 +1,7 @@
 import QtQuick
 
 // Offscreen stand-in for the Omarchy shell's qs.Ui BarWidget
-// (/usr/share/omarchy/shell/Ui/BarWidget.qml). Declares only what omascape's BarWidget.qml uses,
+// (/usr/share/omarchy/shell/Ui/BarWidget.qml). Declares a small subset of the host's members,
 // with the host's semantics; tests/bar-widget-api.sh checks these members still exist on the
 // host. CI has no Omarchy shell, so drift is caught locally only.
 Item {
