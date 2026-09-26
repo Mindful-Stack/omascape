@@ -161,6 +161,38 @@ What this settles:
   both-entries state from (c): hand-add a `plugins` entry, then one `plugin disable`. The README
   documents it.
 
+### Hand verification (2026-09-26)
+
+Confirmed by hand on the same Hyprland 0.56.2, one-monitor setup, after the probe above:
+
+- **0.** Before migrating (plugins-only): `omarchy plugin list` reports `disabled … overlay,bar-widget`
+  while SUPER+TAB still opens the overview — confirms the README wording.
+- **1.** `plugin disable` then `plugin enable --section left` puts the button right after
+  `omarchy.workspaces`; `plugin list` now shows `enabled`.
+- **2.** Mouse (by the owner): left click opens; right- and middle-click do nothing; hover shows
+  the tooltip "Workspace overview". **A second click without moving the pointer does nothing** —
+  see the bug below; moving the pointer first, then clicking, closes it.
+- **3.** `omarchy bar move … center` places it after `omarchy.weather`; `… right` places it after
+  `omarchy.tray`; `… left` restores it after the workspaces.
+- **4.** `omarchy bar set … icon 󰍺` changes the glyph; `icon ""` restores the default grid glyph.
+- **5.** Tooltip: covered in 2.
+- **7.** `omarchy bar position left` renders the button in the vertical bar below the workspaces;
+  restored to `top` afterward.
+
+#### The dead second click — Hyprland 0.56, not the button
+
+When a layer surface maps under a stationary cursor with keyboard interactivity, Hyprland 0.56.2
+(`src/desktop/view/LayerSurface.cpp:203`, commit efb5099) sends `wl_pointer.enter` with the
+monitor's layout position subtracted twice (`m_geometry` is already global — `Renderer.cpp`
+`arrangeLayerArray` builds it from `full_area = {monitor.position, …}`). On a monitor not at
+(0,0) the overview therefore believes the pointer is far outside itself, and a click before any
+motion is dropped. Measured with a standalone Quickshell repro under `WAYLAND_DEBUG`: cursor at
+(849,2650) on a monitor at (200,1440) → enter at (449.1, −229.8), expected (649, 1210). The
+keybind summon has the same dead first click; the button only makes it obvious. Upstream already
+removed that code on `main` in d29916a (hyprwm/Hyprland#15899, 2026-08-21), not in any release as
+of v0.56.2. A same-position `hl.dsp.cursor.move` after the map makes Hyprland send a correct
+motion (verified in the repro); Omascape takes that workaround in a separate PR.
+
 **Decided 2026-09-24: accepted, with the disable + enable migration.** The question was: is it acceptable that removing the icon from a
 fresh install unloads the overlay, taking SUPER+TAB and the share reminder frame with it while
 the blanking holds (probe (a′))? The answer is the owner's. If it is not acceptable, the icon moves to a `type: "qml"` module whose

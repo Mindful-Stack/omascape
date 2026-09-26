@@ -5,7 +5,7 @@
   "version": "0.5.2",
   "author": "Mindful Stack",
   "license": "MIT",
-  "description": "Live, spatial overview of every workspace, grouped by monitor, each window a real thumbnail in its true position. Jump by number or arrow, drag windows between workspaces, type to find one, open the scratchpad, or arm a workspace so its windows go black in every screen share. Optional bar button beside your workspaces. Theme-aware; nothing runs until you summon it.",
+  "description": "Live, spatial overview of every workspace, grouped by monitor, each window a real thumbnail in its true position. Jump by number or arrow, drag windows between workspaces, type to find one, open the scratchpad, or arm a workspace so its windows go black in every screen share. A bar button beside your workspaces. Theme-aware; nothing runs until you summon it.",
   "kinds": [
     "overlay",
     "bar-widget"

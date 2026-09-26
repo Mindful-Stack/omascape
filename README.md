@@ -157,7 +157,7 @@ Verify it's installed and enabled:
 
 ```bash
 omarchy plugin list | grep omascape
-# se.mindfulstack.omascape   enabled   third-party   overlay   Omascape
+# se.mindfulstack.omascape         enabled   third-party overlay,bar-widget Omascape
 ```
 
 ### 2. Bind a key to toggle it
@@ -285,6 +285,14 @@ list` shows Omascape as `disabled` even though SUPER+TAB works. That's the shell
 on the bar", and nothing is broken.
 
 ### Uninstalling
+
+If `omarchy plugin list` shows Omascape as `disabled` (the no-button setups above), disable it
+first — otherwise `remove` deletes the folder but leaves the plugin registered in `shell.json`,
+and a later reinstall gets no button:
+
+```bash
+omarchy plugin disable se.mindfulstack.omascape
+```
 
 ```bash
 omarchy plugin remove se.mindfulstack.omascape
@@ -584,7 +592,7 @@ APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inli
 mouse-event tests (see [Drag regression checks](#drag-regression-checks) for what it covers
 and what it needs installed). `mise run test-integration` adds a nested Hyprland run.
 
-`mise run test` now also includes `tests/bar-widget-api.sh`, which checks the offscreen `qs.Ui`
+`mise run test` also includes `tests/bar-widget-api.sh`, which checks the offscreen `qs.Ui`
 stubs against the real Omarchy shell at `/usr/share/omarchy/shell/Ui`. Locally, a missing shell
 is a failure (point `OMARCHY_SHELL_UI` at the `Ui` directory if yours lives elsewhere); on CI
 (`CI` set) it prints a NOTE and passes, because CI can never have the shell — see
