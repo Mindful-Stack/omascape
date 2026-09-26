@@ -126,6 +126,12 @@ tested almost nothing. When reading a Tier 2 result, read the output, not the ex
 is missing. The shape, and the two shell harness idioms to copy from, are in
 [[languages/bash/test-harnesses]].
 
+`tests/bar-widget-api.sh` is the one Tier 1 check where this inverts: its runtime is an installed
+Omarchy shell, and CI can structurally never have one, so a missing host there is expected, not a
+gap to close. It prints a `NOTE:` and exits 0 under `CI:`, and treats the same absence as a `FAIL:`
+on a developer machine, where it means the environment cannot run the check at all — a `SKIP` would
+misreport that as a pass. [[adrs/0011-bar-icon-surface]] is why the check exists.
+
 ## Before opening a PR
 
 `README.md` § Testing carries the checklist and it is the repo-local standard: `mise run test`
