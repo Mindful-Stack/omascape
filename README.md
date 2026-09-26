@@ -294,7 +294,8 @@ omarchy plugin remove se.mindfulstack.omascape
 
 ### What it touches on your system
 
-Omascape never edits your Hyprland or Omarchy configuration. Everything it writes is its own:
+Omascape never edits your Hyprland or Omarchy configuration. Here is everything it touches —
+what it writes itself, and the one file Omarchy writes on its behalf:
 
 - `~/.config/omarchy/shell.json` — **written by Omarchy, not by Omascape**: enabling the plugin
   makes the shell record the bar button in `bar.layout`, and moving it updates that entry.
