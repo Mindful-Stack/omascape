@@ -137,10 +137,15 @@ done < <(printf '%s\n' "$readme" | grep -oE "$RAW/[^)]+" | sed "s|^$RAW/||" | so
 
 is_published() { local n; for n in "${published[@]}"; do [[ $n == "$1" ]] && return 0; done; return 1; }
 
-# The entry point the shell actually loads.
-entry=$(git show "$src:manifest.json" | grep -oE '"overlay"[[:space:]]*:[[:space:]]*"[^"]+"' | sed 's/.*"\([^"]*\)"$/\1/')
-[[ -n $entry ]] || die "manifest.json declares no overlay entry point"
-is_published "$entry" || die "manifest entry point is not published: $entry"
+# Every entry point the shell loads — the overlay, and the bar button (ADR-0011). One that is not
+# published loads here and fails on every installed copy. python3 parses the manifest: invalid
+# JSON stops here with a traceback under set -e, which is loud enough for a release gate.
+entries=$(git show "$src:manifest.json" | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin).get("entryPoints", {}).values()))')
+grep -q . <<<"$entries" || die "manifest.json declares no entry points"
+git show "$src:manifest.json" | grep -qE '"overlay"[[:space:]]*:' || die "manifest.json declares no overlay entry point"
+while IFS= read -r entry; do
+    is_published "$entry" || die "manifest entry point is not published: $entry"
+done <<<"$entries"
 
 # Every local import must resolve inside the published set, or the overlay dies at load with
 # a QML error no test on `dev` would ever see.

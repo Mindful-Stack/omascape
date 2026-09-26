@@ -206,6 +206,13 @@ run "$box"
 same "bad-entry: exits 1"  "$status" "1"
 has  "bad-entry: says why" "$out" "entry point is not published"
 
+box=$(setup bad-bar-entry)
+sed -i 's/"overlay": "Overview.qml"/"overlay": "Overview.qml", "barWidget": "Missing.qml"/' "$box/manifest.json"
+git -C "$box" commit -qam "name a bar entry point that does not exist"
+run "$box"
+same "bad-bar-entry: exits 1"  "$status" "1"
+has  "bad-bar-entry: names it" "$out" "Missing.qml"
+
 box=$(setup bad-import)
 printf 'import QtQuick\nimport "helpers/util.js" as U\nItem { }\n' > "$box/Overview.qml"
 git -C "$box" commit -qam "import something that will not ship"
