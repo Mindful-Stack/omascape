@@ -156,6 +156,10 @@ What this settles:
   button runs the same toggle command as the keybind, which the probe did exercise. Also not
   checked: whether a window opened on the armed workspace *while the overlay is unloaded* is
   blanked. The rule matches the workspace, so it should be.
+- **A fresh install cannot drop the button from the CLI alone.** Every CLI enable path puts the
+  id into `bar.layout`, so removing the button disables the plugin. The icon-less setup is the
+  both-entries state from (c): hand-add a `plugins` entry, then one `plugin disable`. The README
+  documents it.
 
 **Decided 2026-09-24: accepted, with the disable + enable migration.** The question was: is it acceptable that removing the icon from a
 fresh install unloads the overlay, taking SUPER+TAB and the share reminder frame with it while

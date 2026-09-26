@@ -28,7 +28,10 @@ There are **no `pragma` statements** of any kind — no `pragma Singleton`, no
 **Import only what the component genuinely uses.** Four of the ten are pure `QtQuick`, and
 `PeekLayer.qml:7-8` states the reasoning as a rule: *"No Quickshell import here: everything that
 touches a wl toplevel or a layer-shell surface is WindowTile's business, not this component's."*
-`Overview.qml` is the only file importing the host shell's `qs.Commons` / `qs.Ui`.
+`Overview.qml` is the only file importing the host shell's `qs.Commons` / `qs.Ui` for the theme.
+`BarWidget.qml` is a second, separate entry point that imports `qs.Ui` — not for the theme, but
+for the host's `BarWidget`/`WidgetButton` component types, since it is loaded by the shell itself
+rather than by `Overview.qml` (see [[adrs/0011-bar-icon-surface]]).
 
 ## The root element
 
