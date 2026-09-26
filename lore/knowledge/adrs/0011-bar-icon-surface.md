@@ -2,7 +2,7 @@
 title: "ADR-0011: The bar icon is a host-owned bar widget, and the shell owns its placement"
 description: "Omascape adds a bar icon by declaring the bar-widget kind beside overlay, with defaultSection left, because the Omarchy shell already owns widget placement in shell.json; Omascape adds no placement key of its own."
 tags: [adr, architecture, omarchy, quickshell, qml]
-status: proposed
+status: accepted
 date: 2026-09-24
 deciders: [Daniel Thyselius]
 confidence: low
@@ -24,6 +24,8 @@ reminder, and both come back when the plugin is re-enabled. The README states th
 next to the icon instructions. Existing installs migrate with `omarchy plugin disable
 se.mindfulstack.omascape && omarchy plugin enable se.mindfulstack.omascape --section left`,
 marked "not during a share". Acceptance still waits on the first dependent code.
+
+Accepted 2026-09-26. First dependent code: `BarWidget.qml`, `manifest.json` (branch `feat/bar-icon`).
 
 ## Context
 
