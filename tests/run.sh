@@ -18,6 +18,7 @@ fi
 env QT_QPA_PLATFORMTHEME=generic QT_QPA_PLATFORM=offscreen "$RUNNER" -input "$(dirname "$0")"
 bash "$(dirname "$0")/ui/run.sh"
 bash "$(dirname "$0")/manifest.sh"
+bash "$(dirname "$0")/bar-widget-api.sh"
 bash "$(dirname "$0")/lua-check.sh"
 bash "$(dirname "$0")/config-save.sh"
 bash "$(dirname "$0")/dev-link.sh"
