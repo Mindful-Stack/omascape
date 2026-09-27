@@ -330,6 +330,26 @@ TestCase {
         wait(30)
         compare(view.compositor.commands.length, 0)
     }
+    // Distinguishes: the re-seat warp counted as a real pointer move instead of a position. A
+    // wrong Hyprland enter can prime the resting position the same way the reopen case does
+    // (test_a_pointer_moved_while_closed_is_position_not_motion); without re-priming here, the
+    // warp's later, corrected report reads as motion away from that position and arms pointerLive
+    // on a keyboard summon — Ctrl+W then acts on whatever tile the cursor happens to rest over, the
+    // exact bug the priming comment on pointerPrimed says notePointerMove prevents. The wait past
+    // 300 ms before the openlayer event also covers the slow-map case, where the warp's own report
+    // would otherwise land after the window had already elapsed on its own.
+    // Mutation check: delete the `root.pointerPrimed = false; pointerPrime.restart()` pair from the
+    // onRawEvent branch and this goes red on the first compare below.
+    function test_the_reseat_warp_reprimes_rather_than_arming_liveness() {
+        view.close(); view.open()             // a fresh, running pointerPrime window
+        hoverTile("0xA")                      // point A: the wrong Hyprland enter, inside the surface
+        wait(320)                             // the window elapses on its own (the slow-map case)
+        view.compositor.rawEvent({ name: "openlayer", data: "omascape" })
+        hoverTile("0xB")                       // point B: the warp's own corrected report
+        compare(view.pointerLive, false, "the warp's report is a position, not a move")
+        hoverTile("0xC")                        // point C: a real move afterwards still arms it
+        compare(view.pointerLive, true)
+    }
 
     // Distinguishes: an arrow that moves the workspace selection instead of the window cursor,
     // and a cursor that walks model order rather than space. From nothing, Right takes the

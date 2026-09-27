@@ -65,6 +65,21 @@ was `motion(649.12, 1210.16)`, twice.
 - **Removal.** Once Omarchy ships a Hyprland containing d29916a, drop the branch and the
   predicate. The learning records this.
 
+### Side effects (accepted)
+
+- The warp re-shows a cursor `cursor:hide_on_key_press` (Omarchy default) had hidden, on every
+  summon. Hyprland's simulated move emits `input.mouse.move`, which clears `hiddenOnKeyboard`
+  (`Renderer.cpp:154-163`). The cursor already reappears on close (`onUnmap` simulates a move the
+  same way), so this only moves an existing reappearance earlier.
+- `warpTo` calls `rawMonitorFocus` on the monitor under the cursor (`PointerController.cpp:28`): if
+  the cursor rests on a different monitor than the one the overview mapped on, monitor focus moves
+  there and the resulting `focusedmonv2` triggers one extra regrab. Not a loop — `FocusState.cpp:274`
+  returns early on a focus change that is already in effect.
+- The warp's own hover report re-primes pointer liveness rather than counting as pointer motion
+  (`Overview.qml`'s `onRawEvent`, the `overviewMappedEvent` branch): it resets `pointerPrimed` and
+  restarts `pointerPrime` immediately before dispatching, so the corrected report that follows is
+  read as the resting position, not a move.
+
 ## Testing
 
 - **Tier 1 logic** (`tests/tst_actions.qml`, next to the `focusStealingEvent` test): the predicate's
