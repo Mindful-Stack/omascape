@@ -62,6 +62,10 @@ was `motion(649.12, 1210.16)`, twice.
   unload. The event route has an async hop of a few milliseconds, which no human click beats.
 - **Why not a timer after `open()`.** It guesses when the surface has mapped. A warp before the map
   does nothing.
+- **The warp's own hover report re-primes pointer liveness rather than counting as pointer motion**
+  (`Overview.qml`'s `onRawEvent`, the `overviewMappedEvent` branch): it resets `pointerPrimed` and
+  restarts `pointerPrime` immediately before dispatching, so the corrected report that follows is
+  read as the resting position, not a move.
 - **Removal.** Once Omarchy ships a Hyprland containing d29916a, drop the branch and the
   predicate. The learning records this.
 
@@ -75,10 +79,6 @@ was `motion(649.12, 1210.16)`, twice.
   the cursor rests on a different monitor than the one the overview mapped on, monitor focus moves
   there and the resulting `focusedmonv2` triggers one extra regrab. Not a loop — `FocusState.cpp:274`
   returns early on a focus change that is already in effect.
-- The warp's own hover report re-primes pointer liveness rather than counting as pointer motion
-  (`Overview.qml`'s `onRawEvent`, the `overviewMappedEvent` branch): it resets `pointerPrimed` and
-  restarts `pointerPrime` immediately before dispatching, so the corrected report that follows is
-  read as the resting position, not a move.
 
 ## Testing
 
@@ -87,6 +87,9 @@ was `motion(649.12, 1210.16)`, twice.
 - **Tier 1 UI** (`tests/ui/actions.qml`, the `closewindow` pattern): a fake `openlayer`/`omascape`
   while open sends exactly one `cursor.move`. The catcher's namespace sends none, and so does the
   same event while closed.
+- **Tier 1 UI, the re-prime** (`tests/ui/actions.qml`,
+  `test_the_reseat_warp_reprimes_rather_than_arming_liveness`): a wrong enter primed, the window
+  elapsed, then the warp's report must not arm `pointerLive`; a later real move still does.
 - **By hand, not CI** (ADR-0003): on the offset laptop panel, open with the bar button and click
   again without moving, and it closes. Also rerun the `WAYLAND_DEBUG` repro against the linked
   build and look for a correcting `motion` right after the `enter`.

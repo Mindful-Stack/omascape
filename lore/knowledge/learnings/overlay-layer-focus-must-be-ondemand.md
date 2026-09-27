@@ -54,5 +54,7 @@ exception.
 - [[frameworks/hyprland/compositor-state]] — the other half of the compositor boundary.
 - [[frameworks/quickshell/component-patterns]] — lifetime and visibility of these surfaces.
 - [[adrs/0008-keep-loaded-overlay]] — why the always-on surfaces can exist between summons.
+- [[learnings/hyprland-056-layer-enter-offset]] — the other bug this same `OnDemand` grab causes:
+  a wrong pointer-enter position on map, on any monitor not at (0,0).
 - Implementation: `Overview.qml`'s `panel` and the catcher `Variants` block, each with the
   reasoning in a comment beside the property.
