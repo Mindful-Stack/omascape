@@ -1884,6 +1884,10 @@ Item {
             // and the close event carries a bare hex address that would need prefix-matching anyway.
             if (event && root.opened && Logic.focusStealingEvent(event.name))
                 Hyprland.dispatch(Logic.regrabFocusLua())
+            // Our own layer just mapped: re-seat the pointer (Logic.overviewMappedEvent explains the
+            // Hyprland 0.56 enter-offset bug this works around). Same warp as the focus regrab.
+            if (event && root.opened && Logic.overviewMappedEvent(event))
+                Hyprland.dispatch(Logic.regrabFocusLua())
             // Share-time reminder frame (addendum): each monitor's `lastIpcObject` is a snapshot,
             // and the frame is a binding on it. These are the events after which the workspace a
             // monitor SHOWS may have changed (Logic.lockFrameRefreshEvent) — deliberately not the

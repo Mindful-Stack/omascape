@@ -444,6 +444,20 @@ TestCase {
         verify(!Logic.focusStealingEvent(""))
     }
 
+    // Distinguishes: re-seating the pointer for the wrong surface. Only the overview's own layer
+    // (namespace exactly "omascape") grabs keyboard focus on map and so hits Hyprland 0.56's
+    // double-offset enter; the catchers ("omascape-catcher") are keyboard-None and never do, and a
+    // prefix match would warp on every catcher map. closelayer and malformed events must not qualify.
+    function test_overviewMappedEvent_is_the_overviews_own_openlayer_only() {
+        verify(Logic.overviewMappedEvent({ name: "openlayer", data: "omascape" }))
+        verify(!Logic.overviewMappedEvent({ name: "openlayer", data: "omascape-catcher" }), "catchers never grab focus")
+        verify(!Logic.overviewMappedEvent({ name: "openlayer", data: "omarchy-bar" }))
+        verify(!Logic.overviewMappedEvent({ name: "closelayer", data: "omascape" }))
+        verify(!Logic.overviewMappedEvent({ name: "openlayer", data: "" }))
+        verify(!Logic.overviewMappedEvent({ name: "openlayer" }))
+        verify(!Logic.overviewMappedEvent(null))
+    }
+
     // menuNavigate takes the ITEM LIST, not a count (docs/specs/2026-09-15-actions-design.md,
     // "The menu", addendum 2026-09-17: the separator needs the list to know what to skip).
     // `items(n)` builds n plain, non-separator rows; `sepItems(spec)` marks the `true` slots as

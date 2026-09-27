@@ -301,6 +301,36 @@ TestCase {
         compare(view.compositor.commands.length, 0)
     }
 
+    // Distinguishes: the dead first click on an offset monitor. When the overview's layer maps,
+    // Hyprland 0.56 sends its pointer-enter off by the monitor position, so a click before any
+    // motion hits nothing; the same-position warp dispatched on openlayer is what corrects it.
+    // Mutation check: delete the overviewMappedEvent branch in onRawEvent and this goes red.
+    function test_the_overview_mapping_reseats_the_pointer() {
+        view.compositor.commands = []
+        view.compositor.rawEvent({ name: "openlayer", data: "omascape" })
+        wait(30)
+        var warps = 0
+        for (var i = 0; i < view.compositor.commands.length; i++)
+            if (view.compositor.commands[i].indexOf("cursor.move") >= 0) warps++
+        compare(warps, 1, "exactly one cursor warp, to re-seat the pointer")
+    }
+    // Distinguishes: a prefix match that also warps when a catcher maps on another screen.
+    function test_a_catcher_mapping_reseats_nothing() {
+        view.compositor.commands = []
+        view.compositor.rawEvent({ name: "openlayer", data: "omascape-catcher" })
+        wait(30)
+        compare(view.compositor.commands.length, 0)
+    }
+    // Distinguishes: warping on a stray openlayer while closed. The event can only matter while
+    // the overview is up, because that is when a click on it is meant to land.
+    function test_openlayer_while_closed_reseats_nothing() {
+        view.close()
+        view.compositor.commands = []
+        view.compositor.rawEvent({ name: "openlayer", data: "omascape" })
+        wait(30)
+        compare(view.compositor.commands.length, 0)
+    }
+
     // Distinguishes: an arrow that moves the workspace selection instead of the window cursor,
     // and a cursor that walks model order rather than space. From nothing, Right takes the
     // first window in reading order; the second Right must reach 0xB, the window to its right,
