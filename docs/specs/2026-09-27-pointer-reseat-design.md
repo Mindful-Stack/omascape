@@ -1,7 +1,7 @@
 # Omascape — re-seat the pointer when the overview maps (design)
 
 Date: 2026-09-27 · Target: Hyprland 0.56.2 (Lua config mode), Quickshell 0.3.1.
-Status: **designed, not built.** Found while hand-verifying the bar button
+Status: **built and hand-verified 2026-09-27** (see Testing). Found while hand-verifying the bar button
 (`docs/specs/2026-09-24-bar-icon-design.md` on `feat/bar-icon`, "The dead second click").
 
 ## Problem
@@ -98,3 +98,9 @@ was `motion(649.12, 1210.16)`, twice.
 
 `lore/knowledge/learnings/hyprland-056-layer-enter-offset.md` records the bug, the evidence, the
 workaround and the removal condition.
+
+## Hand verification (2026-09-27)
+
+On eDP-1 at layout (200, 1440), with the build dev-linked: SUPER+TAB, then a click on the scrim
+**without moving the pointer**, landed on the first try. Before this change, that click did
+nothing until the mouse moved. The shell log showed no QML errors from the new branch.
