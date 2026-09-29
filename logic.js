@@ -1729,6 +1729,45 @@ function digitActivate(key, latch, boxes, autoRepeat) {
     return { action: "select", id: id, index: index, latch: key }
 }
 
+// Key repeats that arrive as real key events (docs/specs/2026-09-29-synthetic-key-repeat-design.md).
+// Under an input method (fcitx5 — Omarchy's default — once a text-input window has had focus),
+// a held key repeats as a release and a press 1 ms apart, BOTH with isAutoRepeat false (measured
+// 2026-09-29), so every guard that trusted the flag read a hold as a stream of fresh presses: the
+// peek flickered, and a held Ctrl+W would close a window per repeat. A release is therefore only
+// provisional for KEY_RELEASE_GRACE_MS; a press of the same key inside it is a repeat and the
+// release is dropped. 50 ms sits between the measured 1 ms gap and the ~80 ms a person needs to
+// re-press a key. The tracker is a plain object so the pure functions below stay unit-testable;
+// Overview.qml owns the one timer that lets a surviving release take effect.
+var KEY_RELEASE_GRACE_MS = 50
+function keyRepeatTracker() { return { pending: {} } }
+// True when this press repeats a key already held: Qt says so, or the key's release is pending.
+function trackPress(tr, key, qtRepeat) {
+    var k = String(key)
+    if (tr.pending.hasOwnProperty(k)) { delete tr.pending[k]; return true }
+    return !!qtRepeat
+}
+// Records a real release as pending (true). A release Qt flags as a repeat is ignored (false).
+function trackRelease(tr, key, qtRepeat, now) {
+    if (qtRepeat) return false
+    tr.pending[String(key)] = now
+    return true
+}
+// The keys whose release has outlived the grace (every pending key when `force`), removed from
+// the tracker so each takes effect exactly once.
+function dueReleases(tr, now, grace, force) {
+    var out = []
+    for (var k in tr.pending) {
+        if (!tr.pending.hasOwnProperty(k)) continue
+        if (force || now - tr.pending[k] >= grace) out.push(parseInt(k, 10))
+    }
+    for (var i = 0; i < out.length; i++) delete tr.pending[String(out[i])]
+    return out
+}
+function hasPendingReleases(tr) {
+    for (var k in tr.pending) if (tr.pending.hasOwnProperty(k)) return true
+    return false
+}
+
 // ---- Scratchpad (docs/specs/2026-09-12-scratchpad-design.md) ---------------------------
 // Hyprland allocates special-workspace ids dynamically (the next free id below -99), so the
 // overview never uses the reported id: buildInput() identifies the scratchpad by name and remaps
