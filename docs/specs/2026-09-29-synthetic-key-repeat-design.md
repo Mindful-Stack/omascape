@@ -82,7 +82,7 @@ instead of `e.isAutoRepeat`.
 
 **Test fixture.** `Overview.qml` exposes `property int keyReleaseGraceMs`. Its production default is
 `Logic.KEY_RELEASE_GRACE_MS`, and at `<= 0` a release takes effect synchronously, exactly as it does
-today. `tests/ui/prepare.py` rewrites the default to `0`, so the 83 existing Space press/release
+today. `tests/ui/prepare.py` rewrites the default to `0`, so the roughly 80 existing Space press/release
 sites keep their semantics unchanged. The new tests set `50` explicitly, and the suites' `cleanup()`
 restores `0`. A logic test pins `KEY_RELEASE_GRACE_MS === 50`, so the production value cannot drift
 unnoticed.
@@ -108,5 +108,6 @@ QtTest cannot synthesize isAutoRepeat" gaps close.
 
 ## Out of scope
 
-Stopping fcitx5 from taking the keyboard, which is a system configuration matter. The overview
-already asks for no input method.
+Stopping fcitx5 from taking the keyboard. The overview asks for no input method, so it is not the
+trigger; the takeover is compositor-wide. System-level options (fcitx5 or Hyprland input-method
+configuration) were not investigated.

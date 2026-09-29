@@ -1,6 +1,6 @@
 ---
 title: "Under fcitx5, a held key's repeats arrive as real key events, not Qt auto-repeat"
-description: "Once fcitx5 has taken the keyboard, a held key repeats as a release and a press 1 ms apart, both with isAutoRepeat false, so any guard trusting the flag alone read a hold as fresh presses; every press now runs through Logic.trackPress, provisional for KEY_RELEASE_GRACE_MS (50 ms)."
+description: "Under fcitx5, a held key repeats as release+press pairs 1 ms apart with isAutoRepeat false, so guards trusting the flag read a hold as fresh presses; a release now only takes effect after KEY_RELEASE_GRACE_MS (50 ms), and a same-key press inside it is a repeat."
 tags: [frameworks, quickshell, qml, compositor]
 confidence: verified
 source: developer-input
@@ -30,12 +30,15 @@ transitions, key-catcher focus, raw Hyprland events), reproduced by the owner on
 
 Full detail: `docs/specs/2026-09-29-synthetic-key-repeat-design.md`.
 
-## Why Omascape can't opt out
+## Why Omascape tolerates it rather than preventing it
 
 fcitx5, Omarchy's input-method daemon, takes over the keyboard once a text-input window has had
 focus, and it generates repeat itself as discrete synthetic events. The overview's focused item is
-a plain `Item` — it asks for no input method — so there is nothing on Omascape's side to switch
-off. The overview has to tolerate the repeats it is handed, not prevent them.
+a plain `Item` that asks for no input method, so Omascape's overlay is not what triggers the
+takeover. The switch is compositor-wide: it happens when *another* window gains text-input focus.
+No Omascape-side mechanism to opt this surface out was found; system-level options (fcitx5 or
+Hyprland input-method configuration) were not investigated. So the overview tolerates the repeats
+it is handed rather than preventing them.
 
 ## The rule
 
@@ -79,7 +82,7 @@ while the first release is still pending.
 `tests/ui/prepare.py` rewrites `keyReleaseGraceMs` to `0` for the offscreen suites. At `<= 0` a
 release takes effect synchronously (`Overview.qml:2447`, `if (root.keyReleaseGraceMs <= 0) {
 root.flushKeyReleases(true); return }`), exactly as it did before this tracker existed — so the
-83 pre-existing Space press/release sites keep their semantics unchanged, and only the tests that
+roughly 80 pre-existing Space press/release sites keep their semantics unchanged, and only the tests that
 explicitly set `50` exercise the grace itself.
 
 ## See also
