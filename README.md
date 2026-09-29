@@ -148,15 +148,16 @@ omarchy plugin add https://github.com/Mindful-Stack/omascape.git --enable
 ```
 
 This clones the plugin into `~/.config/omarchy/plugins/se.mindfulstack.omascape/` (the folder
-is named after the manifest `id`, not the repo) and enables it. New plugins default to
-disabled, so the `--enable` flag matters — without it, run `omarchy plugin enable
-se.mindfulstack.omascape` afterwards.
+is named after the manifest `id`, not the repo) and enables it, which also puts Omascape's bar
+button right after your workspaces (the installer asks which section, with left preselected).
+New plugins default to disabled, so the `--enable` flag matters. Without it, run `omarchy plugin
+enable se.mindfulstack.omascape` afterwards.
 
 Verify it's installed and enabled:
 
 ```bash
 omarchy plugin list | grep omascape
-# se.mindfulstack.omascape   enabled   third-party   overlay   Omascape
+# se.mindfulstack.omascape         enabled   third-party overlay,bar-widget Omascape
 ```
 
 ### 2. Bind a key to toggle it
@@ -238,13 +239,60 @@ what commits, and `Ctrl+W` follows the selection rather than the pointer. See
 Digits jump to a workspace only while the query is empty; once you've typed a letter, digits
 are query characters too. Ctrl+letter chords are reserved for future actions.
 
+### Bar button
+
+Omascape adds a button to the Omarchy bar that does exactly what SUPER+TAB does. It sits right
+after your workspaces. Move it the way you move any bar widget: drag it, or
+
+```bash
+omarchy bar move se.mindfulstack.omascape center     # or left / right
+```
+
+Change the glyph with `omarchy bar set se.mindfulstack.omascape icon 󰍺` (any Nerd Font glyph).
+
+`omarchy plugin list` reports Omascape as `enabled` only while the button is on the bar. In the
+setups below that have no button, it shows `disabled` even though the overview is loaded and
+SUPER+TAB works.
+
+**Removing the button disables Omascape.** The shell treats the bar entry as the plugin being
+enabled, so `omarchy plugin disable se.mindfulstack.omascape` (or removing the button) also
+unloads the overview: SUPER+TAB stops working, and during a screen share the red reminder frame
+goes away. Armed workspaces stay blanked in the share either way, because that protection lives
+in Hyprland, not in the overview. Re-enable to get everything back.
+
+**Want Omascape without the button?** Add `{ "id": "se.mindfulstack.omascape" }` to the
+`plugins` list in `~/.config/omarchy/shell.json`, then run `omarchy plugin disable
+se.mindfulstack.omascape` once. That removes only the button, and the overview stays, though
+`omarchy plugin list` now shows `disabled`. To disable Omascape entirely from that state, run
+the disable command a second time.
+
 ### Updating
 
 ```bash
 omarchy plugin update se.mindfulstack.omascape
 ```
 
+Installed before the bar button existed? Updating does not add it: your install is enabled
+through the shell's plugin list, and `omarchy bar put` will claim success without adding
+anything. To get the button, **when no screen share is running**:
+
+```bash
+omarchy plugin disable se.mindfulstack.omascape && omarchy plugin enable se.mindfulstack.omascape --section left
+```
+
+Omascape is unloaded for the moment between the two commands. Until you migrate, `omarchy plugin
+list` shows Omascape as `disabled` even though SUPER+TAB works. That's the shell reporting "not
+on the bar", and nothing is broken.
+
 ### Uninstalling
+
+If `omarchy plugin list` shows Omascape as `disabled` (the no-button setups above), disable it
+first — otherwise `remove` deletes the folder but leaves the plugin registered in `shell.json`,
+and a later reinstall gets no button:
+
+```bash
+omarchy plugin disable se.mindfulstack.omascape
+```
 
 ```bash
 omarchy plugin remove se.mindfulstack.omascape
@@ -254,8 +302,12 @@ omarchy plugin remove se.mindfulstack.omascape
 
 ### What it touches on your system
 
-Omascape never edits your Hyprland or Omarchy configuration. Everything it writes is its own:
+Omascape never edits your Hyprland or Omarchy configuration. Here is everything it touches —
+what it writes itself, and the one file Omarchy writes on its behalf:
 
+- `~/.config/omarchy/shell.json` — **written by Omarchy, not by Omascape**: enabling the plugin
+  makes the shell record the bar button in `bar.layout`, and moving it updates that entry.
+  Omascape itself never reads or writes the button's position.
 - `~/.config/omarchy/omascape.json` — **read only**, never created. Your optional settings (see
   Configuration).
 - `~/.config/omarchy/omascape-locks.json` — written when you arm or disarm a workspace with
@@ -539,6 +591,12 @@ APIs they use (`Hyprland.*`, `Quickshell.*`, `Color.menu.*`) are documented inli
 `mise run test` is the Tier 1 suite: pure layout/actions/find logic plus offscreen Qt
 mouse-event tests (see [Drag regression checks](#drag-regression-checks) for what it covers
 and what it needs installed). `mise run test-integration` adds a nested Hyprland run.
+
+`mise run test` also includes `tests/bar-widget-api.sh`, which checks the offscreen `qs.Ui`
+stubs against the real Omarchy shell at `/usr/share/omarchy/shell/Ui`. Locally, a missing shell
+is a failure (point `OMARCHY_SHELL_UI` at the `Ui` directory if yours lives elsewhere); on CI
+(`CI` set) it prints a NOTE and passes, because CI can never have the shell — see
+`lore/knowledge/general/testing.md`.
 
 Plenty of the overlay is still visual, though, so testing also means reloading the shell and
 checking behavior by hand. Before opening a PR, confirm:

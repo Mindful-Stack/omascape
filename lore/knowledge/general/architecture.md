@@ -41,6 +41,9 @@ The rules that follow from this:
   other `Hyprland.*` access are in that one file. No other component imports
   `Quickshell.Hyprland`.
 - **Only `Overview.qml` knows the theme.** See [[frameworks/quickshell/theming-and-motion]].
+  `BarWidget.qml` is a second entry point that imports `qs.Ui`, but only for the host's
+  `BarWidget`/`WidgetButton` component types — it is loaded by the shell itself, not by
+  `Overview.qml`, and never touches `Color`/`Style` (see [[adrs/0011-bar-icon-surface]]).
 
 ## logic.js holds the decisions; QML holds the wiring
 
