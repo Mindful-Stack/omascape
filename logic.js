@@ -856,6 +856,20 @@ function focusStealingEvent(name) {
            name === "activespecialv2" || name === "focusedmonv2"
 }
 
+// The overview's own layer surface has just been mapped (`openlayer>>omascape`). Hyprland 0.56.2
+// gives a layer that grabs keyboard focus a wl_pointer.enter with the monitor's layout offset
+// subtracted twice (LayerSurface.cpp:203: m_geometry is already global), so on a monitor that is
+// not at (0,0) the overview believes the pointer is far outside itself, and a click made before
+// any motion is dropped. The caller answers with regrabFocusLua(): a same-position warp makes
+// Hyprland send a motion with correct coordinates. Exact match: the catchers ("omascape-catcher")
+// are keyboard-None, never take that path, and must not warp. Remove this, and its caller in
+// Overview.qml, once Omarchy ships a Hyprland containing d29916a (hyprwm/Hyprland#15899), which
+// replaces that computation with simulateMouseMovement(). See
+// docs/specs/2026-09-27-pointer-reseat-design.md.
+function overviewMappedEvent(event) {
+    return !!event && event.name === "openlayer" && event.data === "omascape"
+}
+
 // One atomic chunk that re-grants keyboard focus to this overlay's layer surface, by warping the
 // cursor to where it already is.
 //

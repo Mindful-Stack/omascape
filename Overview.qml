@@ -1884,6 +1884,18 @@ Item {
             // and the close event carries a bare hex address that would need prefix-matching anyway.
             if (event && root.opened && Logic.focusStealingEvent(event.name))
                 Hyprland.dispatch(Logic.regrabFocusLua())
+            // Our own layer just mapped: re-seat the pointer (Logic.overviewMappedEvent explains the
+            // Hyprland 0.56 enter-offset bug this works around). Same warp as the focus regrab —
+            // but re-prime first: the warp's own hover report is where the pointer already rests,
+            // not a move, and without this it either reads as motion away from whatever position a
+            // wrong Hyprland enter already primed (case a), or, on a slow map, arrives after
+            // pointerPrime's 300 ms window has already elapsed (case b) — either way arming
+            // pointerLive and handing a keyboard-summoned Ctrl+W to whatever tile the cursor
+            // happens to rest over.
+            if (event && root.opened && Logic.overviewMappedEvent(event)) {
+                root.pointerPrimed = false; pointerPrime.restart()
+                Hyprland.dispatch(Logic.regrabFocusLua())
+            }
             // Share-time reminder frame (addendum): each monitor's `lastIpcObject` is a snapshot,
             // and the frame is a binding on it. These are the events after which the workspace a
             // monitor SHOWS may have changed (Logic.lockFrameRefreshEvent) — deliberately not the
