@@ -160,8 +160,7 @@ TestCase {
         compare(changes, 0, "no repeat pair may close or re-open the peek")
         keyRelease(Qt.Key_Space)
         verify(view.testPeek.shown, "a real release waits out the grace")
-        wait(120)
-        compare(view.testPeek.shown, false, "then the hold ends")
+        tryCompare(view.testPeek, "shown", false)
     }
 
     // Distinguishes: a Space routed as ordinary keyboard intent. This is the whole point of

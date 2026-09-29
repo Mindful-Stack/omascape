@@ -1767,6 +1767,23 @@ function hasPendingReleases(tr) {
     for (var k in tr.pending) if (tr.pending.hasOwnProperty(k)) return true
     return false
 }
+// Milliseconds until the OLDEST pending release is due, or -1 when nothing is pending. A fixed
+// grace+5 timer re-arms on every flush and so drifts to whichever key was released MOST recently
+// — a second pending release (e.g. Ctrl let go 20ms before Space) would then delay Space's own
+// effect well past the grace. Targeting the oldest release instead means the timer always fires
+// for the release that has been waiting longest, and every other pending release is still caught
+// by the flush at the top of the next press/release (dueReleases returns every key past its own
+// grace, not just the oldest).
+function nextReleaseDueIn(tr, now, grace) {
+    var oldest = -1
+    for (var k in tr.pending) {
+        if (!tr.pending.hasOwnProperty(k)) continue
+        if (oldest === -1 || tr.pending[k] < oldest) oldest = tr.pending[k]
+    }
+    if (oldest === -1) return -1
+    var due = grace - (now - oldest)
+    return due < 0 ? 0 : due
+}
 
 // ---- Scratchpad (docs/specs/2026-09-12-scratchpad-design.md) ---------------------------
 // Hyprland allocates special-workspace ids dynamically (the next free id below -99), so the

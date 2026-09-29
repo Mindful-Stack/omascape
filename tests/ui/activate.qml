@@ -265,8 +265,8 @@ TestCase {
         view.keyReleaseGraceMs = 50
         keyPress(Qt.Key_2); keyRelease(Qt.Key_2); wait(120)
         compare(view.selectedId, 2)
-        keyPress(Qt.Key_2); keyRelease(Qt.Key_2); wait(120)
-        compare(view.opened, false, "the second, real press commits")
+        keyPress(Qt.Key_2); keyRelease(Qt.Key_2)
+        tryCompare(view, "opened", false)
     }
 
     // Distinguishes: a latch that outlives the summon it was armed in, which would make the

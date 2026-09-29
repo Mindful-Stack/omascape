@@ -633,11 +633,24 @@ Item {
     // semantics; the repeat tests set the production grace explicitly.
     property int keyReleaseGraceMs: Logic.KEY_RELEASE_GRACE_MS
     property var _keyRepeat: Logic.keyRepeatTracker()
-    Timer { id: keyReleaseGrace; interval: root.keyReleaseGraceMs + 5; onTriggered: root.flushKeyReleases(false) }
+    // Interval is set fresh by armKeyReleaseGrace() every time, never bound to keyReleaseGraceMs —
+    // a bound `grace + 5` re-arms to whichever key was released MOST recently, which would delay
+    // an OLDER pending release (see armKeyReleaseGrace's own comment at its call sites).
+    Timer { id: keyReleaseGrace; onTriggered: root.flushKeyReleases(false) }
     function flushKeyReleases(force) {
         var due = Logic.dueReleases(_keyRepeat, Date.now(), keyReleaseGraceMs, force)
         for (var i = 0; i < due.length; i++) handleKeyRelease(due[i])
-        if (Logic.hasPendingReleases(_keyRepeat)) keyReleaseGrace.restart()
+        armKeyReleaseGrace()
+    }
+    // Targets the OLDEST pending release, not "whatever is still pending": re-derived from
+    // Logic.nextReleaseDueIn() on every call, so a second pending release (e.g. Ctrl let go 20ms
+    // after Space) can never push Space's own release back past the grace. The `+ 5` is the same
+    // rounding margin flushKeyReleases always had.
+    function armKeyReleaseGrace() {
+        var d = Logic.nextReleaseDueIn(_keyRepeat, Date.now(), keyReleaseGraceMs)
+        if (d < 0) { keyReleaseGrace.stop(); return }
+        keyReleaseGrace.interval = d + 5
+        keyReleaseGrace.restart()
     }
     function handleKeyRelease(key) {
         if (menuDismissKey !== 0 && key === menuDismissKey) menuDismissKey = 0
@@ -2432,9 +2445,10 @@ Item {
                     // Provisional: see keyReleaseGraceMs. A Qt-flagged repeat release is ignored.
                     if (!Logic.trackRelease(root._keyRepeat, e.key, e.isAutoRepeat, Date.now())) return
                     if (root.keyReleaseGraceMs <= 0) { root.flushKeyReleases(true); return }
-                    // Start, never restart: another key's repeats must not keep pushing a pending
-                    // release back. flushKeyReleases re-arms while anything is still pending.
-                    if (!keyReleaseGrace.running) keyReleaseGrace.start()
+                    // The timer always targets the OLDEST pending release; the flush at the top of
+                    // Keys.onPressed applies any release already due, so no key's repeats can
+                    // postpone another key's release past its own grace.
+                    root.armKeyReleaseGrace()
                 }
             }
 

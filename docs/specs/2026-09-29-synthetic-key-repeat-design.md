@@ -57,12 +57,19 @@ instead of `e.isAutoRepeat`.
 - **Why 50 ms.** The measured fcitx5 gap between a synthetic release and its press is 1 ms. A person
   re-pressing the same key takes 80 ms or more, and a fast double-tap is around 100 ms. 50 ms
   separates the two with room on both sides, and the only cost is that releasing Space closes a
-  peek 50 ms later.
+  peek 50 ms later. A deliberate same-key double-tap faster than 50 ms is the one case this reads
+  as a hold instead — and it fails safe: in select mode, `2 2` faster than the grace only selects
+  workspace 2 (it does not enter, since the second press lands while the first release is still
+  pending), and find's own typing never reads the repeat answer at all, so doubled letters in a
+  fast-typed query are unaffected either way.
 - **Qt-flagged repeat releases** (`isAutoRepeat = true`) are ignored, as every release guard does
   today.
 - **An expired release takes effect before the next press is judged**, so a late timer can never
-  turn a genuine re-press into a repeat. The timer is started, never restarted, so another key's
-  repeats cannot keep pushing a pending release back.
+  turn a genuine re-press into a repeat. The timer always targets the OLDEST pending release
+  (`Logic.nextReleaseDueIn`), re-armed from scratch on every flush and every release — a fixed
+  `grace + 5` interval that simply restarted on each release would instead drift to whichever key
+  was let go most recently, delaying an older pending release (e.g. Ctrl released 20 ms before
+  Space) well past its own grace.
 - **Focus loss flushes every pending release first.** A release that happened before the loss really
   happened, and its press, if it was synthetic, goes to another surface. After the flush the
   existing `peekAbort()` sees `peekKeyDown = false` and latches nothing.

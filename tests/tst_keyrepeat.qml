@@ -56,4 +56,19 @@ TestCase {
         compare(Logic.trackRelease(tr, Qt.Key_Space, true, 1000), false, "ignored, not pending")
         compare(Logic.hasPendingReleases(tr), false)
     }
+    // Distinguishes: a timer that re-arms to whichever key was released MOST recently. With two
+    // pending releases, the due-in must follow the OLDER one (Space, released first) — a timer
+    // keyed on the younger one (Ctrl) would delay Space's own effect past the grace.
+    function test_next_release_due_in_follows_the_oldest_pending_release() {
+        var tr = Logic.keyRepeatTracker()
+        Logic.trackRelease(tr, Qt.Key_Space, false, 1000)
+        Logic.trackRelease(tr, Qt.Key_Control, false, 1020)
+        compare(Logic.nextReleaseDueIn(tr, 1030, 50), 20, "follows Space (due at 1050), not Ctrl (due at 1070)")
+    }
+    // Distinguishes: a due-in that keeps counting down after the grace has already passed, or one
+    // that reports something when nothing is pending at all.
+    function test_next_release_due_in_is_minus_one_when_nothing_is_pending() {
+        var tr = Logic.keyRepeatTracker()
+        compare(Logic.nextReleaseDueIn(tr, 1000, 50), -1)
+    }
 }
