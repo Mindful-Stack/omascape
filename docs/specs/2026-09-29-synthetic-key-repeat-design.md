@@ -1,7 +1,7 @@
 # Omascape — recognise key repeats that arrive as real key events (design)
 
 Date: 2026-09-29 · Target: Omarchy Quattro (fcitx5 on by default), Hyprland 0.56.2, Quickshell 0.3.1.
-Status: **designed, not built.**
+Status: **built** (hand-verified 2026-09-29 via the live log: 416 fcitx5 synthetic presses classed as repeats, one release per hold).
 
 ## Problem
 
@@ -40,7 +40,7 @@ reading the code; only the peek was observed.
 | Ctrl+, opens settings, `!e.isAutoRepeat` | settings toggles repeatedly |
 | digits in `activate: "select"` (`Logic.digitActivate(…, e.isAutoRepeat)`) | a held digit commits ("same digit again") |
 | `menuDismissKey` / `settingsDismissKey` released, `!e.isAutoRepeat` | a key that dismissed a menu stops being swallowed mid-hold |
-| `SettingsPanel.handleKey`, Enter, `!e.isAutoRepeat` | a held Enter re-fires the row |
+| `SettingsPanel.handleKey`, Enter, `!e.isAutoRepeat` | the guard is unreachable under repeats in practice — the only row Enter fires (`openRequested` → `openConfigFile()`) closes the overview synchronously on the first press, so no repeat can reach the panel again; the detector's answer is still passed through for correctness, and there is no test because none can fail |
 
 ## Design
 
