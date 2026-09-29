@@ -74,7 +74,7 @@ TestCase {
         wait(400)
         view.compositor.commands = []    // drop the lock install/sync chunks open() dispatches
     }
-    function cleanup() { view.close() }
+    function cleanup() { view.keyReleaseGraceMs = 0; view.close() }
 
     function tileCentre(addr) {
         for (var i = 0; i < view.testModel.count; i++) {
@@ -243,6 +243,31 @@ TestCase {
     // (tests/ui/actions.qml:431 says so for the Ctrl+W guard). That is why the rule lives in
     // digitActivate, where test_digitActivate_an_auto_repeat_is_a_true_no_op covers both
     // failure modes. Holding a digit is a live-check item, not an offscreen one.
+
+    // Distinguishes: a held digit committing in select mode. A second press of the same digit
+    // commits by design, and an input method's repeat pairs look exactly like one unless the
+    // tracker marks them. Mutation check: pass e.isAutoRepeat to digitActivate and this goes red.
+    function test_c_a_held_digit_under_synthetic_repeat_only_selects() {
+        view.keyReleaseGraceMs = 50
+        keyPress(Qt.Key_2)
+        for (var i = 0; i < 4; i++) { keyRelease(Qt.Key_2); keyPress(Qt.Key_2) }
+        keyRelease(Qt.Key_2)
+        wait(120)
+        compare(view.opened, true, "a held digit must not enter")
+        compare(view.selectedId, 2)
+        compare(view.compositor.commands.length, 0)
+    }
+    // Distinguishes: a tracker that swallows a real second press. A release that outlived the
+    // grace was real, so pressing the same digit again is the deliberate "same digit enters" —
+    // a tracker that called it a repeat would leave the overview open. (The Space branch never
+    // reads the repeat answer, so this is tested on a digit: plan review, verified.)
+    function test_c_a_slow_second_press_of_the_same_digit_enters() {
+        view.keyReleaseGraceMs = 50
+        keyPress(Qt.Key_2); keyRelease(Qt.Key_2); wait(120)
+        compare(view.selectedId, 2)
+        keyPress(Qt.Key_2); keyRelease(Qt.Key_2); wait(120)
+        compare(view.opened, false, "the second, real press commits")
+    }
 
     // Distinguishes: a latch that outlives the summon it was armed in, which would make the
     // first digit press of the NEXT open enter instead of select. Asserted BEHAVIOURALLY, by

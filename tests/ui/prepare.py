@@ -52,6 +52,11 @@ qml = re.sub(r'Style\.\w+FillAlpha', '0.1', qml)
 qml = re.sub(r'Style\.font\.\w*Family', '"sans-serif"', qml)
 qml = re.sub(r'Style\.font\.\w+', '11', qml)
 qml = re.sub(r'Style\.space\((\d+)\)', r'\1', qml)
+# Key repeats (docs/specs/2026-09-29-synthetic-key-repeat-design.md): the fixture releases keys
+# synchronously, exactly as before the tracker existed, so the ~80 existing press/release sites keep
+# their semantics. The repeat tests set the production grace explicitly and cleanup() resets it.
+qml = replaced(qml, 'property int keyReleaseGraceMs: Logic.KEY_RELEASE_GRACE_MS',
+               'property int keyReleaseGraceMs: 0', 'keyReleaseGraceMs default')
 qml = qml.replace('Hyprland.', 'compositor.').replace('target: Hyprland', 'target: compositor')
 # The two per-screen instantiations — the share-time reminder frame and the click-catcher for the
 # screens the overview is NOT on. Quickshell's `Variants` has no offscreen equivalent; `Repeater`

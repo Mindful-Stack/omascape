@@ -79,7 +79,7 @@ TestCase {
         wait(400)
         view.compositor.commands = []    // drop the lock install/sync chunks open() dispatches
     }
-    function cleanup() { view.close() }
+    function cleanup() { view.keyReleaseGraceMs = 0; view.close() }
 
     // Centre of a tile in TestCase coordinates, for mouseMove/mousePress.
     function tileCentre(addr) {
@@ -499,6 +499,23 @@ TestCase {
         var n = view.compositor.commands.length
         ctrlW()
         compare(view.compositor.commands.length, n, "a third press has no target")
+    }
+    // Distinguishes: a held Ctrl+W under an input method closing a window per repeat. The repeat
+    // pairs of W pass a guard that trusts isAutoRepeat. Mutation check: pass e.isAutoRepeat
+    // instead of `rep` to the Ctrl+W guard and this goes red.
+    function test_a_held_ctrl_w_under_synthetic_repeat_closes_once() {
+        view.keyReleaseGraceMs = 50
+        keyClick(Qt.Key_Right)
+        compare(view.cursorAddress, "0xA")
+        view.compositor.commands = []
+        keyPress(Qt.Key_W, Qt.ControlModifier)
+        for (var i = 0; i < 4; i++) { keyRelease(Qt.Key_W, Qt.ControlModifier); keyPress(Qt.Key_W, Qt.ControlModifier) }
+        keyRelease(Qt.Key_W, Qt.ControlModifier)
+        wait(120)
+        var closes = 0
+        for (var j = 0; j < view.compositor.commands.length; j++)
+            if (view.compositor.commands[j].indexOf("window.close") >= 0) closes++
+        compare(closes, 1, "one held chord closes one window")
     }
     // Distinguishes: a workspace target closing something it cannot name. Workspace 1 holds two
     // windows, so Ctrl+W with no cursor and no hover must dispatch nothing at all — the guard the
