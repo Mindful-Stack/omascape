@@ -143,3 +143,5 @@ Cite the spec. It is the only link between a component and the reasoning behind 
   capture handle as a property.
 - [[learnings/overlay-layer-focus-must-be-ondemand]] — the focus settings these surfaces take.
 - [[learnings/only-left-button-submits-a-drop]] — the audit a widened `acceptedButtons` owes.
+- [[learnings/fcitx5-key-repeat-is-real-events]] — why the key catcher inside `Overview.qml` (the
+  composition root) cannot trust `isAutoRepeat` alone.

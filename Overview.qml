@@ -626,6 +626,42 @@ Item {
     // stray press+release cycle the user never asked for would clear it before the NEXT real
     // press could open anything).
     property bool peekKeyDown: false
+    // Key repeats that arrive as real key events (Logic.keyRepeatTracker; spec
+    // docs/specs/2026-09-29-synthetic-key-repeat-design.md). A release only takes effect once no
+    // press of the same key has followed within the grace. At <= 0 it takes effect synchronously —
+    // the offscreen fixture's setting (tests/ui/prepare.py), so the existing key tests keep their
+    // semantics; the repeat tests set the production grace explicitly.
+    property int keyReleaseGraceMs: Logic.KEY_RELEASE_GRACE_MS
+    property var _keyRepeat: Logic.keyRepeatTracker()
+    // Interval is set fresh by armKeyReleaseGrace() every time, never bound to keyReleaseGraceMs —
+    // a bound `grace + 5` re-arms to whichever key was released MOST recently, which would delay
+    // an OLDER pending release (see armKeyReleaseGrace's own comment at its call sites).
+    Timer { id: keyReleaseGrace; onTriggered: root.flushKeyReleases(false) }
+    function flushKeyReleases(force) {
+        var due = Logic.dueReleases(_keyRepeat, Date.now(), keyReleaseGraceMs, force)
+        for (var i = 0; i < due.length; i++) handleKeyRelease(due[i])
+        armKeyReleaseGrace()
+    }
+    // Targets the OLDEST pending release, not "whatever is still pending": re-derived from
+    // Logic.nextReleaseDueIn() on every call, so a second pending release (e.g. Ctrl let go 20ms
+    // after Space) can never push Space's own release back past the grace. The `+ 5` is the same
+    // rounding margin flushKeyReleases always had.
+    function armKeyReleaseGrace() {
+        var d = Logic.nextReleaseDueIn(_keyRepeat, Date.now(), keyReleaseGraceMs)
+        if (d < 0) { keyReleaseGrace.stop(); return }
+        keyReleaseGrace.interval = d + 5
+        keyReleaseGrace.restart()
+    }
+    function handleKeyRelease(key) {
+        if (menuDismissKey !== 0 && key === menuDismissKey) menuDismissKey = 0
+        if (settingsDismissKey !== 0 && key === settingsDismissKey) settingsDismissKey = 0
+        // The release is the ONLY thing that clears the cancel: every other exit path
+        // (a modal, focus loss, the target vanishing) leaves it set, which is what
+        // stops the layer re-opening under a key that is merely still held. It is also
+        // the only place `peekKeyDown` goes back to false, so `peekAbort()` stops
+        // latching a fresh cancel the instant the physical key comes up.
+        if (key === Qt.Key_Space) { peekKeyDown = false; peekRelease() }
+    }
     // "w:<address>" for a window, "s:<id>" for a workspace. A single namespaced string so the
     // two kinds can never collide in the model test (a workspace id is a number, an address a
     // string, and JS would happily compare them across kinds).
@@ -1754,6 +1790,7 @@ Item {
         settingsDismissKey = 0
         digitLatch = 0
         peekReset()                                 // nothing carries over from the previous summon
+        _keyRepeat = Logic.keyRepeatTracker()       // ditto: no stale pending release from before
         // A keyboard summon (SUPER+TAB is a compositor keybind the overview never sees as a key
         // event) must hand the target to the keyboard until the pointer actually moves again —
         // "most recent input device wins" means the device that summoned the overview, not
@@ -2193,12 +2230,20 @@ Item {
                 // honest about the key's real state, and re-opening under a genuinely-held key is
                 // the better of the two wrong answers versus leaving the hold dead forever.
                 onActiveFocusChanged: {
-                    if (!activeFocus) root.peekAbort()
+                    // A release that happened before the loss really happened: flush first so
+                    // peekAbort() sees the key as up and latches nothing.
+                    if (!activeFocus) { root.flushKeyReleases(true); root.peekAbort() }
                     else { root.peekKeyDown = false; root.peekCancelled = false }
                 }
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function (e) {
                     e.accepted = true
+                    // Releases whose grace has already passed take effect first, so a timer that fired
+                    // late (a busy event loop) can never make a genuine re-press look like a repeat.
+                    root.flushKeyReleases(false)
+                    // One answer for every repeat guard below: Qt's flag, or a press of a key whose
+                    // release is still pending (an input method's repeat — Logic.trackPress).
+                    var rep = Logic.trackPress(root._keyRepeat, e.key, e.isAutoRepeat)
                     // Lone modifiers belong to no class (see Logic.isModifierKey).
                     if (Logic.isModifierKey(e.key)) return
                     // Take the latch: EVERY key that gets this far clears it, and only the digit
@@ -2285,7 +2330,7 @@ Item {
                         // held Enter would otherwise close the panel and then jump somewhere.
                         // Cleared straight after, so the property is never read stale.
                         root.settingsKeyInFlight = e.key
-                        settingsPanel.handleKey(e)
+                        settingsPanel.handleKey({ key: e.key, modifiers: e.modifiers, text: e.text, isAutoRepeat: rep })
                         root.settingsKeyInFlight = 0
                         return
                     }
@@ -2337,11 +2382,11 @@ Item {
                         if (chord === Qt.ControlModifier && e.key === Qt.Key_Backspace && finding) root.setQuery("")
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_S) root.toggleScratchpad()
                         else if (chord === Qt.ControlModifier && e.key === Qt.Key_L) root.lockToggleSelected()
-                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_W && !e.isAutoRepeat) root.closeTarget()
+                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_W && !rep) root.closeTarget()
                         // !finding: a query is a transient mode with its own Esc semantics, and
                         // stacking a modal on top of it would give Esc three meanings. Clear the
                         // query first.
-                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_Comma && !finding && !e.isAutoRepeat) root.openSettings()
+                        else if (chord === Qt.ControlModifier && e.key === Qt.Key_Comma && !finding && !rep) root.openSettings()
                         return
                     }
                     if (e.key === Qt.Key_Escape) {
@@ -2374,7 +2419,7 @@ Item {
                                 root.jump(e.key === Qt.Key_0 ? 10 : e.key - Qt.Key_0)
                                 return
                             }
-                            var d = Logic.digitActivate(e.key, latch, root.boxes, e.isAutoRepeat)
+                            var d = Logic.digitActivate(e.key, latch, root.boxes, rep)
                             root.digitLatch = d.latch      // an auto-repeat hands `latch` back
                             if (d.action === "none") return
                             root.setCursor("")
@@ -2397,16 +2442,13 @@ Item {
                 }
                 Keys.onReleased: function (e) {
                     e.accepted = true
-                    if (root.menuDismissKey !== 0 && e.key === root.menuDismissKey && !e.isAutoRepeat)
-                        root.menuDismissKey = 0
-                    if (root.settingsDismissKey !== 0 && e.key === root.settingsDismissKey && !e.isAutoRepeat)
-                        root.settingsDismissKey = 0
-                    // The release is the ONLY thing that clears the cancel: every other exit path
-                    // (a modal, focus loss, the target vanishing) leaves it set, which is what
-                    // stops the layer re-opening under a key that is merely still held. It is also
-                    // the only place `peekKeyDown` goes back to false, so `peekAbort()` stops
-                    // latching a fresh cancel the instant the physical key comes up.
-                    if (e.key === Qt.Key_Space && !e.isAutoRepeat) { root.peekKeyDown = false; root.peekRelease() }
+                    // Provisional: see keyReleaseGraceMs. A Qt-flagged repeat release is ignored.
+                    if (!Logic.trackRelease(root._keyRepeat, e.key, e.isAutoRepeat, Date.now())) return
+                    if (root.keyReleaseGraceMs <= 0) { root.flushKeyReleases(true); return }
+                    // The timer always targets the OLDEST pending release; the flush at the top of
+                    // Keys.onPressed applies any release already due, so no key's repeats can
+                    // postpone another key's release past its own grace.
+                    root.armKeyReleaseGrace()
                 }
             }
 

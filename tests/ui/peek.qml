@@ -78,7 +78,7 @@ TestCase {
         wait(400)
         view.compositor.commands = []
     }
-    function cleanup() { view.close() }
+    function cleanup() { view.keyReleaseGraceMs = 0; view.close() }
 
     function tileCentre(addr) {
         for (var i = 0; i < view.testModel.count; i++) {
@@ -137,6 +137,30 @@ TestCase {
         keyRelease(Qt.Key_Space)
         compare(view.peeking, false)
         compare(view.testPeek.shown, false)
+    }
+
+    // Distinguishes: an input method's repeats read as real key events — the measured flicker.
+    // Under fcitx5 a held Space repeats as release+press pairs with isAutoRepeat false; without the
+    // tracker each pair ends the peek and re-opens it. Mutation check: make Logic.trackPress ignore
+    // a pending release and this goes red on `changes`.
+    function test_synthetic_repeats_keep_the_peek_open() {
+        view.keyReleaseGraceMs = 50
+        hoverTile("0xB")
+        keyPress(Qt.Key_Space)
+        verify(view.testPeek.shown, "the hold opened a peek")
+        var changes = 0
+        var count = function () { changes++ }
+        view.peekingChanged.connect(count)
+        for (var i = 0; i < 5; i++) { keyRelease(Qt.Key_Space); keyPress(Qt.Key_Space) }
+        // Wait out the grace WHILE the key is still held (the last event is a press): a pair whose
+        // release was wrongly kept pending would only take effect ~55 ms later, so a shorter wait
+        // would stay green under the very bug this test names (plan review, verified).
+        wait(120)
+        view.peekingChanged.disconnect(count)
+        compare(changes, 0, "no repeat pair may close or re-open the peek")
+        keyRelease(Qt.Key_Space)
+        verify(view.testPeek.shown, "a real release waits out the grace")
+        tryCompare(view.testPeek, "shown", false)
     }
 
     // Distinguishes: a Space routed as ordinary keyboard intent. This is the whole point of
