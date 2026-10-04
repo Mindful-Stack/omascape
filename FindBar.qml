@@ -27,6 +27,7 @@ Item {
     Text {   // nf-md-magnify; Omarchy's menu font carries the Nerd glyphs
         id: glyph
         objectName: "findGlyph"
+        textFormat: Text.PlainText
         x: bar.groupX
         anchors.verticalCenter: parent.verticalCenter
         text: "\u{F0349}"
@@ -50,6 +51,7 @@ Item {
     Text {
         id: countText
         objectName: "findCount"
+        textFormat: Text.PlainText
         x: queryText.x + queryText.width + bar.gapB
         anchors.verticalCenter: parent.verticalCenter
         text: bar.count > 0 ? (bar.index + 1) + " of " + bar.count : "0 matches"

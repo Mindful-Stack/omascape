@@ -71,6 +71,7 @@ Item {
             model: menu.items.filter(function (it) { return !it.separator })
             Text {
                 required property var modelData
+                textFormat: Text.PlainText
                 font.family: menu.fontFamily; font.pixelSize: menu.fontSize
                 text: (modelData.glyph ? modelData.glyph + "  " : "") + modelData.label
             }
@@ -129,6 +130,7 @@ Item {
                     Text {
                         anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
                                   leftMargin: menu.padH; rightMargin: menu.padH }
+                        textFormat: Text.PlainText
                         text: (cell.modelData.glyph ? cell.modelData.glyph + "  " : "") + cell.modelData.label
                         color: cell.index === menu.index ? menu.selText : menu.foreground
                         font.family: menu.fontFamily; font.pixelSize: menu.fontSize

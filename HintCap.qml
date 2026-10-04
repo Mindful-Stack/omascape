@@ -23,6 +23,7 @@ Row {
         width: capText.implicitWidth + 10
         Text {
             id: capText; anchors.centerIn: parent
+            textFormat: Text.PlainText
             text: cap.modelData.k
             color: cap.foreground; opacity: cap.capOpacity
             font.family: cap.fontFamily; font.pixelSize: cap.fontSize
@@ -31,6 +32,7 @@ Row {
     }
     Text {
         anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
         text: cap.modelData.l
         color: cap.foreground; opacity: cap.labelOpacity
         font.family: cap.fontFamily; font.pixelSize: cap.fontSize

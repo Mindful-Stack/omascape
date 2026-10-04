@@ -66,6 +66,7 @@ Rectangle {
                 color: index === panel.index ? panel.rowFill : "transparent"
                 Text {
                     anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
+                    textFormat: Text.PlainText
                     text: modelData.label
                     color: panel.foreground
                     opacity: modelData.editable ? 0.85 : 0.5
@@ -73,6 +74,7 @@ Rectangle {
                 }
                 Text {
                     anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                    textFormat: Text.PlainText
                     // The non-editable row says WHY it cannot be changed here, rather than
                     // looking like a control that does not respond.
                     text: modelData.editable
@@ -96,6 +98,7 @@ Rectangle {
             Text {
                 id: actionLabel
                 anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
+                textFormat: Text.PlainText
                 text: "edit the file"
                 color: panel.foreground; opacity: 0.85
                 font.family: panel.fontFamily; font.pixelSize: panel.fontSize
@@ -103,6 +106,7 @@ Rectangle {
             Text {
                 anchors { left: actionLabel.right; leftMargin: 12; right: parent.right
                           rightMargin: 8; verticalCenter: parent.verticalCenter }
+                textFormat: Text.PlainText
                 horizontalAlignment: Text.AlignRight
                 // Elided in the MIDDLE: the interesting halves of a config path are its start
                 // and its filename, and a tail elide would hide the latter.
@@ -119,6 +123,7 @@ Rectangle {
         id: helpLabel
         anchors { left: parent.left; leftMargin: 20; right: parent.right; rightMargin: 20
                   top: list.bottom; topMargin: 10 }
+        textFormat: Text.PlainText
         height: panel.helpHeight
         verticalAlignment: Text.AlignTop
         wrapMode: Text.WordWrap
