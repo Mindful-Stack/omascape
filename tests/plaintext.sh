@@ -15,10 +15,22 @@ set -euo pipefail
 # line, one nested inside another) — requires a `textFormat: Text.PlainText` line at the block's
 # OWN nesting level; a nested child Text must carry its own. Comments and string literals are
 # stripped before any of this is checked, so neither can forge compliance, and braces inside a
-# string never shift the nesting count. Everywhere in the file, any `textFormat` assignment
-# (`:` or `=`) that is not exactly `Text.PlainText`, and any bare `Text.*`/`TextEdit.*` rich-text
-# enum, is reported on its own — this is a second, independent net for a value the first check's
-# per-block framing could miss (e.g. a dynamically assigned `textFormat`).
+# string never shift the nesting count. Independently, anywhere in the file: any `textFormat`
+# write (`:` or `=`) whose value is not the literal token `Text.PlainText` fails — numeric
+# (`textFormat = 2`), parenthesised (`textFormat = (Label.RichText)`) and any other shape, not
+# only a bare enum name; any `<ident>.(AutoText|StyledText|RichText|MarkdownText)` token fails,
+# whatever its qualifier; any `createQmlObject` call fails outright, since a string it builds
+# from could contain a `Text` this scanner never sees; and the quoted string `"textFormat"` /
+# `'textFormat'` fails wherever it appears in the RAW source (before comment/string stripping,
+# since stripping would hide exactly this — `t["textFormat"] = 2` or a `Binding { property:
+# "textFormat"; … }` both reach the real property without ever writing the bare identifier
+# `textFormat` our other checks key on).
+#
+# Known limit of a static scan: the stripper does not model JS regex literals, so a `/"/` pair
+# could in principle hide a `Text` the same way a string does — root `*.qml` contains no regex
+# literal today, and a regex belongs in `logic.js` by convention anyway (see
+# `lore/knowledge/languages/javascript/tooling-dialect.md`), so this is accepted rather than
+# fixed. See `lore/knowledge/learnings/qml-text-autotext-renders-markup.md`.
 root=$(cd "$(dirname "$0")/.." && pwd)
 root=${1:-$root}
 python3 - "$root" <<'PY'
@@ -30,11 +42,21 @@ root = sys.argv[1]
 # named type) is not mistaken for "Text {", while "QQ.Text {" and "delegate: Text {" both match.
 OPEN_RE = re.compile(r'\b(?:\w+\.)?(?:Text|Label)\s*\{')
 REQUIRED_RE = re.compile(r'\btextFormat\s*:\s*Text\.PlainText\b')
-# Any textFormat assignment whose value is not exactly Text.PlainText — "Text.PlainTextX" does
-# not satisfy the lookahead's trailing \b, so it is correctly treated as a bad value, not as a
+# Any textFormat write whose value is not exactly the token Text.PlainText — numeric
+# (`= 2`), parenthesised (`= (Label.RichText)`), or anything else. "Text.PlainTextX" does not
+# satisfy the lookahead's trailing \b, so it is correctly treated as a bad value, not as a
 # near-miss of the real one.
-BAD_ASSIGN_RE = re.compile(r'\btextFormat\s*[:=]\s*(?!Text\.PlainText\b)([A-Za-z_][\w.]*)')
-BANNED_TOKEN_RE = re.compile(r'\b(?:Text|TextEdit)\.(?:AutoText|StyledText|RichText|MarkdownText)\b')
+BAD_ASSIGN_RE = re.compile(r'\btextFormat\s*[:=]\s*(?!Text\.PlainText\b)(\S+)')
+# Any qualifier, not only Text/TextEdit — `Label.RichText` inside a parenthesised expression is
+# exactly as capable of being read back as a rich-text value as `Text.RichText` is.
+BANNED_TOKEN_RE = re.compile(r'\b\w+\.(?:AutoText|StyledText|RichText|MarkdownText)\b')
+CREATE_QML_OBJECT_RE = re.compile(r'\bcreateQmlObject\b')
+# Checked on the RAW source, never the stripped one: stripping replaces a string literal's body
+# with spaces, which would hide exactly the thing being looked for here — `textFormat` reached
+# as a quoted property name (`t["textFormat"] = 2`, or a `Binding { property: "textFormat"; … }`)
+# rather than as the bare identifier every other check above keys on.
+RAW_QUOTED_TEXTFORMAT_RE = re.compile(r'''(["'])textFormat\1''')
+RAW_BINDING_PROPERTY_RE = re.compile(r'''\bproperty\s*:\s*["']textFormat["']''')
 
 
 class ScanError(Exception):
@@ -180,6 +202,16 @@ def check_file(path, root):
 
     for m in BANNED_TOKEN_RE.finditer(stripped):
         offenders.append((line_of(stripped, m.start()), "uses the banned rich-text value %s" % stripped[m.start():m.end()]))
+
+    for m in CREATE_QML_OBJECT_RE.finditer(stripped):
+        offenders.append((line_of(stripped, m.start()), "calls createQmlObject, which this scanner cannot see inside"))
+
+    # Raw source, deliberately not the stripped one — see the header comment.
+    for m in RAW_QUOTED_TEXTFORMAT_RE.finditer(raw):
+        offenders.append((line_of(raw, m.start()), 'reaches "textFormat" as a quoted property name'))
+
+    for m in RAW_BINDING_PROPERTY_RE.finditer(raw):
+        offenders.append((line_of(raw, m.start()), 'binds property: "textFormat" directly'))
 
     seen = set()
     out = []

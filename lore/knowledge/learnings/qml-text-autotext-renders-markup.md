@@ -69,20 +69,36 @@ user who typed it — that was the one block of the 18 found that was already co
 finds every `Text {` / `Label {` block **however it is introduced** — `delegate: Text {`, a
 qualified `QQ.Text {`, several on one line, one nested inside another — by brace-depth rather than
 by line-start position, and requires a `textFormat: Text.PlainText` line at that specific block's
-own nesting level; a nested child's own `textFormat` never satisfies its parent's. Independently,
-anywhere in the file, any `textFormat` assignment (`:` or `=`) whose value is not exactly
-`Text.PlainText`, and any bare `Text.*`/`TextEdit.*` rich-text enum token, is reported on its own —
-a second net for a value the first check's per-block framing could miss. It fails closed (a clear
-message, not a traceback) on a file with unbalanced braces.
+own nesting level; a nested child's own `textFormat` never satisfies its parent's.
+
+Independently, anywhere in the file: any `textFormat` write (`:` or `=`) whose value is not the
+literal token `Text.PlainText` fails — numeric (`textFormat = 2`), parenthesised (`textFormat =
+(Label.RichText)`), or any other shape, not only a near-miss enum name; any
+`<ident>.(AutoText|StyledText|RichText|MarkdownText)` token fails, whatever its qualifier (not only
+`Text`/`TextEdit`); any `createQmlObject` call fails outright, since a string it builds from could
+contain a `Text` this scanner never sees inside; and the quoted string `"textFormat"` /
+`'textFormat'` fails wherever it appears in the file's raw source, checked **before** comment/string
+stripping specifically because stripping would hide it — `t["textFormat"] = 2` or a `Binding {
+property: "textFormat"; … }` both reach the real property without ever writing the bare identifier
+the checks above key on. It fails closed (a clear message, not a traceback) on a file with
+unbalanced braces, an unterminated string, or an unterminated block comment.
+
+**Known limit, accepted rather than fixed:** the stripper does not model JS regex literals, so a
+`/"/`-shaped pair could in principle hide a `Text` the way a string does. Root `*.qml` contains no
+regex literal today, and a regex belongs in `logic.js` by convention anyway
+(`lore/knowledge/languages/javascript/tooling-dialect.md`), so this is a known gap in a static
+scan, not a bug being tracked.
 
 Its own correctness is guarded in turn by `tests/plaintext-selftest.sh` (also wired into
-`tests/run.sh`), which feeds it one throwaway fixture file per known bypass — not-line-start
-openers, a qualified type name, a comment or string forging the required line, a brace inside a
-string that must not shift the nesting count, a nested child satisfying its parent, a near-miss
-enum name (`Text.PlainTextX`), an explicit non-`PlainText` value via `:` or `=`, a bare banned
-token under an unrelated property name — and asserts the guard rejects every one, plus two shapes
-it must still accept (an inline `delegate: Text { textFormat: Text.PlainText; … }`, and a parent
-and child Text each carrying its own).
+`tests/run.sh`), which feeds it one throwaway fixture file per known bypass across two rounds of
+adversarial review — not-line-start openers, a qualified type name, a comment or string forging the
+required line, a brace inside a string that must not shift the nesting count, a nested child
+satisfying its parent, a near-miss enum name (`Text.PlainTextX`), an explicit non-`PlainText` value
+via `:` or `=`, a bare banned token under an unrelated property name, a numeric or parenthesised
+dynamic write, `textFormat` reached as a quoted property name (bracket access or a `Binding`), and a
+bare `createQmlObject` call — and asserts the guard rejects every one, plus two shapes it must still
+accept (an inline `delegate: Text { textFormat: Text.PlainText; … }`, and a parent and child Text
+each carrying its own). 24 fixtures in total.
 
 A companion UI test (`tests/ui/actions.qml`, `test_a_markup_title_renders_as_literal_text`) seeds a
 window whose title is `<img src="http://127.0.0.1:1/x">`, finds the tile's title `Text` by its new

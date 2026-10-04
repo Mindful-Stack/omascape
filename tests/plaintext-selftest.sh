@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Guards tests/plaintext.sh itself: every bypass found in adversarial review of the first cut of
-# that guard (not at line start, qualified `QQ.Text {`, comments/strings forging compliance,
-# braces inside strings miscounting depth, a nested child satisfying its parent, a near-miss enum
-# name, an explicit non-PlainText value) gets its own fixture here, asserted REJECTED — plus
-# fixtures the guard must still ACCEPT, so hardening the scanner never turns it into a guard that
-# rejects everything. tests/plaintext.sh takes an optional root override for exactly this: each
-# case below points it at a throwaway one-file directory instead of the real tree, so this is the
-# real scanner under test, not a reimplementation of it.
+# Guards tests/plaintext.sh itself: every bypass found across two rounds of adversarial review
+# (round 1: not at line start, qualified `QQ.Text {`, comments/strings forging compliance, braces
+# inside strings miscounting depth, a nested child satisfying its parent, a near-miss enum name,
+# an explicit non-PlainText value; round 2: a numeric or parenthesised dynamic `textFormat =` write,
+# a qualifier other than Text/TextEdit on a banned enum, `textFormat` reached as a quoted property
+# name via bracket access or a `Binding { property: "textFormat" }`, and a bare `createQmlObject`
+# call) gets its own fixture here, asserted REJECTED — plus fixtures the guard must still ACCEPT,
+# so hardening the scanner never turns it into a guard that rejects everything. tests/plaintext.sh
+# takes an optional root override for exactly this: each case below points it at a throwaway
+# one-file directory instead of the real tree, so this is the real scanner under test, not a
+# reimplementation of it.
 here=$(cd "$(dirname "$0")" && pwd)
 plaintext_sh="$here/plaintext.sh"
 fail=0
@@ -169,6 +172,40 @@ Item {
         text: "x"
     }
 }' fail "Text.MarkdownText"
+
+# ---- round 2: numeric/parenthesised/dynamic writes, and routes around the bare identifier --------
+check "numeric_dynamic_assignment" '
+Item {
+    Text {
+        text: "x"
+        Component.onCompleted: textFormat = 2
+    }
+}' fail "textFormat set to 2"
+
+check "parenthesised_dynamic_assignment" '
+Item {
+    Text {
+        text: "x"
+        Component.onCompleted: textFormat = (Label.RichText)
+    }
+}' fail "Label.RichText"
+
+check "bracket_quoted_assignment" '
+Item {
+    Text { textFormat: Text.PlainText; text: "x" }
+    Component.onCompleted: t["textFormat"] = 2
+}' fail "quoted property name"
+
+check "binding_property_textformat" '
+Item {
+    Text { textFormat: Text.PlainText; text: "x" }
+    Binding { target: parent; property: "textFormat"; value: 2 }
+}' fail "textFormat"
+
+check "create_qml_object" "
+Item {
+    Component.onCompleted: Qt.createQmlObject('import QtQuick; Text { text: x }', parent)
+}" fail "createQmlObject"
 
 # ---- compliant shapes the hardened guard must still accept ---------------------------------------
 check "inline_delegate_compliant" '
