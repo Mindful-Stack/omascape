@@ -145,3 +145,5 @@ Cite the spec. It is the only link between a component and the reasoning behind 
 - [[learnings/only-left-button-submits-a-drop]] — the audit a widened `acceptedButtons` owes.
 - [[learnings/fcitx5-key-repeat-is-real-events]] — why the key catcher inside `Overview.qml` (the
   composition root) cannot trust `isAutoRepeat` alone.
+- [[learnings/qml-text-autotext-renders-markup]] — why every `Text`/`Label` here declares
+  `textFormat: Text.PlainText`.
