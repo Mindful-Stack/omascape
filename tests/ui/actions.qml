@@ -795,6 +795,34 @@ TestCase {
         return found
     }
 
+    // Depth-first search for a child by objectName: plain QtQuick Items have no findChild()
+    // exposed to QML/JS, and a tile's title Text carries no fixture alias of its own.
+    function findByObjectName(item, name) {
+        if (item.objectName === name) return item
+        var kids = item.children
+        for (var i = 0; i < kids.length; i++) {
+            var found = findByObjectName(kids[i], name)
+            if (found) return found
+        }
+        return null
+    }
+
+    // Distinguishes: a window title rendered as markup. A webpage controls its title; under AutoText,
+    // <img src=…> makes the shell fetch an attacker URL (marketplace#9564). The title must reach the
+    // tile as literal text.
+    function test_a_markup_title_renders_as_literal_text() {
+        var evil = '<img src="http://127.0.0.1:1/x">'
+        view.compositor.workspaces = { values: [
+            wsRow(1, [{ address: "0xA", at: [100, 1500], size: [400, 400], floating: false,
+                        title: evil, "class": "alpha", fullscreen: 0 }])
+        ] }
+        view.rebuild()
+        var t = findByObjectName(tileOf("0xA"), "tileTitle")
+        verify(t !== null, "no tileTitle found on the 0xA tile")
+        compare(t.textFormat, Text.PlainText)
+        verify(t.text.indexOf(evil) >= 0)
+    }
+
     // Distinguishes: a right press that opens nothing, or that opens the workspace menu because
     // the press fell through the tile to the well beneath it.
     //

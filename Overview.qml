@@ -2576,6 +2576,7 @@ Item {
                             // big low-contrast numeral, only where nothing would hide it
                             Text {
                                 objectName: "wsNumeral"
+                                textFormat: Text.PlainText
                                 anchors.centerIn: parent
                                 visible: !boxItem.model.occupied && !boxItem.model.placeholder
                                 text: root.wsLabel(boxItem.model.workspaceId)
@@ -2588,6 +2589,7 @@ Item {
                             // no tiles are laid out, so the well shows only this glyph.
                             Text {
                                 objectName: "lockGlyph"
+                                textFormat: Text.PlainText
                                 anchors.centerIn: parent
                                 visible: boxItem.model.placeholder
                                 text: "\u{F033E}"          // nf-md-lock
@@ -2635,6 +2637,7 @@ Item {
                         model: panel.visible ? root.groups : []
                         Text {
                             objectName: "monitorChip"
+                            textFormat: Text.PlainText
                             required property var modelData
                             visible: !!modelData.special || root.multiMonitor
                             x: modelData.x + modelData.inset + 4; y: modelData.y + modelData.inset
@@ -2848,6 +2851,7 @@ Item {
                             Text {
                                 id: badgeText
                                 objectName: "wsBadgeText"
+                                textFormat: Text.PlainText
                                 anchors.centerIn: parent
                                 text: root.wsLabel(badge.model.workspaceId) + (badge.model.armed ? " \u{F033E}" : "")
                                 color: badge.model.focused ? root.background : root.foreground

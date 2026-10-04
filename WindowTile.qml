@@ -255,6 +255,7 @@ Item {
         Text {
             anchors.centerIn: parent
             visible: !cap.visible && tile.iconUrl.length === 0 && (!tile.graceActive || tile.graceElapsed)
+            textFormat: Text.PlainText
             text: String(tile.cls).substring(0, 1).toUpperCase()
             color: tile.fg
             font.pixelSize: Math.min(20, parent.height * 0.5)
@@ -271,7 +272,8 @@ Item {
         Behavior on opacity { enabled: tile.motion.enabled
             NumberAnimation { duration: tile.motion.fast; easing.type: tile.motion.hover } }
         Text {
-            id: lbl; anchors.centerIn: parent; color: "#fff"
+            id: lbl; objectName: "tileTitle"; anchors.centerIn: parent; color: "#fff"
+            textFormat: Text.PlainText
             font.family: tile.fontFamily; font.pixelSize: tile.titleSize
             elide: Text.ElideRight; width: parent.width - 8
             text: (tile.fullscreen === 2 ? "Fullscreen · " : tile.fullscreen === 1 ? "Maximized · " : "")
