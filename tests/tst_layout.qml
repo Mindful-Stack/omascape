@@ -179,6 +179,36 @@ TestCase {
     }
     // Review finding: synthetic ids must not reorder groups. Real 2 on eDP-1 and 6 on HDMI-A-1,
     // padded to 10, laid out with either monitor focused — same order, same geometry.
+    // Omarchy 4.5+ per-monitor workspaces: each monitor owns a block of ten ids and pads its own.
+    function test_pad_workspaces_per_monitor_blocks() {
+        var blocks = { "eDP-1": 0, "HDMI-A-1": 1 }
+        var real = [{id:1,monitorName:"eDP-1",focused:true,occupied:true},
+                    {id:11,monitorName:"HDMI-A-1",focused:false,occupied:true},
+                    {id:15,monitorName:"HDMI-A-1",focused:false,occupied:true}]
+        var padded = Logic.padWorkspaces(real, 4, "eDP-1", blocks)
+        var byId = {}; for (var i = 0; i < padded.length; i++) byId[padded[i].id] = padded[i]
+        var ids = Object.keys(byId).map(Number).sort(function (a, b) { return a - b })
+        compare(ids, [1,2,3,4,11,12,13,14,15])                // 15 is real, kept past the count
+        for (var a = 2; a <= 4; a++) compare(byId[a].monitorName, "eDP-1")
+        for (var b = 12; b <= 14; b++) { compare(byId[b].monitorName, "HDMI-A-1"); verify(byId[b].synthetic) }
+        // the count is capped at one block, and an empty block map keeps global numbering
+        compare(Logic.padWorkspaces([], 20, "eDP-1", { "eDP-1": 0 }).length, 10)
+        compare(Logic.padWorkspaces(real, 4, "eDP-1", {}).length,
+                Logic.padWorkspaces(real, 4, "eDP-1").length)
+    }
+
+    function test_per_monitor_slot_and_owner() {
+        var blocks = { "eDP-1": 0, "HDMI-A-1": 1 }
+        compare(Logic.slotOf(1), 1); compare(Logic.slotOf(10), 10)
+        compare(Logic.slotOf(11), 1); compare(Logic.slotOf(14), 4)
+        compare(Logic.ownerOf(3, blocks), "eDP-1")
+        compare(Logic.ownerOf(13, blocks), "HDMI-A-1")
+        compare(Logic.ownerOf(23, blocks), "")                // no connected monitor owns block 2
+        compare(Logic.ownerOf(13, {}), "")                    // global numbering
+        compare(Logic.ownerOf(Logic.SCRATCHPAD_ID, blocks), "")
+        verify(Logic.perMonitor(blocks)); verify(!Logic.perMonitor({})); verify(!Logic.perMonitor(null))
+    }
+
     function test_padded_layout_is_focus_invariant() {
         function lay(focusedMon) {
             var real = [{id:2,monitorName:"eDP-1",focused:focusedMon==="eDP-1",occupied:true},
