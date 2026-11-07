@@ -2355,11 +2355,20 @@ function configWithKey(rawText, key, value) {
 }
 
 // Per-monitor workspaces: a window moved onto a workspace Hyprland has not created yet makes it
-// on whatever monitor Hyprland picks. Put it on the monitor that owns its block instead.
+// on whatever monitor Hyprland picks. Put it on the monitor that owns its block instead. A
+// guarded chunk like the others (ADR-0002); a no-op when it is already there or never appeared.
 function homeWorkspaceLua(id, monitorName) {
     var ws = String(parseInt(id, 10))
     var mon = JSON.stringify(String(monitorName))
-    return 'function() local w = hl.get_workspace(' + ws + ') ' +
-           'if w and w.monitor and w.monitor.name ~= ' + mon + ' then ' +
-           'hl.dispatch(hl.dsp.workspace.move({ workspace = "' + ws + '", monitor = ' + mon + ' })) end end'
+    return (
+        'function()\n' +
+        '  local w = hl.get_workspace(' + ws + ')\n' +
+        '  if not w or not w.monitor or w.monitor.name == ' + mon + ' then return end\n' +
+        '  ' + dispatchGuardLua() + '\n' +
+        '  local ok, err = pcall(function()\n' +
+        '    run(hl.dsp.workspace.move({ workspace = "' + ws + '", monitor = ' + mon + ' }))\n' +
+        '  end)\n' +
+        '  ' + reportLua('home workspace') + '\n' +
+        'end'
+    ).replace(/\n\s*/g, ' ')
 }

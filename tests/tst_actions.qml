@@ -187,6 +187,13 @@ TestCase {
     // Distinguishes: THE gap this rule exists for. hasWs() would accept 7 as a valid id and let
     // the latch arm, so a second press would enter a workspace that was never visibly selected.
     // The third case is a box that disappeared BETWEEN the two presses.
+    function test_digitActivate_base_offsets_into_the_focused_block() {
+        var b = [{ workspaceId: 12 }, { workspaceId: 20 }]
+        var r = Logic.digitActivate(0x32, 0, b, false, 10)    // "2" on the second monitor
+        compare(r.id, 12); compare(r.index, 0); compare(r.action, "select")
+        compare(Logic.digitActivate(0x30, 0, b, false, 10).id, 20)   // "0" is that block's 10
+    }
+
     function test_digitActivate_a_digit_with_no_box_is_inert() {
         var b = boxesFor([1, 2])
         var cold = Logic.digitActivate(0x37, 0, b, false)    // "7", nothing latched

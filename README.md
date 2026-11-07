@@ -46,6 +46,10 @@ you, are under [Install](#install).
   monitor's group sits on a faint accent backdrop. Undocked collapses to a single flush group.
 - **Always 1–0.** Workspaces `1`..`10` are always shown, even ones Hyprland has not created yet,
   so every number key has a visible target (`workspaces` in the config, `0` to turn it off).
+- **Per-monitor workspaces.** On Omarchy 4.5+, where every monitor has its own workspaces 1–10
+  (Hyprland ids 1–10, 11–20, …), each group is labelled 1–10, padded with its own empty slots,
+  and the digit keys reach the focused monitor's workspaces. Read from Omarchy's
+  `~/.local/state/omarchy/monitor-workspaces`; without it numbering stays global.
 - **Fast selection.** Number keys jump (`1`–`9`, `0` = 10), `Tab`/`Shift+Tab` step through the
   workspaces (the Cmd+Tab / Alt+Tab habit, so bind the overview to `SUPER+TAB` and it all stays
   under one hand), the arrow keys step through the windows on the selected one, and `Enter`
