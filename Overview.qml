@@ -3,6 +3,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "logic.js" as Logic
@@ -119,7 +120,44 @@ Item {
         (0.299 * background.r + 0.587 * background.g + 0.114 * background.b) < 0.5
     // Badge chip: the card colour, nearly opaque, so the number reads over any preview.
     readonly property color badgeColor: Qt.rgba(background.r, background.g, background.b, 0.88)
-    function wsLabel(id) { return Logic.isScratchpad(id) ? "S" : id === 10 ? "0" : String(id) }   // matches the 1–0 keys
+    // Matches the 1–0 keys; with Omarchy's per-monitor workspaces, the slot within the block.
+    function wsLabel(id) {
+        if (Logic.isScratchpad(id)) return "S"
+        var n = Logic.perMonitor(blockByMon) && id > 0 ? Logic.slotOf(id) : id
+        return n === 10 ? "0" : String(n)
+    }
+    // Omarchy 4.5+ per-monitor workspaces: connector -> block, from the state file Hyprland's
+    // default/hypr/monitor-workspaces.lua keeps (and the bar's own workspaces widget reads).
+    // Empty when the file is absent: global 1..N numbering, as before.
+    property var omarchyBlocks: ({})
+    // omarchyBlocks narrowed to the connected monitors; set by buildInput().
+    property var blockByMon: ({})
+    function readOmarchyBlocks(text) {
+        var next = {}, lines = String(text || "").split("\n")
+        for (var i = 0; i < lines.length; i++) {
+            var f = lines[i].split("\t")
+            if (f.length >= 3 && f[1] !== "") next[f[1]] = parseInt(f[0], 10)
+        }
+        omarchyBlocks = next
+    }
+    FileView {
+        path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/monitor-workspaces"
+        watchChanges: true
+        onFileChanged: reload()
+        onLoaded: root.readOmarchyBlocks(text())
+        onLoadFailed: root.readOmarchyBlocks("")
+    }
+    // The id the 1 key reaches minus one: the focused monitor's block start in per-monitor mode.
+    function digitBase() {
+        if (!Logic.perMonitor(blockByMon)) return 0
+        var fm = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
+        return (fm in blockByMon) ? blockByMon[fm] * Logic.SLOTS : 0
+    }
+    // After moving a window to `id`, keep a just-created workspace on the monitor owning its block.
+    function homeWorkspace(id) {
+        var owner = Logic.ownerOf(id, blockByMon)
+        if (owner) Hyprland.dispatch(Logic.homeWorkspaceLua(id, owner))
+    }
     // The card owns its radius: Style.cornerRadius mirrors Hyprland rounding, which may be 0.
     readonly property int boxRadius: 8
     readonly property int cardRadius: boxRadius + card.pad
@@ -506,7 +544,10 @@ Item {
         // placeholder flags: without this, arming an empty workspace shows no badge, and a
         // formerly-armed workspace loses its badge the instant its last window closes and it
         // becomes a pad slot instead of a real record.
-        var padded = Logic.padWorkspaces(wss, config.workspaces, focusedMonitorName)
+        var bbm = {}
+        for (var bn in omarchyBlocks) if (monNames[bn] && isFinite(omarchyBlocks[bn])) bbm[bn] = omarchyBlocks[bn]
+        root.blockByMon = bbm
+        var padded = Logic.padWorkspaces(wss, config.workspaces, focusedMonitorName, bbm)
         for (var pi = 0; pi < padded.length; pi++) {
             var pw = padded[pi]
             if (pw.armed === undefined) {
@@ -1404,6 +1445,7 @@ Item {
         }
         Hyprland.dispatch(Logic.tiledInsertLua(addr, targetWs,
             { anchor: plan.anchor, side: plan.side, x: fallback.x, y: fallback.y }))
+        homeWorkspace(targetWs)
         return true
     }
     function submitDrop(addr, targetWs, dropX, dropY, px, py) {
@@ -1417,6 +1459,7 @@ Item {
             // tiles, so there is no anchor window to insert against.
             else Hyprland.dispatch('hl.dsp.window.move({ workspace = "' + Logic.wsSelector(targetWs) +
                                    '", follow = false, window = "address:' + addr + '" })')
+            homeWorkspace(targetWs)
             scheduleRebuild()
             return
         }
@@ -1454,6 +1497,7 @@ Item {
         if (pos) Hyprland.dispatch(Logic.floatingMoveLua(addr, targetWs, pos))
         else Hyprland.dispatch('hl.dsp.window.move({ workspace = "' + Logic.wsSelector(targetWs) +
                                '", follow = false, window = "address:' + addr + '" })')
+        homeWorkspace(targetWs)
         scheduleRebuild()
         reconcileTimer.restart()
     }
@@ -1766,7 +1810,11 @@ Item {
     function jump(id) {
         if (!Logic.hasWs(id)) return
         if (Logic.isScratchpad(id)) { Hyprland.dispatch(Logic.scratchpadShowLua()); root.close(); return }
-        Hyprland.dispatch('hl.dsp.focus({ workspace = "' + id + '" })'); root.close()
+        var owner = Logic.ownerOf(id, blockByMon)
+        // Omarchy's own focus brings the workspace to the monitor that owns it, or creates it there.
+        if (owner) Hyprland.dispatch('o.workspaces.focus(' + Logic.slotOf(id) + ', ' + JSON.stringify(owner) + ')')
+        else Hyprland.dispatch('hl.dsp.focus({ workspace = "' + id + '" })')
+        root.close()
     }
     function open() {
         if (opened) return                          // already open: not a second entrance
@@ -2416,10 +2464,10 @@ Item {
                         if (e.key >= Qt.Key_0 && e.key <= Qt.Key_9) {
                             if (config.activate !== "select") {
                                 root.setCursor("")
-                                root.jump(e.key === Qt.Key_0 ? 10 : e.key - Qt.Key_0)
+                                root.jump((e.key === Qt.Key_0 ? 10 : e.key - Qt.Key_0) + root.digitBase())
                                 return
                             }
-                            var d = Logic.digitActivate(e.key, latch, root.boxes, rep)
+                            var d = Logic.digitActivate(e.key, latch, root.boxes, rep, root.digitBase())
                             root.digitLatch = d.latch      // an auto-repeat hands `latch` back
                             if (d.action === "none") return
                             root.setCursor("")

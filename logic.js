@@ -155,9 +155,44 @@ function recoverSlot(R, others, P) {
 // created on jump or drop; the next rebuild then shows the truth. Synthesized entries carry
 // `synthetic: true` so ordering can ignore them. `count` <= 0 disables padding. Returns a new
 // array; input untouched.
-function padWorkspaces(workspaces, count, focusedMonitorName) {
+// Omarchy 4.5+ per-monitor workspaces (default/hypr/monitor-workspaces.lua): each monitor owns
+// a block of SLOTS ids — block 0 is 1-10, block 1 is 11-20 — and shows them as 1-10. `blockByMon`
+// maps connector -> block for the connected monitors; empty or absent means global numbering.
+var SLOTS = 10
+function blockOf(id) { return Math.floor((id - 1) / SLOTS) }
+function slotOf(id) { return (id - 1) % SLOTS + 1 }
+function perMonitor(blockByMon) {
+    if (!blockByMon) return false
+    for (var k in blockByMon) if (blockByMon.hasOwnProperty(k)) return true
+    return false
+}
+// The connector that owns `id`'s block, or "" when no connected monitor does.
+function ownerOf(id, blockByMon) {
+    if (!perMonitor(blockByMon) || !(id > 0)) return ""
+    var b = blockOf(id)
+    for (var k in blockByMon) if (blockByMon.hasOwnProperty(k) && blockByMon[k] === b) return k
+    return ""
+}
+
+function padWorkspaces(workspaces, count, focusedMonitorName, blockByMon) {
     var out = workspaces.slice()
     if (!(count > 0)) return out
+    if (perMonitor(blockByMon)) {
+        // Every monitor gets its own slots 1..count, in its own block.
+        var have = {}
+        for (var pi = 0; pi < workspaces.length; pi++) if (workspaces[pi].id > 0) have[workspaces[pi].id] = true
+        var n = Math.min(count, SLOTS)
+        for (var mon in blockByMon) {
+            if (!blockByMon.hasOwnProperty(mon)) continue
+            for (var slot = 1; slot <= n; slot++) {
+                var pid = blockByMon[mon] * SLOTS + slot
+                if (have[pid]) continue
+                out.push({ id: pid, monitorName: mon, focused: false, occupied: false, windowCount: 0,
+                           synthetic: true })
+            }
+        }
+        return out
+    }
     var realIds = []
     var monById = {}
     for (var i = 0; i < workspaces.length; i++) {
@@ -1719,9 +1754,10 @@ function isActionKey(key, chord, ctrlMask) {
 // auto-repeat event (tests/ui/actions.qml:431), so the offscreen suite could never cover it.
 // It is checked BEFORE the box lookup, because a repeat must change nothing at all — including
 // the latch of a digit whose box has since gone.
-function digitActivate(key, latch, boxes, autoRepeat) {
+function digitActivate(key, latch, boxes, autoRepeat, base) {
     if (key < 0x30 || key > 0x39) return null            // Qt.Key_0 .. Qt.Key_9 (ASCII)
-    var id = (key === 0x30) ? 10 : key - 0x30            // Qt.Key_0 is workspace 10
+    // Qt.Key_0 is workspace 10; `base` offsets into the focused monitor's per-monitor block.
+    var id = ((key === 0x30) ? 10 : key - 0x30) + (base | 0)
     if (autoRepeat) return { action: "none", id: id, index: -1, latch: latch }
     var index = indexOfWorkspace(boxes || [], id)
     if (index < 0) return { action: "none", id: id, index: -1, latch: 0 }
@@ -2316,4 +2352,14 @@ function configWithKey(rawText, key, value) {
     var text2 = JSON.stringify(obj, null, 2)
     if (!Object.prototype.hasOwnProperty.call(JSON.parse(text2), key)) return ""
     return text2 + "\n"
+}
+
+// Per-monitor workspaces: a window moved onto a workspace Hyprland has not created yet makes it
+// on whatever monitor Hyprland picks. Put it on the monitor that owns its block instead.
+function homeWorkspaceLua(id, monitorName) {
+    var ws = String(parseInt(id, 10))
+    var mon = JSON.stringify(String(monitorName))
+    return 'function() local w = hl.get_workspace(' + ws + ') ' +
+           'if w and w.monitor and w.monitor.name ~= ' + mon + ' then ' +
+           'hl.dispatch(hl.dsp.workspace.move({ workspace = "' + ws + '", monitor = ' + mon + ' })) end end'
 }
